@@ -14,13 +14,13 @@ Runtime checkout: {{.RuntimePath}}
 Implementation edits belong only beneath the runtime checkout. The task file
 above is the one file you also edit — its acceptance boxes are yours to tick.
 
-{{if .RefineConventionRecorded}}## This repository's refine convention
+{{if .ImplementationConventionRecorded}}## This repository's implementation convention
 
 The rules below are this repository's standard for the code you write. Follow
 them as you build: a Refine pass checks the work against this same text, and
 what you leave short of it is fixed or reported there.
 
-{{.RefineConvention}}
+{{.ImplementationConvention}}
 
 {{end}}This attempt is a single non-interactive session. There is no human and no
 later turn: once you end your response the attempt is over, and ending

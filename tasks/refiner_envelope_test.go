@@ -7,16 +7,16 @@ import (
 	"time"
 )
 
-// refinerFrameHalves are the two things pop owns in the Refiner's prompt and
-// no rank of the `refine` convention may displace (ADR-0227 decision 2): the
-// Role preamble ahead of the body — including the fix licence and its limit,
-// which is what makes Refine a writing step (ADR-0240) — and the output
-// expectation behind it, whose no-verdict rule and fixed/left split are the
-// report's whole shape.
+// refinerFrameHalves are the things pop owns in the Refiner's prompt that no
+// rank of the `implementation` convention may displace (ADR-0246/0247): the
+// Role preamble — including the fix licence and its limit, which is what makes
+// Refine a writing step (ADR-0240) — and the output expectation behind it,
+// whose no-verdict rule and fixed/left split are the report's whole shape.
 var refinerFrameHalves = []string{
 	"You are an independent Refiner",
 	"Reach no verdict.",
 	"## What you may fix",
+	"## What a pass may fix",
 	"Fix nothing the standard does not name.",
 	"## Respond with the report and nothing else",
 	"starting at a `## ` heading",
@@ -24,13 +24,14 @@ var refinerFrameHalves = []string{
 	"**Left** —",
 }
 
-// TestRefinerPromptCarriesTheRepositorysRefineConvention: the resolved
-// `refine` convention is the prompt's body, so a repository that commits
-// its own standard changes what the Refiner weighs with no change to pop — and
-// pop's frame survives the substitution. The hostile document is the point of
-// the second case: a standard that tries to make the Refiner reach a verdict or
-// commit its own edits cannot, because neither is the convention's to decide.
-func TestRefinerPromptCarriesTheRepositorysRefineConvention(t *testing.T) {
+// TestRefinerPromptCarriesTheRepositorysImplementationConvention: the resolved
+// `implementation` convention is a labelled block inside pop's own prompt, so a
+// repository that commits its own standard changes what the Refiner weighs with
+// no change to pop — and pop's framing survives the substitution. The hostile
+// document is the point of the second case: a standard that tries to make the
+// Refiner reach a verdict or commit its own edits cannot, because neither is
+// the convention's to decide.
+func TestRefinerPromptCarriesTheRepositorysImplementationConvention(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name     string
@@ -62,21 +63,22 @@ func TestRefinerPromptCarriesTheRepositorysRefineConvention(t *testing.T) {
 			if _, err := refineResolvedSet(d, nil, opts); err != nil {
 				t.Fatalf("refineResolvedSet: %v", err)
 			}
+			if !strings.Contains(prompt, "## This repository's implementation convention") {
+				t.Fatalf("prompt must carry the labelled implementation block:\n%s", prompt)
+			}
 			if !strings.Contains(prompt, tc.document) {
-				t.Fatalf("prompt must carry the repository's refine convention as its body:\n%s", prompt)
+				t.Fatalf("prompt must carry the repository's implementation convention:\n%s", prompt)
 			}
 			for _, want := range refinerFrameHalves {
 				if !strings.Contains(prompt, want) {
 					t.Fatalf("the frame must survive the convention; prompt missing %q:\n%s", want, prompt)
 				}
 			}
-			// The body sits between the halves: the role preamble opens the prompt and
-			// the output expectation closes it, whatever the document says.
 			role := strings.Index(prompt, "You are an independent Refiner")
 			body := strings.Index(prompt, tc.document)
 			respond := strings.Index(prompt, "## Respond with the report and nothing else")
 			if !(role < body && body < respond) {
-				t.Fatalf("body must sit between the frame halves (role %d, body %d, respond %d):\n%s", role, body, respond, prompt)
+				t.Fatalf("convention block must sit between the frame halves (role %d, body %d, respond %d):\n%s", role, body, respond, prompt)
 			}
 		})
 	}
@@ -109,15 +111,16 @@ func TestRefinerPromptNeverForbidsJudgingWhatTheCodeDoes(t *testing.T) {
 }
 
 // TestRefinerPromptWithoutConventionKeepsTheFrame: a caller that wired no seam
-// leaves the Refiner with pop's frame alone rather than failing the run — the
-// standard is not pop's to supply, and the frame is all pop owns.
+// leaves the Refiner with pop's own prompt alone rather than failing the run —
+// the standard is not pop's to invent when the seam is unwired, and the frame is
+// all pop owns.
 func TestRefinerPromptWithoutConventionKeepsTheFrame(t *testing.T) {
 	t.Parallel()
 	d, _, _ := setupRefineFixture(t, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC))
 	prompt := buildRefinerPrompt(d, goldenBareManifest(),
 		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", passDocument{}, false)
-	if strings.Contains(prompt, "The standard to hold this changeset against") {
-		t.Fatalf("no convention means no body section:\n%s", prompt)
+	if strings.Contains(prompt, "## This repository's implementation convention") {
+		t.Fatalf("no convention means no labelled block:\n%s", prompt)
 	}
 	for _, want := range refinerFrameHalves {
 		if !strings.Contains(prompt, want) {

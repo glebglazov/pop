@@ -168,16 +168,16 @@ var taskVerifyCmd = &cobra.Command{
 
 var taskRefineCmd = &cobra.Command{
 	Use:   "refine TASK_SET",
-	Short: "Run an independent Refiner agent over a task set's changeset, fix what the convention licenses and write the Refine report",
+	Short: "Run an independent Refiner agent over a task set's changeset, fix what the licence allows and write the Refine report",
 	Long: `Refine how a task set's changeset is written, against this repository's standard.
 
-The resolved refine convention is the pass's whole standard: pop supplies
-the role framing and the output expectation, and the convention says what to
-weigh and what may be fixed. A fresh Refiner reads it, the previous Refine
-report when one exists, and the changeset itself — it is given the commit range
-and the set's diff --stat and reads the changed files in the checkout on its own.
+The Refiner's prompt is pop's own end to end: the fix licence, the labelled
+implementation convention (what good code looks like here), and the report
+shape. A fresh Refiner reads it, the previous Refine report when one exists,
+and the changeset itself — it is given the commit range and the set's diff
+--stat and reads the changed files in the checkout on its own.
 
-The pass writes. What the convention licenses the Refiner fixes in place, and
+The pass writes. What the licence allows the Refiner fixes in place, and
 pop lands everything it left in the working tree as one commit on the branch
 you are on, carrying a Pop-Refine trailer; a pass that fixed nothing commits
 nothing. What it did not fix it reports. It still reaches no verdict and gates
@@ -1041,7 +1041,7 @@ func runTaskRefineWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) 
 		Timeout:      timeout,
 		Output:       w,
 		Show:         show,
-		Convention:   refineConvention(d),
+		Convention:   implementationConvention(d),
 		Wait:         admissionWaitChoice(taskRefineWait, taskRefineNoWait),
 		ConfirmIn:    os.Stdin,
 	}); err != nil {
@@ -1106,14 +1106,14 @@ func runTaskArtifactsWith(d *tasks.Deps, w io.Writer, taskSetID, show string) er
 	return nil
 }
 
-// refineConvention wires the Refiner's convention seam to the real
-// Convention stack (ADR-0227): the resolved `refine` convention is the body
-// of the Refiner's prompt. It lives here because the conventions package
-// resolves Repository identity through tasks, so tasks cannot reach it directly
-// and cmd is the layer that holds both.
-func refineConvention(d *tasks.Deps) tasks.RefineConvention {
+// implementationConvention wires the Refiner's (and optional implementer's)
+// convention seam to the real Convention stack (ADR-0246): the resolved
+// `implementation` convention is a labelled block. It lives here because the
+// conventions package resolves Repository identity through tasks, so tasks
+// cannot reach it directly and cmd is the layer that holds both.
+func implementationConvention(d *tasks.Deps) tasks.ImplementationConvention {
 	return func(cwd string) (string, error) {
-		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindRefine, cwd)
+		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindImplementation, cwd)
 		if err != nil {
 			return "", err
 		}
@@ -1141,7 +1141,7 @@ func commitConvention(d *tasks.Deps) tasks.CommitConventionSource {
 
 // verificationConvention wires the Verifier's mandate to the real Convention
 // stack (ADR-0227): the resolved `verification` convention is the body of the
-// Verifier's prompt. It lives beside refineConvention, and for the same
+// Verifier's prompt. It lives beside implementationConvention, and for the same
 // reason — cmd is the layer that holds both packages.
 func verificationConvention(d *tasks.Deps) tasks.VerificationConvention {
 	return func(cwd string) (string, error) {
@@ -1366,7 +1366,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		Output:           stdout,
 		BindCheckout:     taskBindCheckout(d),
 		PreSeedTopic:     taskPreSeedTopic(),
-		RefineConvention: refineConvention(d),
+		ImplementationConvention: implementationConvention(d),
 	})
 	if err != nil {
 		return err
@@ -1400,7 +1400,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		Timeout:                timeout,
 		VerifyAgents:           append([]string(nil), taskImplementVerifyAgents...),
 		VerifyEffort:           taskImplementVerifyEffort,
-		RefineConvention:       refineConvention(d),
+		ImplementationConvention:       implementationConvention(d),
 		VerificationConvention: verificationConvention(d),
 		Yes:                    taskRunYes,
 		Wait:                   taskImplementWaitChoice(),

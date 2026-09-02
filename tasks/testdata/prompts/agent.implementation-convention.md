@@ -14,14 +14,14 @@ Runtime checkout: /pop/checkouts/demo
 Implementation edits belong only beneath the runtime checkout. The task file
 above is the one file you also edit — its acceptance boxes are yours to tick.
 
-## This repository's refine convention
+## This repository's implementation convention
 
 The rules below are this repository's standard for the code you write. Follow
 them as you build: a Refine pass checks the work against this same text, and
 what you leave short of it is fixed or reported there.
 
 ----- ANSWER: SHIPPED (pop's own) -----
-conventions/shipped/refine.md
+conventions/shipped/implementation.md
 
 Name things after what they are in this repository's language.
 Keep a function's abstraction level uniform.

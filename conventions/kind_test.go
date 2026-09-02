@@ -15,15 +15,16 @@ func TestEveryKindDeclaresAConsumptionShape(t *testing.T) {
 	}
 }
 
-// TestConsumptionShapesAsDecided pins the split ADR-0227 decision 1 made: the
-// two kinds that are an agent's entire mandate are the prompt body, and the two
-// that are a fact another prompt needs stay a block inside pop's own.
+// TestConsumptionShapesAsDecided pins the split ADR-0227 decision 1 made, as
+// refined by ADR-0246/0247: only verification is an agent's entire mandate, and
+// the three kinds that are a fact another prompt needs stay a block inside
+// pop's own.
 func TestConsumptionShapesAsDecided(t *testing.T) {
 	for kind, want := range map[Kind]Shape{
-		KindVerification: ShapeRoleDriving,
-		KindRefine:       ShapeRoleDriving,
-		KindCommits:      ShapeStepInforming,
-		KindIssueTracker: ShapeStepInforming,
+		KindVerification:   ShapeRoleDriving,
+		KindImplementation: ShapeStepInforming,
+		KindCommits:        ShapeStepInforming,
+		KindIssueTracker:   ShapeStepInforming,
 	} {
 		if got := kind.Shape(); got != want {
 			t.Errorf("kind %s declares shape %q, want %q", kind, got, want)

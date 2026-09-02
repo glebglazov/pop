@@ -34,10 +34,10 @@ type WholeSetOptions struct {
 	// `--verify-effort`), forwarded verbatim to the task-set executor.
 	VerifyAgents []string
 	VerifyEffort string
-	// RefineConvention resolves the repository's `refine` Convention for the
-	// drain's refine phase (ADR-0240); forwarded verbatim to the task-set
-	// executor, which hands it to the Refiner.
-	RefineConvention tasks.RefineConvention
+	// ImplementationConvention resolves the repository's `implementation`
+	// Convention for the drain's refine phase and optional implement-prompt
+	// inlining (ADR-0246); forwarded verbatim to the task-set executor.
+	ImplementationConvention tasks.ImplementationConvention
 	// VerificationConvention resolves the repository's `verification` Convention
 	// for the drain's verify phase (ADR-0227); forwarded verbatim to the task-set
 	// executor, which hands it to the Verifier as its mandate.
@@ -97,7 +97,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		Timeout:                opts.Timeout,
 		VerifyAgents:           opts.VerifyAgents,
 		VerifyEffort:           opts.VerifyEffort,
-		RefineConvention:       opts.RefineConvention,
+		ImplementationConvention:       opts.ImplementationConvention,
 		VerificationConvention: opts.VerificationConvention,
 		Yes:                    opts.Yes,
 		Wait:                   opts.Wait,

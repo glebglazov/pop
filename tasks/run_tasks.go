@@ -66,15 +66,16 @@ type RunTaskSetOptions struct {
 	// verifyCoreOptions.runVerifier. Unexported and test-only: production always
 	// resolves the real Verifier agent. Nil ⇒ the configured Verifier runs.
 	verifyRunner func(prompt string) (string, error)
-	// RefineConvention resolves the repository's `refine` Convention for the
-	// drain's refine phase (ADR-0240). It is a seam for the same reason the
-	// on-demand refine's is: the conventions package resolves Repository identity
-	// through tasks, so the caller that holds both wires it. Nil ⇒ the Refiner is
-	// handed no convention and is told so.
-	RefineConvention RefineConvention
+	// ImplementationConvention resolves the repository's `implementation`
+	// Convention for the drain's refine phase and for optional implement-prompt
+	// inlining (ADR-0246). It is a seam for the same reason the on-demand
+	// refine's is: the conventions package resolves Repository identity through
+	// tasks, so the caller that holds both wires it. Nil ⇒ the Refiner's prompt
+	// carries no convention block.
+	ImplementationConvention ImplementationConvention
 	// VerificationConvention resolves the repository's `verification` Convention
 	// for the drain's verify phase (ADR-0227): it is the Verifier's mandate, not a
-	// section of pop's prompt. Same seam reason as RefineConvention — the caller
+	// section of pop's prompt. Same seam reason as ImplementationConvention — the caller
 	// that holds both packages wires it. Nil ⇒ the Verifier runs on pop's frame
 	// alone.
 	VerificationConvention VerificationConvention

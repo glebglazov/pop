@@ -11,6 +11,26 @@ Everything else stays a finding in the report and nothing more: anything structu
 
 Fix nothing the standard does not name. The standard is both your licence and its limit — it is this repository's own prose, so a fix made under it was asked for in advance, and a fix made outside it is one nobody asked for.
 
+## What a pass may fix
+
+Fix in place, and record it as fixed:
+
+- a name, where the honest one is obvious and the rename is mechanical
+- a duplicated shape, where extracting it touches only the sites that share it
+- a comment that is false, stale, or restates the code
+- dead code, an unused parameter, a hook nothing calls
+- drift from the idiom of the file the code sits in
+
+Report it and leave it alone:
+
+- anything that changes behaviour, an exported interface, or a stored shape
+- anything that moves code between packages, types or files
+- anything a reasonable reader could disagree with
+- anything whose whole effect you cannot see in the files you touched
+
+Between the two, report. A fix nobody asked for costs more than a finding
+nobody acts on.
+
 Do not commit, do not stage, do not touch git history. Leave your edits in the working tree; committing them is pop's job.
 
 ## Read the changed files yourself
@@ -37,8 +57,11 @@ You are writing the report that replaces the one below, not an appendix to it. C
 {{end}}## What the set set out to do
 {{range .Tasks}}- {{.ID}}: {{.Title}}
 {{end}}
-{{if .ConventionRecorded}}## The standard to hold this changeset against
-This section is this repository's refine convention: what good code looks like here, and what a refine pass may fix. It is the repository's and the human's, not pop's — hold the changeset to it the way it says, and let it be the whole of what you fix.
+{{if .ConventionRecorded}}## This repository's implementation convention
+
+The rules below are this repository's standard for the code under review. Hold
+the changeset to them: fix what they name where the licence above allows, and
+report the rest.
 
 {{.Convention}}
 

@@ -32,7 +32,7 @@ Worktree binding / Runtime path (Binding-first): /pop/checkouts/demo
 ## Operations you may perform (by editing Task storage / the checkout)
 - Inspect task bodies and the runtime checkout to advise the human.
 - Edit implementation under the runtime checkout when the human asks.
-- Run `pop conventions get refine` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
+- Run `pop conventions get implementation` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
 - Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine` (those start a Drain, the Verifier or a Refiner).
 
 The human decides every outcome here. You do not effect a disposition — no task status change (complete, skip, reset, reopen), no verdict recorded, no accept, no remediation spawned — even when the human has told you which outcome they want; they effect it themselves after you exit.

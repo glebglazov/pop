@@ -8,17 +8,17 @@ import (
 	"github.com/glebglazov/pop/config"
 )
 
-// refineConventionProse is what the `refine` Convention stack hands the seam:
-// notice-free prose, the way conventions.StackProse renders it.
-const refineConventionProse = "----- ANSWER: SHIPPED (pop's own) -----\n" +
-	"conventions/shipped/refine.md\n\nName things after what they are here.\n"
+// implementationConventionProse is what the `implementation` Convention stack
+// hands the seam: notice-free prose, the way conventions.StackProse renders it.
+const implementationConventionProse = "----- ANSWER: SHIPPED (pop's own) -----\n" +
+	"conventions/shipped/implementation.md\n\nName things after what they are here.\n"
 
-// includeRefineConventionConfig is the toggle on with the Refine pass off — the
-// independence ADR-0240 asks for: a repository may hold its builders to the
-// standard long before it switches the pass on.
-func includeRefineConventionConfig() *config.Config {
+// includeImplementationConventionConfig is the toggle on with the Refine pass
+// off — the independence ADR-0246 asks for: a repository may hold its builders
+// to the standard long before it switches the pass on.
+func includeImplementationConventionConfig() *config.Config {
 	return &config.Config{Work: &config.WorkConfig{
-		Implement: &config.ImplementConfig{IncludeRefineConvention: true},
+		Implement: &config.ImplementConfig{IncludeImplementationConvention: true},
 		Refine:    &config.RefineConfig{Enabled: false},
 	}}
 }
@@ -33,11 +33,11 @@ func plannedAndRemediationSet() []Task {
 	}
 }
 
-// TestImplementPromptsCarryTheRefineConvention drives a whole drain with the
-// toggle set and reads the prompts the agent was actually handed: both the
-// planned task's and the Remediation task's carry the convention as a labelled
-// block, notice-free, and the seam is asked about the runtime checkout.
-func TestImplementPromptsCarryTheRefineConvention(t *testing.T) {
+// TestImplementPromptsCarryTheImplementationConvention drives a whole drain
+// with the toggle set and reads the prompts the agent was actually handed: both
+// the planned task's and the Remediation task's carry the convention as a
+// labelled block, notice-free, and the seam is asked about the runtime checkout.
+func TestImplementPromptsCarryTheImplementationConvention(t *testing.T) {
 	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", plannedAndRemediationSet())
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{changeFile: "work.txt", changeData: "x\n", checkTask: true, summary: "done"})
@@ -46,13 +46,13 @@ func TestImplementPromptsCarryTheRefineConvention(t *testing.T) {
 	opts := env.runTaskSetOpts(true, agent, &buf)
 	opts.TaskSetOverride = "demo"
 	var asked []string
-	opts.RefineConvention = func(cwd string) (string, error) {
+	opts.ImplementationConvention = func(cwd string) (string, error) {
 		asked = append(asked, cwd)
-		return refineConventionProse, nil
+		return implementationConventionProse, nil
 	}
 
 	if _, err := RunTaskSetWith(env.deps(), nil, func(string) (*config.Config, error) {
-		return includeRefineConventionConfig(), nil
+		return includeImplementationConventionConfig(), nil
 	}, opts); err != nil {
 		t.Fatalf("RunTaskSetWith: %v", err)
 	}
@@ -62,10 +62,10 @@ func TestImplementPromptsCarryTheRefineConvention(t *testing.T) {
 		t.Fatalf("agent saw %d prompts, want one per task:\n%s", len(prompts), strings.Join(prompts, "\n---\n"))
 	}
 	for i, prompt := range prompts {
-		if !strings.Contains(prompt, "## This repository's refine convention") {
+		if !strings.Contains(prompt, "## This repository's implementation convention") {
 			t.Fatalf("prompt %d carries no convention block:\n%s", i+1, prompt)
 		}
-		if !strings.Contains(prompt, refineConventionProse) {
+		if !strings.Contains(prompt, implementationConventionProse) {
 			t.Fatalf("prompt %d does not carry the resolved prose:\n%s", i+1, prompt)
 		}
 		if strings.Contains(prompt, "READ-WHOLE NOTICE") {
@@ -91,9 +91,9 @@ func TestImplementPromptIsUnchangedWithoutTheToggle(t *testing.T) {
 	opts := env.runTaskSetOpts(true, agent, &buf)
 	opts.TaskSetOverride = "demo"
 	resolved := false
-	opts.RefineConvention = func(string) (string, error) {
+	opts.ImplementationConvention = func(string) (string, error) {
 		resolved = true
-		return refineConventionProse, nil
+		return implementationConventionProse, nil
 	}
 
 	if _, err := RunTaskSetWith(env.deps(), nil, func(string) (*config.Config, error) {

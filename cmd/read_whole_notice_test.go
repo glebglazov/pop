@@ -118,7 +118,7 @@ func TestNoticeStaysOnTheCommandPaths(t *testing.T) {
 	td := f.deps.tasksDeps()
 	for name, seam := range map[string]func(string) (string, error){
 		"the Verifier's prompt body":       verificationConvention(td),
-		"the Refiner's prompt body":        refineConvention(td),
+		"the Refiner's implementation convention": implementationConvention(td),
 		"the manifest's commit_convention": commitConvention(td),
 	} {
 		prose, err := seam(f.repo)

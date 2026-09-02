@@ -74,7 +74,7 @@ const DefaultVerifyEffort = "heavy"
 // VerificationConvention resolves this repository's `verification` Convention
 // stack as the prose that becomes the Verifier's mandate — the body of its
 // prompt rather than a section inside pop's own (ADR-0227 decisions 1 and 2).
-// It is a seam for the same reason RefineConvention is: the conventions package
+// It is a seam for the same reason ImplementationConvention is: the conventions package
 // answers Repository identity through this package, so tasks cannot import it
 // back. A nil seam, an error, or an empty answer all mean the same thing — the
 // prompt carries no mandate and pop's frame stands alone.

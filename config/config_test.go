@@ -175,14 +175,14 @@ max_remediation_depth = 2
 	}
 }
 
-// TestLoadImplementIncludeRefineConvention pins the upfront-adherence toggle
-// (ADR-0240): it lives under the implement group, it is off unless the human
-// says otherwise, and it is independent of [work.refine].enabled.
-func TestLoadImplementIncludeRefineConvention(t *testing.T) {
+// TestLoadImplementIncludeImplementationConvention pins the upfront-adherence
+// toggle (ADR-0246): it lives under the implement group, it is off unless the
+// human says otherwise, and it is independent of [work.refine].enabled.
+func TestLoadImplementIncludeImplementationConvention(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
 [work.implement]
-include_refine_convention = true
+include_implementation_convention = true
 
 [work.refine]
 enabled = false
@@ -193,8 +193,8 @@ enabled = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.ImplementIncludesRefineConvention() {
-		t.Fatal("[work.implement].include_refine_convention = true did not load as set")
+	if !cfg.ImplementIncludesImplementationConvention() {
+		t.Fatal("[work.implement].include_implementation_convention = true did not load as set")
 	}
 	if r := cfg.RefineSettings(); r == nil || r.Enabled {
 		t.Fatalf("refine settings = %+v, want the pass still switched off", r)
@@ -208,8 +208,28 @@ enabled = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if empty.ImplementIncludesRefineConvention() {
+	if empty.ImplementIncludesImplementationConvention() {
 		t.Fatal("an undeclared toggle must resolve to off")
+	}
+}
+
+// TestLoadIncludeRefineConventionRenameError: the retired key hard-fails naming
+// the new one (ADR-0246), rather than silently dropping the behaviour a bool
+// defaulting to false would lose.
+func TestLoadIncludeRefineConventionRenameError(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[work.implement]
+include_refine_convention = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load accepted include_refine_convention; want a rename error")
+	}
+	if !strings.Contains(err.Error(), "include_implementation_convention") {
+		t.Fatalf("rename error = %v, want it to name include_implementation_convention", err)
 	}
 }
 

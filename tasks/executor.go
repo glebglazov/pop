@@ -50,12 +50,13 @@ type RunTaskOptions struct {
 	// with no model call. Invoked once, after the task is selected and the run
 	// is confirmed, before the agent's first prompt.
 	PreSeedTopic func(taskTitle string)
-	// RefineConvention mirrors RunTaskSetOptions.RefineConvention for the
-	// single-task path: it is what [work.implement].include_refine_convention
-	// inlines into the prompt (ADR-0240). Same seam reason — the conventions
-	// package resolves Repository identity through tasks, so the caller that
-	// holds both wires it. Nil ⇒ the prompt carries no convention.
-	RefineConvention RefineConvention
+	// ImplementationConvention mirrors RunTaskSetOptions.ImplementationConvention
+	// for the single-task path: it is what
+	// [work.implement].include_implementation_convention inlines into the prompt
+	// (ADR-0246). Same seam reason — the conventions package resolves Repository
+	// identity through tasks, so the caller that holds both wires it. Nil ⇒ the
+	// prompt carries no convention.
+	ImplementationConvention ImplementationConvention
 }
 
 // RunTaskResult is the outcome of a successful or declined run-task.
@@ -272,7 +273,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 
 	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath,
-		implementRefineConvention(cfg, opts.RefineConvention, runtimePath))
+		implementImplementationConvention(cfg, opts.ImplementationConvention, runtimePath))
 	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, resolveRepoTurnCap(d, cfg, runtimePath))
 
 	maxTries, err := plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)

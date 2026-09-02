@@ -32,12 +32,13 @@ var refineReport = passReport{
 	PointerLabel: "Refine",
 }
 
-// RefineConvention resolves this repository's `refine` Convention stack as
-// the prose a Refiner is handed. It is a seam rather than a direct call: the
-// conventions package answers Repository identity through this one, so tasks
-// cannot import it back. A nil seam, an error, or an empty answer all mean the
-// same thing here — the prompt carries no convention and says so.
-type RefineConvention func(cwd string) (string, error)
+// ImplementationConvention resolves this repository's `implementation`
+// Convention stack as the prose a Refiner (and, when opted in, an implementer)
+// is handed as a labelled block (ADR-0246). It is a seam rather than a direct
+// call: the conventions package answers Repository identity through this one,
+// so tasks cannot import it back. A nil seam, an error, or an empty answer all
+// mean the same thing here — the prompt carries no convention block.
+type ImplementationConvention func(cwd string) (string, error)
 
 // RefineOptions configures a `pop tasks refine <set>` run.
 type RefineOptions struct {
@@ -58,8 +59,8 @@ type RefineOptions struct {
 	// Show prints the set's latest Refine report and runs nothing — the path a
 	// document takes to a pull request, where piping is the human's business.
 	Show bool
-	// Convention resolves the `refine` convention for the checkout.
-	Convention RefineConvention
+	// Convention resolves the `implementation` convention for the checkout.
+	Convention ImplementationConvention
 	// Wait is the `--wait` / `--no-wait` tri-state for admission to the checkout
 	// (ADR-0239). The unset default waits at a terminal and refuses elsewhere.
 	Wait AdmissionWaitChoice
@@ -97,7 +98,7 @@ type refineCoreOptions struct {
 	Timeout    time.Duration
 	Output     io.Writer
 	Show       bool
-	Convention RefineConvention
+	Convention ImplementationConvention
 	// runRefiner returns the Refiner's document and the agent that wrote it.
 	runRefiner func(prompt string) (string, string, error)
 	probeMemo  *agentAvailabilityProbeMemo
@@ -182,7 +183,7 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
 		return nil, err
 	}
 	previous, hasPrevious := refineReport.latestDocument(d, m.Dir)
-	convention := resolveRefineConvention(opts)
+	convention := resolveImplementationConvention(opts)
 	// The work SHA is read before the Refiner runs: it is the commit the report
 	// describes, and the Refiner that moved it would be doing something a refine
 	// pass must not do.
@@ -261,12 +262,12 @@ func hasDoneAFKTask(m *Manifest) bool {
 	return false
 }
 
-// resolveRefineConvention asks the seam for the repository's `refine`
-// convention — the body of the Refiner's prompt (ADR-0227). It is best-effort
-// by design: the stack always answers, so an empty result means no seam was
-// wired or resolution failed, and the Refiner then runs on pop's frame alone
-// rather than the run failing.
-func resolveRefineConvention(opts refineCoreOptions) string {
+// resolveImplementationConvention asks the seam for the repository's
+// `implementation` convention — a labelled block in the Refiner's prompt
+// (ADR-0246). It is best-effort by design: the stack always answers, so an empty
+// result means no seam was wired or resolution failed, and the Refiner then runs
+// on pop's own prompt alone rather than the run failing.
+func resolveImplementationConvention(opts refineCoreOptions) string {
 	if opts.Convention == nil {
 		return ""
 	}
@@ -476,14 +477,15 @@ func printRefineWritten(w io.Writer, setID, path, commitSHA string, superseded b
 	out.line(ansiDim, "   Read it: pop tasks refine %s --show", setID)
 }
 
-// buildRefinerPrompt assembles the Refiner's input as an envelope (ADR-0227):
-// pop's role framing, then the resolved `refine` convention as the body,
-// then the output expectation pop needs back. Around the body sit the previous
-// report when one exists and the changeset's shape — its commit range and
-// complete `git diff --stat`, never the diff bodies. The Refiner stands in the
-// checkout it describes and reads the changed files itself, which is the
-// deliberate divergence from how the Verifier is prompted: naming, structure and
-// idiom cannot be judged from a file-name-and-linecount table (ADR-0214).
+// buildRefinerPrompt assembles the Refiner's prompt end to end (ADR-0246,
+// ADR-0247): pop owns the role framing (including the fix licence), the labelled
+// `implementation` convention block, and the output expectation. Around them sit
+// the previous report when one exists and the changeset's shape — its commit
+// range and complete `git diff --stat`, never the diff bodies. The Refiner
+// stands in the checkout it describes and reads the changed files itself, which
+// is the deliberate divergence from how the Verifier is prompted: naming,
+// structure and idiom cannot be judged from a file-name-and-linecount table
+// (ADR-0214).
 func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention string, previous passDocument, hasPrevious bool) string {
 	view := refinerPromptView{
 		TaskSet:   m.Stem,

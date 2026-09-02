@@ -13,12 +13,12 @@ import (
 type Kind string
 
 const (
-	// KindRefine is the standard a Refiner holds a changeset against: what good
-	// code looks like in this repository, as prose. Where the repository has
-	// stated none, pop's shipped answer is a smell baseline that the
-	// repository's own documents, linters and idiom override (ADR-0214,
-	// ADR-0226 decision 2, ADR-0240).
-	KindRefine Kind = "refine"
+	// KindImplementation is what good code looks like in this repository, as
+	// prose — code and tests as one subject. It is step-informing: where a
+	// prompt carries it, it is a labelled block. The Refiner always carries it;
+	// the implementer carries it only when
+	// [work.implement].include_implementation_convention is set (ADR-0246).
+	KindImplementation Kind = "implementation"
 	// KindCommits is the commit-message grammar a repository's team writes
 	// history in — types, scopes, subject style and body style, which are one
 	// document and one git log sample rather than two kinds.
@@ -62,9 +62,9 @@ const (
 // Shape answers how this kind reaches an agent.
 func (k Kind) Shape() Shape {
 	switch k {
-	case KindRefine, KindVerification:
+	case KindVerification:
 		return ShapeRoleDriving
-	case KindCommits, KindIssueTracker:
+	case KindImplementation, KindCommits, KindIssueTracker:
 		return ShapeStepInforming
 	}
 	return ""
@@ -74,7 +74,7 @@ func (k Kind) Shape() Shape {
 // the order `get` with no kind walks, and the order an unknown kind is refused
 // with.
 func Kinds() []Kind {
-	return []Kind{KindRefine, KindCommits, KindIssueTracker, KindVerification}
+	return []Kind{KindImplementation, KindCommits, KindIssueTracker, KindVerification}
 }
 
 // Desc is the one-line description of what a kind answers, for a surface that
@@ -83,8 +83,8 @@ func Kinds() []Kind {
 // than in that surface so two surfaces cannot describe a kind differently.
 func (k Kind) Desc() string {
 	switch k {
-	case KindRefine:
-		return "What good code looks like in this repository — the standard a refine pass reads a changeset against."
+	case KindImplementation:
+		return "What good code looks like in this repository — the standard a builder and a Refiner both read."
 	case KindCommits:
 		return "How this repository writes commits — types, scopes, subject and body style."
 	case KindIssueTracker:

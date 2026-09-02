@@ -2,7 +2,7 @@
 
 Nobody has written down what good code looks like here, so this is pop's own
 answer: a short list of rules, generic by construction. Any document written at
-a rank above this one — the team's `docs/agents/refine.md`, or either of your
+a rank above this one — the team's `docs/agents/implementation.md`, or either of your
 own — displaces it whole, so a repository that has stated its taste is never
 held to a stranger's.
 
@@ -40,23 +40,3 @@ Two rules bind the rest.
 - **Errors and tests follow the file.** Handle and wrap errors the way the
   surrounding code does, and write tests that drive a real path rather than
   pinning one method in place.
-
-## What a pass may fix
-
-Fix in place, and record it as fixed:
-
-- a name, where the honest one is obvious and the rename is mechanical
-- a duplicated shape, where extracting it touches only the sites that share it
-- a comment that is false, stale, or restates the code
-- dead code, an unused parameter, a hook nothing calls
-- drift from the idiom of the file the code sits in
-
-Report it and leave it alone:
-
-- anything that changes behaviour, an exported interface, or a stored shape
-- anything that moves code between packages, types or files
-- anything a reasonable reader could disagree with
-- anything whose whole effect you cannot see in the files you touched
-
-Between the two, report. A fix nobody asked for costs more than a finding
-nobody acts on.

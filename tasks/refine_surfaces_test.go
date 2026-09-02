@@ -270,18 +270,18 @@ func TestRefineStalenessNeedsBothCommits(t *testing.T) {
 	}
 }
 
-// TestAssistPromptPointsAtTheRefineConvention pins the Assist hint (ADR-0240):
+// TestAssistPromptPointsAtTheImplementationConvention pins the Assist hint (ADR-0240):
 // the session is told where the standard is written, and told that running the
 // pass itself is not its business — the Refiner commits, and an attended session
 // leaves committing to the human.
-func TestAssistPromptPointsAtTheRefineConvention(t *testing.T) {
+func TestAssistPromptPointsAtTheImplementationConvention(t *testing.T) {
 	t.Parallel()
 	m := &Manifest{Stem: "demo", Dir: t.TempDir(), Valid: true,
 		Tasks: []Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: TaskOpen}}}
 	prompt := BuildAssistPrompt(&Deps{FS: &promptFixtureFS{files: map[string]string{}}}, "demo", m, StatusReady, "/rt", "")
 
 	for _, want := range []string{
-		"`pop conventions get refine`",
+		"`pop conventions get implementation`",
 		"Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine`",
 	} {
 		if !strings.Contains(prompt, want) {

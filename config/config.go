@@ -296,12 +296,13 @@ type ImplementConfig struct {
 	// sits here, not at the [work] root, because the drain's commit path is the
 	// only reader.
 	Git *TaskGitConfig `toml:"git" include:"replace" desc:"Commit-time git overrides for Pop's commits ([work.implement.git] table)."`
-	// IncludeRefineConvention inlines the resolved `refine` convention into every
-	// implement prompt as a labelled block, so a builder adheres upfront to the
-	// rules the Refiner later enforces (ADR-0240). It is deliberately independent
-	// of [work.refine].enabled: adherence can be driven before the pass is ever
-	// switched on. Absent/false ⇒ the implement prompt is unchanged.
-	IncludeRefineConvention bool `toml:"include_refine_convention" include:"replace" desc:"Inline the resolved refine convention into every implement prompt (default false)."`
+	// IncludeImplementationConvention inlines the resolved `implementation`
+	// convention into every implement prompt as a labelled block, so a builder
+	// adheres upfront to the rules the Refiner later enforces (ADR-0246). It is
+	// deliberately independent of [work.refine].enabled: adherence can be driven
+	// before the pass is ever switched on. Absent/false ⇒ the implement prompt
+	// is unchanged.
+	IncludeImplementationConvention bool `toml:"include_implementation_convention" include:"replace" desc:"Inline the resolved implementation convention into every implement prompt (default false)."`
 }
 
 // AgentGroupConfig is a Work group whose only setting is its ordered agent
@@ -1161,16 +1162,16 @@ func (c *Config) ResolveVerifyMaxTries() int {
 	return DefaultTaskMaxTries
 }
 
-// ImplementIncludesRefineConvention reports whether every implement prompt
-// carries the resolved `refine` convention (ADR-0240). It reads
-// [work.implement].include_refine_convention alone — the toggle is independent
-// of [work.refine].enabled, so upfront adherence can be driven with the pass
-// switched off.
-func (c *Config) ImplementIncludesRefineConvention() bool {
+// ImplementIncludesImplementationConvention reports whether every implement
+// prompt carries the resolved `implementation` convention (ADR-0246). It reads
+// [work.implement].include_implementation_convention alone — the toggle is
+// independent of [work.refine].enabled, so upfront adherence can be driven with
+// the pass switched off.
+func (c *Config) ImplementIncludesImplementationConvention() bool {
 	if c == nil || c.Work == nil || c.Work.Implement == nil {
 		return false
 	}
-	return c.Work.Implement.IncludeRefineConvention
+	return c.Work.Implement.IncludeImplementationConvention
 }
 
 // ImplementAgents returns the commands of the [work.implement].agents list, in
@@ -1840,6 +1841,12 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := includeRefineConventionRenameError(path, md); err != nil {
+		return nil, err
+	}
+	if err := includeRefineConventionRenameError(DefaultOverrideConfigPathWith(d), overrideMD); err != nil {
+		return nil, err
+	}
 	for _, f := range retiredTasksSectionFindings(path, md) {
 		cfg.recordFinding(f)
 	}
@@ -1966,6 +1973,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		}
 		for _, f := range repoBlockWarnings(expanded, includedMD) {
 			cfg.recordFinding(f)
+		}
+		if err := includeRefineConventionRenameError(expanded, includedMD); err != nil {
+			return nil, err
 		}
 		for _, f := range retiredTasksSectionFindings(expanded, includedMD) {
 			cfg.recordFinding(f)
@@ -2378,6 +2388,20 @@ func repoRenameFindings(path string, md toml.MetaData) []Finding {
 func validateRepoConfigMetadata(path string, md toml.MetaData) error {
 	if findings := repoRenameFindings(path, md); len(findings) > 0 {
 		return errors.New(findings[0].Message)
+	}
+	return nil
+}
+
+// includeRefineConventionRenameError is the load-time refusal for the retired
+// [work.implement].include_refine_convention key (ADR-0246). A bool defaulting
+// to false would silently lose behaviour under a silent alias or ignore, so the
+// old name hard-fails naming the new one — the same habit as
+// execution_base/queue_base → trunk.
+func includeRefineConventionRenameError(path string, md toml.MetaData) error {
+	for _, key := range md.Undecoded() {
+		if len(key) == 3 && key[0] == "work" && key[1] == "implement" && key[2] == "include_refine_convention" {
+			return fmt.Errorf("%s: [work.implement].include_refine_convention was renamed to include_implementation_convention", path)
+		}
 	}
 	return nil
 }

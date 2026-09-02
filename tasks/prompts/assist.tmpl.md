@@ -26,7 +26,7 @@ Derived status: {{.Status}}
 ## Operations you may perform (by editing Task storage / the checkout)
 - Inspect task bodies and the runtime checkout to advise the human.
 - Edit implementation under the runtime checkout when the human asks.
-- Run `pop conventions get refine` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
+- Run `pop conventions get implementation` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
 - Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine` (those start a Drain, the Verifier or a Refiner).
 
 {{template "the-human-decides"}}

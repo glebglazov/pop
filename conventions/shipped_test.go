@@ -76,19 +76,19 @@ func TestCommitsShippedAnswerSamplesTheLog(t *testing.T) {
 	}
 }
 
-// TestRefineIsAKindWithAnAnswer: refine is configurable only through this
-// stack, so the kind's presence in the enum is what makes a repository able to
-// state its own standard at all (ADR-0214).
-func TestRefineIsAKindWithAnAnswer(t *testing.T) {
+// TestImplementationIsAKindWithAnAnswer: implementation is configurable only
+// through this stack, so the kind's presence in the enum is what makes a
+// repository able to state its own standard at all (ADR-0246).
+func TestImplementationIsAKindWithAnAnswer(t *testing.T) {
 	var found bool
 	for _, kind := range Kinds() {
-		found = found || kind == KindRefine
+		found = found || kind == KindImplementation
 	}
 	if !found {
-		t.Fatalf("refine is not a Convention kind; Kinds() = %v", Kinds())
+		t.Fatalf("implementation is not a Convention kind; Kinds() = %v", Kinds())
 	}
-	if strings.TrimSpace(Shipped(KindRefine)) == "" {
-		t.Error("the refine kind has no shipped standard to hold a changeset against")
+	if strings.TrimSpace(Shipped(KindImplementation)) == "" {
+		t.Error("the implementation kind has no shipped standard to hold a changeset against")
 	}
 }
 
@@ -149,28 +149,27 @@ func TestVerificationShippedAnswerCarriesNoneOfPopsMachinery(t *testing.T) {
 	}
 }
 
-// TestRefineShippedAnswerIsShortAndRuleShaped: pop's own answer is a compact
-// list of what good code looks like and what a pass may fix (ADR-0240). The
-// length matters as much as the content — the same text rides every implement
-// prompt when upfront adherence is on, so a document that grew into an essay
-// would be paid for on every task.
-func TestRefineShippedAnswerIsShortAndRuleShaped(t *testing.T) {
-	answer := Shipped(KindRefine)
+// TestImplementationShippedAnswerIsShortAndRuleShaped: pop's own answer is a
+// compact list of what good code looks like (ADR-0246). The length matters —
+// the same text rides every implement prompt when upfront adherence is on, so a
+// document that grew into an essay would be paid for on every task. The fix
+// licence lives in the Refiner's prompt, not here.
+func TestImplementationShippedAnswerIsShortAndRuleShaped(t *testing.T) {
+	answer := Shipped(KindImplementation)
 	for what, want := range map[string]string{
-		"what good code looks like":  "## What good code looks like here",
-		"the fix licence":            "## What a pass may fix",
-		"the repository's override":  "The repository overrides.",
-		"what tooling already says":  "Skip what a machine says faster.",
-		"what stays a finding":       "Report it and leave it alone",
-		"the rule for the undecided": "Between the two, report.",
+		"what good code looks like": "## What good code looks like here",
+		"the repository's override": "The repository overrides.",
+		"what tooling already says": "Skip what a machine says faster.",
 	} {
 		if !strings.Contains(answer, want) {
-			t.Errorf("refine shipped answer does not carry %s (%q):\n%s", what, want, answer)
+			t.Errorf("implementation shipped answer does not carry %s (%q):\n%s", what, want, answer)
 		}
 	}
-	// The two-axis review it replaced was more than twice this long.
+	if strings.Contains(answer, "## What a pass may fix") {
+		t.Errorf("implementation shipped answer still carries the fix licence, which is the Refiner's:\n%s", answer)
+	}
 	if lines := len(strings.Split(strings.TrimSpace(answer), "\n")); lines > 70 {
-		t.Errorf("refine shipped answer is %d lines; it rides every implement prompt and must stay short", lines)
+		t.Errorf("implementation shipped answer is %d lines; it rides every implement prompt and must stay short", lines)
 	}
 	for what, gone := range map[string]string{
 		"the standards axis": "Axis 1",
@@ -178,22 +177,7 @@ func TestRefineShippedAnswerIsShortAndRuleShaped(t *testing.T) {
 		"the two-axis frame": "two axes",
 	} {
 		if strings.Contains(answer, gone) {
-			t.Errorf("refine shipped answer still carries %s (%q):\n%s", what, gone, answer)
-		}
-	}
-}
-
-// TestRefineShippedAnswerNeverCommits: the pass edits the checkout, so the one
-// write it may not make is the one pop makes for it — an answer that told the
-// Refiner to commit would put an agent in git history (ADR-0240).
-func TestRefineShippedAnswerNeverCommits(t *testing.T) {
-	answer := Shipped(KindRefine)
-	if !strings.Contains(answer, "Fix in place, and record it as fixed") {
-		t.Errorf("refine shipped answer does not license the pass to fix in place:\n%s", answer)
-	}
-	for _, gone := range []string{"commit the", "git commit", "Change no files"} {
-		if strings.Contains(answer, gone) {
-			t.Errorf("refine shipped answer carries %q, which is pop's frame's to say:\n%s", gone, answer)
+			t.Errorf("implementation shipped answer still carries %s (%q):\n%s", what, gone, answer)
 		}
 	}
 }
