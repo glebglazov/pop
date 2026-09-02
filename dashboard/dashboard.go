@@ -85,7 +85,7 @@ type dashboardRowsMsg struct {
 	// unfiltered is the same build over every container this page's kinds hold,
 	// whatever the active Work view preset selects. It is carried only while rows
 	// are marked, because it exists to answer one question the preset build cannot:
-	// whether a marked row the preset hides still exists (ADR-0246 decision 2). It
+	// whether a marked row the preset hides still exists (ADR-0254 decision 2). It
 	// is nil on every other poll, and nil is read as "not asked", never as "gone".
 	unfiltered []DashboardRow
 	// seq is the stamp the reload took when it started (ADR-0242 decision 1). The
@@ -938,7 +938,7 @@ type QueueDashboard struct {
 
 	// selection is the human's mark over the rows, keyed by CursorKey and holding
 	// the whole of selection mode: the mode is exactly "some row is marked"
-	// (ADR-0246 decisions 1 and 4). Marked rows are parked in a region at the foot
+	// (ADR-0254 decisions 1 and 4). Marked rows are parked in a region at the foot
 	// of the list and are exempt from every narrowing — the active preset's and the
 	// search's alike — so there is no selected-but-invisible row to account for.
 	selection ui.Selection
@@ -950,7 +950,7 @@ type QueueDashboard struct {
 	unfiltered []DashboardRow
 	// bulkPrompt is the inline y/N a plural verb opens before it writes. While it
 	// is open every key outside its own grammar is inert, so `y` can only ever
-	// write what the question named (ADR-0246 decision 7).
+	// write what the question named (ADR-0254 decision 7).
 	bulkPrompt *dashboardBulkPrompt
 
 	pendingG bool
@@ -1359,7 +1359,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.SetCursor(m.regionBottom())
 		case "tab":
 			// Navigation and marking are the two things a mode never gates, so tab
-			// answers on both sides of it (ADR-0246 decision 4).
+			// answers on both sides of it (ADR-0254 decision 4).
 			m.toggleSelected()
 			return m, nil
 		case "shift+tab":
@@ -2005,7 +2005,7 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	m.err = nil
 	// The intercepted verbs that stay singular refuse here rather than at each key
 	// that reaches them: this is where every one of them arrives, so the audit and
-	// the guard sit together (ADR-0246 decision 5).
+	// the guard sit together (ADR-0254 decision 5).
 	if m.refuseInterceptedVerb(verb) {
 		return m, nil
 	}
@@ -2464,7 +2464,7 @@ func (m QueueDashboard) activeQuery() string {
 // keeping the cursor on the container it was on. The search subtracts from
 // allRows — the rows the active Work view preset selected — so it can never widen
 // the view, except for the rows the human marked: those are parked in the
-// Selection region and are exempt from both narrowings (ADR-0246 decision 2). A
+// Selection region and are exempt from both narrowings (ADR-0254 decision 2). A
 // cursored row the query excludes has nowhere to stay, and only then does the
 // cursor fall back — to the first ordinary row above the region, which it never
 // enters except by being walked in.
@@ -2546,7 +2546,7 @@ func (m *QueueDashboard) retainSelection() {
 
 // toggleSelected answers tab: it marks or unmarks the cursored row and lands the
 // cursor on the row that followed it, which is the outcome tab guarantees
-// whichever way the row itself moved (ADR-0246 decision 8). The view is recomposed
+// whichever way the row itself moved (ADR-0254 decision 8). The view is recomposed
 // rather than reordered in place, so an unmarked row goes back to its own sorted
 // position instead of to the head of the rest.
 func (m *QueueDashboard) toggleSelected() {
@@ -2596,7 +2596,7 @@ func (m QueueDashboard) regionBottom() int {
 
 // refuseSingular answers a key whose verb acts on one row while rows are marked:
 // it does nothing and says so on the bottom line, because a key that goes
-// silently inert is indistinguishable from a bug (ADR-0246 decision 4). The keys
+// silently inert is indistinguishable from a bug (ADR-0254 decision 4). The keys
 // that reach a verb no kind declared plural — the detail view, the row's own I,
 // the worktree open — each call this in a line.
 func (m *QueueDashboard) refuseSingular(verb string) bool {
@@ -2804,7 +2804,7 @@ func (m QueueDashboard) nextReloadSeq() uint64 {
 // tmux round-trip happens here — only the answer is re-derived.
 // While rows are marked it also builds the same page unfiltered, because a mark
 // outranks the preset and the preset build alone cannot tell a row it hides from
-// a row that is gone (ADR-0246 decision 2). That second build is the price of the
+// a row that is gone (ADR-0254 decision 2). That second build is the price of the
 // exemption, and it is paid only in selection mode and only on the page that has
 // presets at all.
 func (m QueueDashboard) reload() tea.Cmd {

@@ -544,7 +544,7 @@ func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetSta
 		view.FindingsRecorded = true
 		view.Findings = trimmed
 	}
-	// The load-bearing surface of ADR-0240: named as a path, like every task
+	// The load-bearing surface of ADR-0252: named as a path, like every task
 	// body, so "read the report and let's work out what to do about it" needs no
 	// plumbing beyond the agent opening the file.
 	view.Refine = refineBlock(d, m, runtimePath)

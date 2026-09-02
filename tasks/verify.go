@@ -304,7 +304,7 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 // turns the set's findings into a fix by spawning a Remediation task carrying
 // their own note, without running the Verifier. Unlike the automatic
 // FIXABLE-under-cap spawn, this is refused unless the set's Verification mark is
-// verify-failed (ADR-0247) — the human authorises the fix the auto path will not
+// verify-failed (ADR-0255) — the human authorises the fix the auto path will not
 // (a NEEDS-HUMAN, or a FIXABLE whose depth cap is exhausted), but only on a set
 // that has actually failed verification. It reuses spawnRemediationTask
 // wholesale, so the new open AFK work invalidates the set's cached verdicts and

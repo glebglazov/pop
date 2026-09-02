@@ -91,7 +91,7 @@ renamed for the residue.
 10. **The Selection path is unchanged in kind.** Each opener behaves at top level exactly
     as it did inside `a`: singular or plural by whether a Selection is active, with the
     plural menu showing the intersection of what every marked row offers and declares
-    plural on `work.Action.Modes` (ADR-0246). `CopyActions` items declare `Modes` like
+    plural on `work.Action.Modes` (ADR-0254). `CopyActions` items declare `Modes` like
     every other action — copy-name is plural, the paths are not.
 
 ## Considered alternatives

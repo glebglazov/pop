@@ -103,7 +103,7 @@ the whole page: a band that vanishes when another project's work arrives teaches
 that its absence means something, and it does not.
 
 **9. A marked row leaves the band with the rest of it.** The **Selection area** moves marked
-rows into a region at the foot (ADR-0246); a band inside a region of one kind of thing marks
+rows into a region at the foot (ADR-0254); a band inside a region of one kind of thing marks
 nothing off from anything, and dropping it keeps the band's invariant simple — one contiguous
 region at the top of the table, never twice on one screen.
 

@@ -29,7 +29,7 @@ func keyY() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'y', Text: "y"} }
 
 // TestMonitorVerbCapabilities pins the capability table itself: kill, follow
 // and unmonitor are the bindings granted the plural mode, and a binding that
-// declares nothing acts on one pane and says so (ADR-0246 decision 5).
+// declares nothing acts on one pane and says so (ADR-0254 decision 5).
 func TestMonitorVerbCapabilities(t *testing.T) {
 	pluralBindings := map[*key.Binding]bool{
 		&dashboardKeys.KillPane:   true,

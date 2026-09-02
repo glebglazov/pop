@@ -347,7 +347,7 @@ type VerifyConfig struct {
 	AttemptRetryDelays []string `toml:"attempt_retry_delays" include:"replace" desc:"Verify inter-attempt retry delay schedule (array of duration strings)."`
 }
 
-// RefineConfig holds Refine settings (ADR-0240). It carries exactly three
+// RefineConfig holds Refine settings (ADR-0252). It carries exactly three
 // keys and no remediation depth, because a refine pass reaches no verdict and
 // spawns no work: the whole output is a report a human may act on or ignore.
 type RefineConfig struct {
@@ -550,7 +550,7 @@ type WorkConfig struct {
 	Implement *ImplementConfig `toml:"implement" merge:"fields" include:"fields" desc:"Implement Work group ([work.implement] table)."`
 	// Verify is the Verifier's group (ADR-0086).
 	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"fields" desc:"Agent-verification settings ([work.verify] table)."`
-	// Refine is the Refiner's group (ADR-0240).
+	// Refine is the Refiner's group (ADR-0252).
 	Refine *RefineConfig `toml:"refine" merge:"fields" include:"fields" desc:"Refine settings ([work.refine] table)."`
 	// Routine is the recurring-Routine group. An absent list falls through to
 	// [work.implement].agents — an override of `agents = []` does not

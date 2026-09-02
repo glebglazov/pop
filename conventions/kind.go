@@ -41,7 +41,7 @@ const (
 // 1). It says nothing about delivery: a kind reaches an agent by three paths and
 // pop hands the prose over on only two of them — the body of a role-driving
 // prompt and the `commits` block on a task set's manifest — the third being the
-// agent running `pop conventions get` itself (ADR-0230).
+// agent running `pop conventions get` itself (ADR-0250).
 type Shape string
 
 const (

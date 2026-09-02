@@ -204,7 +204,7 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 			}
 			result.Refresh = currentRefresh
 
-			// Refine phase (ADR-0240): with [work.refine] enabled and the set's
+			// Refine phase (ADR-0252): with [work.refine] enabled and the set's
 			// Refine episode armed, a fresh Refiner fixes what the `refine`
 			// convention licenses and the runner commits the pass — here, before
 			// the Verifier reads the tree, so a pass's edits are judged by the same

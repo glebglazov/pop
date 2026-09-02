@@ -73,7 +73,7 @@ func TestMonitorTopScrollEdgeRidesTheHeader(t *testing.T) {
 
 // TestMonitorSelectionTabMarks pins tab's whole outcome: the pane is marked, its
 // row moves into the reserved region at the foot, exactly once, and the cursor
-// lands on the row that followed it (ADR-0246 decisions 3 and 8).
+// lands on the row that followed it (ADR-0254 decisions 3 and 8).
 func TestMonitorSelectionTabMarks(t *testing.T) {
 	t.Run("the cursored pane moves to the foot and the cursor moves on", func(t *testing.T) {
 		d := newMonitorDashboard(selectionPanes(4), AttentionCallbacks{})

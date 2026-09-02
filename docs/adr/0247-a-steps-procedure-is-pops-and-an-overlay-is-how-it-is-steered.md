@@ -72,7 +72,7 @@ own advice. The mechanism is built generally enough that a second seam is a line
   only ever forced by `refine` staying a kind.
 - The **Convention kind** set stays four: `implementation`, `commits`,
   `issue-tracker`, `verification`.
-- **ADR-0240 decision 3's guarantee changes form.** "Fixes are human-directed
+- **ADR-0252 decision 3's guarantee changes form.** "Fixes are human-directed
   because the convention is the human's prose" no longer holds as written, since
   the licence is now pop's. It survives in substance: *what counts as a problem*
   comes entirely from `implementation.md`, which is the human's and the team's, and

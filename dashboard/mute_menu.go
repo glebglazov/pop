@@ -203,7 +203,7 @@ func newDashboardMuteMenu(td *tasks.Deps, row DashboardRow, clearable bool) *das
 // muteMenuClearable reports whether the Mute menu opened over rows offers the
 // clear entry: every target must carry a mute. Over one row that is the
 // eligibility the Run menu expressed by omitting unmute; over a Selection it
-// is the same intersection every plural verb answers to (ADR-0246) — one `u`
+// is the same intersection every plural verb answers to (ADR-0254) — one `u`
 // that cleared some of the marked rows would be a partial answer.
 func muteMenuClearable(rows []DashboardRow) bool {
 	if len(rows) == 0 {

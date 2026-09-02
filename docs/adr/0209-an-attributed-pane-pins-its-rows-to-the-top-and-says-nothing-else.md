@@ -73,7 +73,7 @@ pin is a starting position, not a frame.
 live filter query is not pinned, and pinning never widens either. This is ADR-0201's "a launch
 does not get to overrule a deliberate preset", unchanged.
 
-[ADR-0246](0246-a-selection-is-a-human-mark-that-outranks-a-preset-and-turns-verbs-plural.md)
+[ADR-0254](0254-a-selection-is-a-human-mark-that-outranks-a-preset-and-turns-verbs-plural.md)
 amends this for the human's own mark: a marked row is exempt from both narrowings. The clause
 constrains pop's inference, and `tab` is not a guess. Pinning is inference, so it still yields.
 

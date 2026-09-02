@@ -233,7 +233,7 @@ include_refine_convention = true
 	}
 }
 
-// TestLoadWorkRefineSettings pins the [work.refine] group (ADR-0240): three keys
+// TestLoadWorkRefineSettings pins the [work.refine] group (ADR-0252): three keys
 // and no more, disabled unless the human says otherwise, and an omitted agents
 // list left empty so resolution falls through to [work.implement].agents.
 func TestLoadWorkRefineSettings(t *testing.T) {

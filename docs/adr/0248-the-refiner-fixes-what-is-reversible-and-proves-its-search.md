@@ -1,6 +1,6 @@
 # The Refiner fixes what is reversible, and proves its search
 
-[ADR-0240](0240-refine-fixes-in-place-before-the-verify-phase.md) gave the
+[ADR-0252](0252-refine-fixes-in-place-before-the-verify-phase.md) gave the
 **Refiner** a licence to fix "safe, local, convention-named" changes, and
 `refiner.tmpl.md` spelled that out as: anything structural is report-only. In
 practice that licenses almost nothing, and it is backwards from the argument it
@@ -47,7 +47,7 @@ caution. Everything in it is prose in `tasks/prompts/refiner.tmpl.md`
 
 6. **A revealed finding is stated once and never carried forward.** The report is a
    living document, but a revealed finding can never be fixed by a later pass, so
-   carrying it forward turns the report into a backlog — the exact noise ADR-0240
+   carrying it forward turns the report into a backlog — the exact noise ADR-0252
    refused. Prior reports stay on disk under the set's directory, so nothing is
    destroyed, only unpointed. Every out-of-set finding names its refactoring, so it
    is executable rather than advice, and is admissible only when the changeset is
@@ -61,7 +61,7 @@ caution. Everything in it is prose in `tasks/prompts/refiner.tmpl.md`
    different decisions a reader is making at merge time: one block is about this
    work, the other about the codebase.
 
-8. **No task spawning.** ADR-0240's rejection stands. The human reads the report and
+8. **No task spawning.** ADR-0252's rejection stands. The human reads the report and
    acts.
 
 ## Gates and tests
@@ -70,9 +70,9 @@ caution. Everything in it is prose in `tasks/prompts/refiner.tmpl.md`
    `pop conventions get verification` itself rather than being handed a block —
    that kind is role-driving, so inlining it would re-create the wart ADR-0246
    removes, while *fetching* claims no shape and is precedented by `issue-tracker`
-   and by ADR-0240's own Assist hint. A red gate on entry means the pass fixes
+   and by ADR-0252's own Assist hint. A red gate on entry means the pass fixes
    nothing and reports. The after-run is what makes the widened licence safe. This
-   is a *scoped* gate, not the whole-tree one ADR-0240 declined to re-run.
+   is a *scoped* gate, not the whole-tree one ADR-0252 declined to re-run.
 
 10. **A red gate on exit abandons the pass, and pop discards its changes.** After
     one bounded self-correction attempt, the Refiner reports the outcome and pop
@@ -137,7 +137,7 @@ caution. Everything in it is prose in `tasks/prompts/refiner.tmpl.md`
 - **"A refactor changes no test file" survives only as a report line, not as a
   gate.** Decision 11 writes test files by construction. Three traditions converge
   on the rule and it stays worth stating; it stops being checkable.
-- **Refine becomes the heaviest step in the drain.** Accepted: ADR-0240's carve-out
+- **Refine becomes the heaviest step in the drain.** Accepted: ADR-0252's carve-out
   already keeps it off remediation laps, and decision 15 keeps a red gate from
   costing an agent invocation.
 - **Commit-splitting is dropped from the text entirely.** Neither consumer can

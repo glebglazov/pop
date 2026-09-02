@@ -1,13 +1,13 @@
 # The implementation convention is the standard both builder and Refiner read
 
-[ADR-0240](0240-refine-fixes-in-place-before-the-verify-phase.md) made the shipped
+[ADR-0252](0252-refine-fixes-in-place-before-the-verify-phase.md) made the shipped
 `refine` convention serve two consumers: the **Refiner**'s whole mandate, and a
 labelled block inlined into every implement prompt under
 `[work.implement].include_refine_convention`. One text answering to two readers
 is what made that text impossible to write well — every line had to earn its
 place in a prompt about *judging* a changeset and in a prompt about *writing*
 one, and the half that says what a pass may fix rode uselessly into every
-implement prompt. This ADR retires that consequence. ADR-0240's central ruling
+implement prompt. This ADR retires that consequence. ADR-0252's central ruling
 is untouched: refine writes, and it runs before verify.
 
 A new **Convention kind** `implementation` holds what good code looks like in
@@ -37,7 +37,7 @@ The decision, in four parts:
    author and a judge can both act on.
 
 3. **The Refiner carries it unconditionally; the implementer opts in.** The
-   toggle's default stays `false`, unchanged from ADR-0240, so the steady state is
+   toggle's default stays `false`, unchanged from ADR-0252, so the steady state is
    that the implementer never sees the standard and the Refiner holds the work to
    it anyway. That asymmetry is deliberate rather than an accident of which config
    table the key sits in: refine exists to catch what the implementer did not do,
@@ -70,11 +70,11 @@ The decision, in four parts:
   the general habit: **a silently-ignored key gets a rename pointer; a mistyped
   CLI name gets the plain refusal**, because the first loses behaviour without a
   signal and the second is already loud and interactive.
-- ADR-0240's **"one text, two consumers"** consequence is retired, and with it the
+- ADR-0252's **"one text, two consumers"** consequence is retired, and with it the
   constraint that the shipped text stay short enough to ride every implement
-  prompt. ADR-0240's other half survives: a repository that writes a long document
+  prompt. ADR-0252's other half survives: a repository that writes a long document
   pays that length in its own prompts, its choice.
-- **The Assist hint follows the kind.** ADR-0240's one line in the Assist prompt
+- **The Assist hint follows the kind.** ADR-0252's one line in the Assist prompt
   becomes `pop conventions get implementation`.
 - pop writes no repository-rank `docs/agents/implementation.md` of its own. The
   shipped answer is the artifact under test and pop is the only repository

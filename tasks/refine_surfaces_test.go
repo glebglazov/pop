@@ -9,7 +9,7 @@ import (
 )
 
 // refineProse is the one string no surface may print: the document's body. Every
-// surface carries a pointer to it and nothing else (ADR-0240).
+// surface carries a pointer to it and nothing else (ADR-0252).
 const refineProse = "SECRET-REFINE-PROSE"
 
 // seedRefineReport files one Refine report for the fixture set, as the
@@ -270,7 +270,7 @@ func TestRefineStalenessNeedsBothCommits(t *testing.T) {
 	}
 }
 
-// TestAssistPromptPointsAtTheImplementationConvention pins the Assist hint (ADR-0240):
+// TestAssistPromptPointsAtTheImplementationConvention pins the Assist hint (ADR-0252):
 // the session is told where the standard is written, and told that running the
 // pass itself is not its business — the Refiner commits, and an attended session
 // leaves committing to the human.

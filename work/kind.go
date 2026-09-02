@@ -414,7 +414,7 @@ type Action struct {
 	Label string
 	// Modes is the set of surface modes this verb works in. The zero value is
 	// Singular, so a kind that declares nothing offers a verb that acts on the one
-	// container it was invoked over (ADR-0246 decision 5).
+	// container it was invoked over (ADR-0254 decision 5).
 	Modes ActionModes
 }
 

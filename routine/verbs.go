@@ -63,7 +63,7 @@ const noReportMessage = "no report to copy"
 // Neither copy verb is here. What a Routine can be copied as is its CopyActions,
 // reached from the row list rather than from inside this list (decision 6).
 //
-// Capability audit (ADR-0246 decision 5). Nothing here is plural: fire, preview,
+// Capability audit (ADR-0254 decision 5). Nothing here is plural: fire, preview,
 // edit and refine each hand the operator to a pane; the pause pair is one bit per
 // Routine, so a mixed set has no single direction to drive; runs opens one
 // history; and handoff names one Routine's text, which the surface has nowhere to
@@ -101,7 +101,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 // simply omits the line (ADR-0236 decision 6).
 //
 // Only copy-name is plural: two Routines' reports have nowhere to go together
-// (ADR-0246 decision 5).
+// (ADR-0254 decision 5).
 func (k *Kind) CopyActions(c work.Container) []work.Action {
 	actions := []work.Action{{Verb: work.VerbCopyName, Key: "n", Label: "copy name", Modes: work.Plural}}
 	if c.RoutineLastReport != "" {
@@ -122,7 +122,7 @@ func (k *Kind) StatusActions(c work.Container) []work.Action { return nil }
 // act on: what a reader wants from it is where its report is — the same
 // copy-report-path verb the row offers over the newest run — and its name. Both
 // are singular, like every item verb: a Selection marks containers, and
-// item-level bulk is out of scope by decision (ADR-0246).
+// item-level bulk is out of scope by decision (ADR-0254).
 func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	if item.File != "" {

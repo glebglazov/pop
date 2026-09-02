@@ -1,6 +1,6 @@
 ---
 status: accepted
-relates: "supersedes decision 3 of [ADR-0246](0246-a-selection-is-a-human-mark-that-outranks-a-preset-and-turns-verbs-plural.md) on where the Selection area sits, restores [ADR-0209](0209-an-attributed-pane-pins-its-rows-to-the-top-and-says-nothing-else.md)'s Pane pin to an uncontested head, and moves the action menu onto the reserved-block mechanism [ADR-0197](0197-work-view-presets-replace-the-inclusion-toggles.md) decision 9 built for the preset menu"
+relates: "supersedes decision 3 of [ADR-0254](0254-a-selection-is-a-human-mark-that-outranks-a-preset-and-turns-verbs-plural.md) on where the Selection area sits, restores [ADR-0209](0209-an-attributed-pane-pins-its-rows-to-the-top-and-says-nothing-else.md)'s Pane pin to an uncontested head, and moves the action menu onto the reserved-block mechanism [ADR-0197](0197-work-view-presets-replace-the-inclusion-toggles.md) decision 9 built for the preset menu"
 ---
 
 # The Selection area sits at the foot, and every menu is bottom chrome
@@ -13,7 +13,7 @@ boundary hides rows.
 
 ## Context
 
-ADR-0246 put the **Selection area** at the head because that is where a reserved region
+ADR-0254 put the **Selection area** at the head because that is where a reserved region
 had to go — `ui.List` supports exactly one region and only at the head (`ui/list.go`
 `regionLayout`). The placement was inherited from the mechanism, not chosen.
 
@@ -52,7 +52,7 @@ Everything else about the area is unchanged — the exemption from presets and s
 never landing there by default. Only the direction the region grows in is new.
 
 **2. The Pane pin is uncontested at the head again.** ADR-0209 pins attributed rows first;
-ADR-0246 then put the Selection area above them. With the area at the foot, the head of the
+ADR-0254 then put the Selection area above them. With the area at the foot, the head of the
 list means one thing — *which of these is me* — which is an arrival question, answered where
 the eye already starts.
 
@@ -114,7 +114,7 @@ reach it.
 
 **Drop the region entirely and mark rows in place.** The literal reading of "a divider
 between selected and unselected". Rejected: the region is what makes a mark exempt from
-hiding (ADR-0246 decision 2), and without it a marked row can be hidden by a preset or
+hiding (ADR-0254 decision 2), and without it a marked row can be hidden by a preset or
 search, which resurrects the *selected but invisible* state and every count and phrasing
 that decision deleted.
 

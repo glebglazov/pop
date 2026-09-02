@@ -16,7 +16,7 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// The Work dashboard's plural verbs (ADR-0246 decisions 5, 6 and 7): what the
+// The Work dashboard's plural verbs (ADR-0254 decisions 5, 6 and 7): what the
 // menus offer over a Selection, what a bulk run writes, and what is left marked
 // afterwards. Every test drives the keys, because a mode is only worth anything
 // if the keyboard behaves.
@@ -539,7 +539,7 @@ func TestWorkBulkMenuRefusesASingularVerbsHotkey(t *testing.T) {
 
 // Mute is the one plural verb whose modal takes input: the window is picked
 // once, in the surface's own menu, and answers identically for every marked
-// row (ADR-0246 decision 5).
+// row (ADR-0254 decision 5).
 func TestWorkBulkMuteAppliesOneWindowToEveryRow(t *testing.T) {
 	m, k := setDashboard(t, "set-a", "set-b")
 	m = bulkPress(t, m, selKeyTab())

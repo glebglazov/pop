@@ -209,7 +209,7 @@ func TestAgentPromptGoldens(t *testing.T) {
 // goldenImplementationConvention stands in for what the `implementation`
 // Convention stack renders: labelled blocks and a provenance line, and no
 // Read-whole notice — that notice belongs to the command paths a human reads
-// (ADR-0230).
+// (ADR-0250).
 const goldenImplementationConvention = `----- ANSWER: SHIPPED (pop's own) -----
 conventions/shipped/implementation.md
 

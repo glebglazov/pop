@@ -10,7 +10,7 @@ import (
 // refinerFrameHalves are the things pop owns in the Refiner's prompt that no
 // rank of the `implementation` convention may displace (ADR-0246/0247): the
 // Role preamble — including the fix licence and its limit, which is what makes
-// Refine a writing step (ADR-0240) — and the output expectation behind it,
+// Refine a writing step (ADR-0252) — and the output expectation behind it,
 // whose no-verdict rule and Fixed / Left / Revealed split are the report's
 // whole shape (ADR-0248).
 var refinerFrameHalves = []string{
