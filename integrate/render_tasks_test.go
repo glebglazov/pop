@@ -10,7 +10,8 @@ import (
 // SKILL.md body.
 var taskSkillDirs = map[string][]string{
 	"pop-grilling":                 {},
-	"pop-grill-with-docs":          {},
+	"pop-grill-with-docs":          {"GRILL-SESSION.md"},
+	"pop-grill-with-docs-fast":     {"GRILL-SESSION.md"},
 	"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-consolidate":        {},
 	"pop-domain-modeling":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
@@ -29,7 +30,11 @@ var taskSkillDirs = map[string][]string{
 func companionSource(base, name string) string {
 	for _, shared := range sharedSkillDocs[base] {
 		if shared == name {
-			return sharedDocSource(name)
+			src, err := sharedDocSource(name)
+			if err != nil {
+				panic(err)
+			}
+			return src
 		}
 	}
 	return "skills/pop/" + base + "/" + name
@@ -38,8 +43,9 @@ func companionSource(base, name string) string {
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
 // each agent that hosts skills as directories (claude, codex, pi, cursor,
 // opencode): one directory per skill, each with a name-injected SKILL.md, and
-// domain-modeling, grill-with-map and prototype carrying companion documents
-// with cross-skill references rewritten alongside the body.
+// domain-modeling, the two grilling composers, grill-with-map and prototype
+// carrying companion documents with cross-skill references rewritten alongside
+// the body.
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
 	t.Parallel()
 	baseNames := fileBasedSkillBaseNames()
@@ -163,12 +169,14 @@ func TestRenderTaskSkillsBodyRewritesCrossSkillReferences(t *testing.T) {
 		}
 	}
 
-	grill := string(tree["pop-grill-with-docs/SKILL.md"])
-	if !strings.Contains(grill, "pop-grill-consolidate") {
-		t.Errorf("grill-with-docs body missing rewritten pop-grill-consolidate reference")
+	// The reference moved into the document both composers share, and a
+	// companion is rewritten exactly as a body is.
+	session := string(tree["pop-grill-with-docs/GRILL-SESSION.md"])
+	if !strings.Contains(session, "pop-grill-consolidate") {
+		t.Errorf("GRILL-SESSION.md missing rewritten pop-grill-consolidate reference")
 	}
-	if strings.Contains(grill, "`grill-consolidate`") {
-		t.Errorf("grill-with-docs body still has bare `grill-consolidate` reference")
+	if strings.Contains(session, "`grill-consolidate`") {
+		t.Errorf("GRILL-SESSION.md still has bare `grill-consolidate` reference")
 	}
 }
 
@@ -226,8 +234,8 @@ func TestRenderTaskSkillsCustomPrefixRewritesReferences(t *testing.T) {
 		}
 	}
 
-	grill := string(tree["x-grill-with-docs/SKILL.md"])
-	if !strings.Contains(grill, "x-grill-consolidate") {
-		t.Errorf("grill-with-docs body missing rewritten x-grill-consolidate reference")
+	session := string(tree["x-grill-with-docs/GRILL-SESSION.md"])
+	if !strings.Contains(session, "x-grill-consolidate") {
+		t.Errorf("GRILL-SESSION.md missing rewritten x-grill-consolidate reference")
 	}
 }

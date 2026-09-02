@@ -108,7 +108,10 @@ func TestDomainModelingOverlayCarriesPopBehaviour(t *testing.T) {
 func TestDomainModelingOwnsFormatCompanions(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"CONTEXT-FORMAT.md", "ADR-FORMAT.md"} {
-		if got := sharedDocSource(name); got != domainModelingSource+"/"+name {
+		got, err := sharedDocSource(name)
+		if err != nil {
+			t.Errorf("sharedDocSource(%s): %v", name, err)
+		} else if got != domainModelingSource+"/"+name {
 			t.Errorf("sharedDocSource(%s) = %q, want it under %s", name, got, domainModelingSource)
 		}
 		if _, err := skillFiles.ReadFile(domainModelingSource + "/" + name); err != nil {
@@ -129,13 +132,14 @@ func TestDomainModelingOwnsFormatCompanions(t *testing.T) {
 	}
 	for base, docs := range sharedSkillDocs {
 		for _, name := range docs {
-			owner := tree["pop-domain-modeling/"+name]
+			ownerBase := strings.TrimPrefix(sharedSkillDocOwners[name], "skills/pop/")
+			owner := tree["pop-"+ownerBase+"/"+name]
 			got := tree["pop-"+base+"/"+name]
 			if len(owner) == 0 {
-				t.Fatalf("owner did not render %s", name)
+				t.Fatalf("owner %s did not render %s", ownerBase, name)
 			}
 			if string(got) != string(owner) {
-				t.Errorf("pop-%s/%s differs from the canonical copy domain-modeling owns", base, name)
+				t.Errorf("pop-%s/%s differs from the canonical copy %s owns", base, name, ownerBase)
 			}
 		}
 	}

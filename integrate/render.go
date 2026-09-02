@@ -122,7 +122,10 @@ func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string, bas
 // links resolve without knowing which skill owns the original.
 func renderSharedSkillDocs(tree map[string][]byte, prefix, base, skillName string, baseNames []string) error {
 	for _, name := range sharedSkillDocs[base] {
-		src := sharedDocSource(name)
+		src, err := sharedDocSource(name)
+		if err != nil {
+			return err
+		}
 		data, err := skillFiles.ReadFile(src)
 		if err != nil {
 			return fmt.Errorf("failed to read embedded shared skill doc %s: %w", src, err)

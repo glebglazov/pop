@@ -147,6 +147,7 @@ func TestCatalog_TaskSkillsSources(t *testing.T) {
 	want := []string{
 		"skills/pop/grilling",
 		"skills/pop/grill-with-docs",
+		"skills/pop/grill-with-docs-fast",
 		"skills/pop/grill-with-map",
 		"skills/pop/grill-consolidate",
 		"skills/pop/domain-modeling",

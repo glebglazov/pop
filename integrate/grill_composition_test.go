@@ -16,6 +16,16 @@ func embeddedSkillBody(t *testing.T, base string) string {
 	return string(body)
 }
 
+// embeddedSharedDoc returns one embedded companion of a skill directory.
+func embeddedSharedDoc(t *testing.T, base, name string) string {
+	t.Helper()
+	body, err := skillFiles.ReadFile("skills/pop/" + base + "/" + name)
+	if err != nil {
+		t.Fatalf("read embedded %s/%s: %v", base, name, err)
+	}
+	return string(body)
+}
+
 // renderedTaskSkills renders the task-skills component for one agent at one
 // prefix, keyed by rendered path.
 func renderedTaskSkills(t *testing.T, agent, prefix string) map[string][]byte {
@@ -87,7 +97,10 @@ func TestGrillWithDocsComposesGrillingAndDomainModeling(t *testing.T) {
 		t.Error("grill-with-docs owns the commit and must stay human-opened")
 	}
 	if _, ok := sharedSkillDocs["grill-with-docs"]; ok {
-		t.Error("grill-with-docs must own no copy of the format documents")
+		t.Error("grill-with-docs receives no document: it owns GRILL-SESSION.md and holds no format-document copy")
+	}
+	if owner := sharedSkillDocOwners["GRILL-SESSION.md"]; owner != "skills/pop/grill-with-docs" {
+		t.Errorf("GRILL-SESSION.md owner = %q, want grill-with-docs", owner)
 	}
 	if _, pinned := overlayPinnedFiles["skills/pop/grill-with-docs/SKILL.md"]; pinned {
 		t.Error("a composer inlines no upstream region, so it has no drift pin")
@@ -105,7 +118,10 @@ func TestGrillWithDocsComposesGrillingAndDomainModeling(t *testing.T) {
 		}
 	}
 	// Pop's own behaviour: the round-close beat, one fact-finding activity, and
-	// a commit of exactly this session's paths.
+	// a commit of exactly this session's paths. All three live in the document
+	// this skill owns rather than in its body (ADR-0253 decision 6), so the fast
+	// sibling follows the same words instead of a second copy of them.
+	session := embeddedSharedDoc(t, "grill-with-docs", "GRILL-SESSION.md")
 	for _, want := range []string{
 		"Write once a round, not per term",
 		"skip rounds that settled nothing",
@@ -113,9 +129,15 @@ func TestGrillWithDocsComposesGrillingAndDomainModeling(t *testing.T) {
 		"never `git add -A`",
 		"Stage exactly those paths",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("grill-with-docs lost its own behaviour %q", want)
+		if !strings.Contains(session, want) {
+			t.Errorf("GRILL-SESSION.md lost the shared behaviour %q", want)
 		}
+		if strings.Contains(body, want) {
+			t.Errorf("grill-with-docs body keeps a second copy of %q", want)
+		}
+	}
+	if !strings.Contains(body, "(./GRILL-SESSION.md)") {
+		t.Error("grill-with-docs does not send the session to the document it owns")
 	}
 
 	for _, prefix := range []string{"pop-", "", "x-"} {
@@ -127,9 +149,86 @@ func TestGrillWithDocsComposesGrillingAndDomainModeling(t *testing.T) {
 			}
 		}
 		for key := range tree {
-			if strings.HasPrefix(key, prefix+"grill-with-docs/") && key != prefix+"grill-with-docs/SKILL.md" {
+			if !strings.HasPrefix(key, prefix+"grill-with-docs/") {
+				continue
+			}
+			switch key {
+			case prefix + "grill-with-docs/SKILL.md", prefix + "grill-with-docs/GRILL-SESSION.md":
+			default:
 				t.Errorf("grill-with-docs installs an unexpected companion %s", key)
 			}
+		}
+	}
+}
+
+// TestGrillWithDocsFastIsTheDeltaOnly pins ADR-0253. The fast pass is its
+// sibling's session conducted differently, so its body may carry only what
+// differs — the marked override, the two-part ask test, the round budget, the
+// ledger — and must reach every shared rule through the document it receives
+// rather than a copy of its own.
+func TestGrillWithDocsFastIsTheDeltaOnly(t *testing.T) {
+	t.Parallel()
+	body := embeddedSkillBody(t, "grill-with-docs-fast")
+
+	if !strings.Contains(frontmatterOf(t, body), "disable-model-invocation: true") {
+		t.Error("grill-with-docs-fast commits to the repository and must stay human-opened")
+	}
+	if _, pinned := overlayPinnedFiles["skills/pop/grill-with-docs-fast/SKILL.md"]; pinned {
+		t.Error("a composer inlines no upstream region, so it has no drift pin")
+	}
+	if got := sharedSkillDocs["grill-with-docs-fast"]; len(got) != 1 || got[0] != "GRILL-SESSION.md" {
+		t.Errorf("grill-with-docs-fast receives %v, want just GRILL-SESSION.md", got)
+	}
+
+	// It composes rather than inlines, exactly as its sibling does.
+	for _, inlined := range []string{"### Update CONTEXT.md inline", "### Offer ADRs sparingly", "POP OVERLAY"} {
+		if strings.Contains(body, inlined) {
+			t.Errorf("grill-with-docs-fast inlines %q instead of loading the skill that owns it", inlined)
+		}
+	}
+	// The shared rules reach it as a document, never as a second copy.
+	for _, copied := range []string{
+		"Write once a round, not per term",
+		"never `git add -A`",
+		"Stage exactly those paths",
+	} {
+		if strings.Contains(body, copied) {
+			t.Errorf("grill-with-docs-fast carries its own copy of the shared rule %q", copied)
+		}
+	}
+	if !strings.Contains(body, "(./GRILL-SESSION.md)") {
+		t.Error("grill-with-docs-fast does not reach the shared rules it receives")
+	}
+
+	// Its own delta, including the marked override of the primitive it loads.
+	for _, want := range []string{
+		"Override (negates",
+		"Reversibility is deliberately **not** a criterion",
+		"never a refusal",
+		"Decided without asking:",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("grill-with-docs-fast lost its own behaviour %q", want)
+		}
+	}
+
+	for _, prefix := range []string{"pop-", "", "x-"} {
+		tree := renderedTaskSkills(t, "claude", prefix)
+		name := prefix + "grill-with-docs-fast"
+		rendered := string(tree[name+"/SKILL.md"])
+		for _, base := range []string{"grilling", "domain-modeling"} {
+			if !strings.Contains(rendered, "the `"+prefix+base+"` skill") {
+				t.Errorf("at prefix %q grill-with-docs-fast does not load the resolved `%s` skill", prefix, prefix+base)
+			}
+		}
+		// The installed copy is the owner's bytes, so the two composers cannot
+		// drift apart on a machine.
+		got, ok := tree[name+"/GRILL-SESSION.md"]
+		if !ok {
+			t.Fatalf("%s is missing GRILL-SESSION.md", name)
+		}
+		if owner := tree[prefix+"grill-with-docs/GRILL-SESSION.md"]; string(got) != string(owner) {
+			t.Errorf("%s's GRILL-SESSION.md is not the copy grill-with-docs owns", name)
 		}
 	}
 }

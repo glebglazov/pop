@@ -51,7 +51,7 @@ func taskAgents() []taskAgent {
 
 // taskSkillNames is the set of skill directory names the task-skills
 // component installs.
-var taskSkillNames = []string{"pop-grilling", "pop-grill-with-docs", "pop-grill-with-map", "pop-grill-consolidate", "pop-domain-modeling", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
+var taskSkillNames = []string{"pop-grilling", "pop-grill-with-docs", "pop-grill-with-docs-fast", "pop-grill-with-map", "pop-grill-consolidate", "pop-domain-modeling", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, codex,
 // pi, and cursor: every planning skill lands as a render tree under the data

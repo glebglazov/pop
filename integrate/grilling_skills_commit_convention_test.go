@@ -6,17 +6,19 @@ import (
 	"testing"
 )
 
-// grillWithDocsCommitSection is grill-with-docs' closing-commit subject step.
+// grillWithDocsCommitSection is the closing-commit subject step both grilling
+// composers follow. It lives in the document grill-with-docs owns rather than in
+// its body (ADR-0253 decision 6), so pinning it here covers the fast sibling too.
 func grillWithDocsCommitSection(t *testing.T) string {
 	t.Helper()
-	body, err := skillFiles.ReadFile("skills/pop/grill-with-docs/SKILL.md")
+	body, err := skillFiles.ReadFile("skills/pop/grill-with-docs/GRILL-SESSION.md")
 	if err != nil {
-		t.Fatalf("read embedded grill-with-docs skill: %v", err)
+		t.Fatalf("read embedded GRILL-SESSION.md: %v", err)
 	}
 	section := string(body)
 	idx := strings.Index(section, "Before writing the subject")
 	if idx < 0 {
-		t.Fatal("grill-with-docs skill lost its closing-commit subject step")
+		t.Fatal("GRILL-SESSION.md lost its closing-commit subject step")
 	}
 	return section[idx:]
 }
