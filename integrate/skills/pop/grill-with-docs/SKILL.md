@@ -8,10 +8,10 @@ disable-model-invocation: true
 No upstream base, so no drift pin and no verbatim region: this file is
 pop-original composition (ADR-0225 decision 4). Upstream reaches the same
 session by loading two skills together, and this file is that composition plus
-the three things that are pop's alone — the round-close beat for glossary
-writes, one fact-finding activity, and the closing commit.
+what is pop's alone — the round-close beat for glossary
+writes, one fact-finding activity, and the close.
 
-Those three now live in `GRILL-SESSION.md` beside this file rather than in this
+Those rules now live in `GRILL-SESSION.md` beside this file rather than in this
 body (ADR-0253 decision 6), because `grill-with-docs-fast` follows them
 identically and cannot load them: this skill is human-opened, and a
 `disable-model-invocation` skill cannot be loaded by another skill. This skill
@@ -51,10 +51,10 @@ criteria all hold.
 
 Read both before the first round.
 
-## Then follow this session's own three rules
+## Then follow this session's own rules
 
 They are in [GRILL-SESSION.md](./GRILL-SESSION.md), which this skill owns: the
 round-close beat for glossary writes, fact-finding as one activity, and the
-commit that closes the session. Read it before the first round too — the beat
+close — the commit, then the ask for what to do with the settled plan. Read it before the first round too — the beat
 governs round one — and follow it as written. Nothing in it repeats a rule
 either loaded skill already carries, and this body adds nothing to it.

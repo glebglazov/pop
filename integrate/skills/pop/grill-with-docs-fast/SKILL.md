@@ -25,6 +25,12 @@ one to open.
 The override below is marked, in the shape of `domain-modeling`'s single-writer
 override, because it contradicts a rule in the interview primitive this skill
 loads. An unmarked one would read as a skill ignoring the skill it loads.
+
+The clause bounding that override to *who answers* is the one thing this body
+holds that its sibling does not need (ADR-0257). Only this body negates
+`grilling`'s "put each to them and wait", so only this body has to say how far
+the negation reaches; the close-time ask it points at is shared, and lives in
+`GRILL-SESSION.md` with the rest of the close.
 -->
 
 # Grill with docs, fast pass
@@ -69,6 +75,19 @@ to reuse, where a test goes, how an error reads, file placement — is a
 already decided; a question with a foregone answer costs the user a turn and
 buys nothing.
 
+### The override reaches who answers, never whether the work starts
+
+This session's product is a settled plan and its artifacts. Starting the
+implementation is the user's word, asked for at `GRILL-SESSION.md`'s close — and
+never a fast-pass decision, however settled the design looks, which a one-round
+session feels early.
+
+An imperative in the opening message is the **subject** of the grilling, not the
+licence to act on it: "investigate and fix X" means grill X, settle it, commit
+it, and ask at the close. Investigate as far as fact-finding takes you — read
+and search anything — and write only this session's own artifacts: glossary
+fragments, ADRs, and a prototype when a frontier question genuinely needs one.
+
 ## Report every decision you make
 
 Each round, print the fast-pass decisions **before** that round's questions, so
@@ -79,8 +98,7 @@ an override costs no extra turn — the user answers and overrides in one messag
 - **<the call>** → <what you chose>. *(Rejected: <the alternative>. <one clause of why>.)*
 ```
 
-An override is the user's word against yours and wins without argument. At the
-close, restate the whole ledger once, so the settled state is in one place.
+An override is the user's word against yours and wins without argument.
 
 ## One round, and an escape valve that never blocks
 
@@ -103,13 +121,19 @@ answer passes both tests above. Otherwise the scenario and its resolution go in
 the ledger. A fast pass that skipped the sharpening would forfeit the reason it
 loads the discipline at all.
 
-## One addition to the close
+## Two additions to the close
 
-Follow `GRILL-SESSION.md`'s closing commit exactly, with one thing added at its
-subject step: **write the session's full fast-pass ledger into the commit body**,
-under a `Decided without asking:` heading, one short line per call. The
-resolved commit convention still governs the grammar of the whole message,
-heading included — if it has no room for such a section, it wins.
+Follow `GRILL-SESSION.md`'s close exactly — its commit, then its ask for what to
+do with the settled plan — with the ledger added in two places.
+
+**As its own block, ahead of the ask.** Restate the whole session's ledger under
+the same `⚡ **Fast-pass decisions I made for you**` heading, every call and not
+just the last round's, so the user answers the ask with that list in front of
+them and an override still costs no extra turn.
+
+**In the commit body**, under a `Decided without asking:` heading, one short line
+per call. The resolved commit convention governs the grammar of the whole
+message, heading included — if it has no room for such a section, it wins.
 
 The ledger is persisted because a fast pass leaves fewer answers in the
 transcript than an ordinary grilling does, and the reasoning has to survive into

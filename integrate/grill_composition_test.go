@@ -128,6 +128,7 @@ func TestGrillWithDocsComposesGrillingAndDomainModeling(t *testing.T) {
 		"the same\nactivity",
 		"never `git add -A`",
 		"Stage exactly those paths",
+		"Ask what happens next, and wait",
 	} {
 		if !strings.Contains(session, want) {
 			t.Errorf("GRILL-SESSION.md lost the shared behaviour %q", want)
@@ -206,6 +207,10 @@ func TestGrillWithDocsFastIsTheDeltaOnly(t *testing.T) {
 		"Reversibility is deliberately **not** a criterion",
 		"never a refusal",
 		"Decided without asking:",
+		// ADR-0257 decisions 1-3: the negation is bounded, beside the override
+		// it bounds, and its sibling needs no copy of the bound.
+		"never whether the work starts",
+		"not the\nlicence to act on it",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("grill-with-docs-fast lost its own behaviour %q", want)

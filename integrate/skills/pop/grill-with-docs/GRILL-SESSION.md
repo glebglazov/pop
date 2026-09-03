@@ -2,10 +2,10 @@
 No upstream base, so no drift pin and no verbatim region: this document is
 pop-original (ADR-0253 decision 6). It holds every rule the two grilling
 composers follow identically — the round-close beat for glossary writes, one
-fact-finding activity, and the closing commit — so each of their bodies is only
-what differs.
+fact-finding activity, and the close, which is a commit and then a hand-off ask
+— so each of their bodies is only what differs.
 
-`grill-with-docs` owns it, because these three rules were its own before the
+`grill-with-docs` owns it, because these rules were its own before the
 fast sibling existed. Integration copies it into `grill-with-docs-fast` at
 install time (`sharedSkillDocs` in integrate/catalog.go), so both bodies reach
 it as `./GRILL-SESSION.md` wherever they are installed.
@@ -20,7 +20,7 @@ verbatim is a document; only a session shape is a skill.
 # The grilling session's own rules
 
 Both grilling composers load the same two skills — `grilling` for the interview
-and `domain-modeling` for the model. These three rules are what the session adds
+and `domain-modeling` for the model. The rules below are what the session adds
 on top of them. Nothing here repeats a rule either skill already carries.
 
 ## Glossary writes ride the round
@@ -73,5 +73,9 @@ To commit:
    `sed -n` or `grep`, since a prefix read drops rules you are still bound by;
    the output's first line says how many lines to read. The `type` still follows content (docs-only vs. mixed), as above.
 4. **Report.** After committing, show the user the exact files staged and the commit subject. Separately, report any dirty files this session did *not* touch as "left alone — not staged" so nothing is silently swept or split.
-
-After the commit, the plan is settled and persisted; the user will typically move on to a separate step (such as `to-tasks`) themselves.
+5. **Ask what happens next, and wait.** The plan is settled and persisted; what to
+   do with it is the user's word, never an inference from how settled the design
+   looks. Ask which of two things to do — implement it now in this session, or
+   leave it for a separate step (`to-tasks` is the usual one) — and wait for the
+   answer. Either answer is an instruction this session then carries out, and
+   "now" means implement it here, where the grilled context still lives.
