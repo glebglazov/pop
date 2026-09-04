@@ -135,16 +135,17 @@ func resolveGateRefineState(d *Deps, cfg *config.Config, m *Manifest) gateRefine
 // standard was never applied to, and because a set whose pass died looked, until
 // now, exactly like one that was refined and found clean.
 func gateRefinePreamble(refine gateRefineState) []string {
-	phrase := refineMarkPhrase(refine.Resolution)
-	switch {
-	case phrase == "" && !refine.HasReport:
-		return nil
-	case phrase == "":
-		return []string{"📝 " + refine.Pointer.Summary()}
-	case !refine.HasReport:
-		return []string{"📝 " + phrase}
+	var parts []string
+	if phrase := refineMarkPhrase(refine.Resolution); phrase != "" {
+		parts = append(parts, phrase)
 	}
-	return []string{"📝 " + phrase + " · " + refine.Pointer.Summary()}
+	if refine.HasReport {
+		parts = append(parts, refine.Pointer.Summary())
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return []string{"📝 " + strings.Join(parts, " · ")}
 }
 
 // gateRefineEntryDetails is what the paging entry says under its label: the
