@@ -396,7 +396,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 		add(hitlGateReverify, "Re-verify (re-run the Verifier against the current work)")
 	}
 	if refine.HasReport {
-		add(hitlGateReadRefine, "Read the refine report (no agent runs)", refine.Pointer.Path)
+		add(hitlGateReadRefine, "Read the refine report (no agent runs)", gateRefineEntryDetails(refine)...)
 	}
 	if hasVerify {
 		add(hitlGateReadVerify, "Read the verify report (no agent runs)", verify.Path)

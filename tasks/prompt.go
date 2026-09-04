@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/prompt"
 )
 
@@ -522,10 +523,10 @@ type progressRecord struct {
 // BuildAssistPrompt generates the attended-agent prompt for an Assist session's
 // agent assistance. It describes the whole set — identity, storage path, derived
 // status, manifest listing (status/type/effort/blockers), binding and runtime
-// path, recent progress, latest findings, the task contract, and allowed
-// operations — without inlining task bodies (the agent reads those from Task
-// storage).
-func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetStatus, runtimePath, findings string) string {
+// path, recent progress, latest findings, the Refine mark, the task contract,
+// and allowed operations — without inlining task bodies (the agent reads those
+// from Task storage). cfg is what the Refine mark resolves under.
+func BuildAssistPrompt(d *Deps, cfg *config.Config, taskSetID string, m *Manifest, status TaskSetStatus, runtimePath, findings string) string {
 	if d == nil {
 		d = defaultDeps
 	}
@@ -548,6 +549,10 @@ func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetSta
 	// body, so "read the report and let's work out what to do about it" needs no
 	// plumbing beyond the agent opening the file.
 	view.Refine = refineBlock(d, m, runtimePath)
+	// The mark answers what the pointer cannot: an agent handed a set with no
+	// report, or with one an interrupted pass left stale, would otherwise read
+	// the absence as nothing to say (ADR-0260).
+	view.RefineMark = refineMarkPhrase(ResolveRefineMark(d, cfg, m))
 	view.Progress, view.HasProgress, view.ProgressEmpty, view.ProgressUnavailable = recentProgressRows(d, m)
 	return prompt.MustRender(promptTemplates, "assist.tmpl.md", view)
 }
@@ -556,14 +561,17 @@ func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetSta
 // three progress states are named booleans so the template picks a whole
 // section: the recent records, the empty file, or no file at all.
 type assistPromptView struct {
-	TaskSetID           string
-	TaskSetPath         string
-	Status              string
-	BindingLine         string
-	Tasks               []taskRow
-	FindingsRecorded    bool
-	Findings            string
-	Refine              refineBlockView
+	TaskSetID        string
+	TaskSetPath      string
+	Status           string
+	BindingLine      string
+	Tasks            []taskRow
+	FindingsRecorded bool
+	Findings         string
+	Refine           refineBlockView
+	// RefineMark is the mark as the gate words it, empty for a set that carries
+	// none.
+	RefineMark          string
 	Progress            []progressRow
 	HasProgress         bool
 	ProgressEmpty       bool

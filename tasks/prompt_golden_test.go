@@ -274,18 +274,18 @@ func TestInterruptAssistancePromptGoldens(t *testing.T) {
 func TestAssistPromptGoldens(t *testing.T) {
 	full := goldenFullManifest()
 	prompttest.Assert(t, goldenPath("assist.full.md"),
-		BuildAssistPrompt(goldenFixtureDeps(t), goldenSetID, full, StatusFailed, goldenRuntimePath,
+		BuildAssistPrompt(goldenFixtureDeps(t), refineEnabledConfig(), goldenSetID, full, StatusFailed, goldenRuntimePath,
 			"01-afk: the golden for the Assist prompt is missing."))
 
 	bare := goldenBareManifest()
 	prompttest.Assert(t, goldenPath("assist.bare.md"),
-		BuildAssistPrompt(bareDeps(), goldenSetID, bare, StatusReady, "", ""))
+		BuildAssistPrompt(bareDeps(), nil, goldenSetID, bare, StatusReady, "", ""))
 
 	// Progress has a third state between "records" and "no file": a file that
 	// parses to nothing.
 	empty := &Deps{FS: &promptFixtureFS{files: map[string]string{filepath.Join(goldenSetDir, "progress.txt"): "\n"}}, Git: stubGit("", "", "")}
 	prompttest.Assert(t, goldenPath("assist.empty-progress.md"),
-		BuildAssistPrompt(empty, goldenSetID, bare, StatusReady, "", ""))
+		BuildAssistPrompt(empty, nil, goldenSetID, bare, StatusReady, "", ""))
 }
 
 func TestVerifierPromptGoldens(t *testing.T) {

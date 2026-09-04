@@ -342,7 +342,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 		reader = newPromptReader(in)
 	}
 
-	prompt := BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
+	prompt := BuildAssistPrompt(d, env.cfg, taskSetID, m, status, runtimePath, findings)
 	// The agent is resolved when assistance is chosen, never on the way in: a
 	// session must open — and show the set — even when every attended agent is
 	// cooling or missing, and the walk's refusal belongs in the menu.
@@ -377,7 +377,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 					m = refreshed
 				}
 			}
-			prompt = BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
+			prompt = BuildAssistPrompt(d, env.cfg, taskSetID, m, status, runtimePath, findings)
 		case genericAssistShell:
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)

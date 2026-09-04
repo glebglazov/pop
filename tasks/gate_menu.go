@@ -147,6 +147,20 @@ func gateRefinePreamble(refine gateRefineState) []string {
 	return []string{"📝 " + phrase + " · " + refine.Pointer.Summary()}
 }
 
+// gateRefineEntryDetails is what the paging entry says under its label: the
+// document it will open, and the mark from the same resolution the preamble
+// reads (ADR-0260 decision 5). The mark belongs on the entry as well as above
+// it, because a report is left in place by a pass that did not refine — a
+// reader choosing to read one has to know whether it describes the changeset
+// they are signing off.
+func gateRefineEntryDetails(refine gateRefineState) []string {
+	details := []string{refine.Pointer.Path}
+	if phrase := refineMarkPhrase(refine.Resolution); phrase != "" {
+		details = append(details, phrase)
+	}
+	return details
+}
+
 // gateVerifyPreamble tells the same human that a Verify report of the set
 // exists, and against which commit — the pointer only, on the same terms as the
 // refine one above it (ADR-0245). It answers why verification judged as it did,

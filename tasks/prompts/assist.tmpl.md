@@ -9,6 +9,9 @@ Derived status: {{.Status}}
 {{template "task-listing" .Tasks}}
 {{if .FindingsRecorded}}## Latest Verify verdict findings
 {{.Findings}}
+{{end}}{{if .RefineMark}}
+## Refinement
+- {{.RefineMark}}. Nothing gates on this; it says only whether the implementation standard was applied to this set's changeset.
 {{end}}{{template "latest-refine-report" .Refine}}
 
 ## Recent progress

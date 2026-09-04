@@ -574,7 +574,7 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 			return fmt.Errorf("tasks register: %w", err)
 		}
 		tasks.AttachBound(d, result.Rows)
-		tasks.RenderTaskSetDetail(d, w, id, tasks.FindRow(result, id), result.Manifests[id])
+		tasks.RenderTaskSetDetail(d, cfg, w, id, tasks.FindRow(result, id), result.Manifests[id])
 		return nil
 	}
 
@@ -735,8 +735,11 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	// the invoking cwd. Overview runtime-lock and checkout badges still describe
 	// the current checkout.
 	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
+	// Read once and kept: the verdict pass and the per-set detail's Refine mark
+	// both resolve under the merged config, and a set must not read one way in
+	// the table and another in the mark below it.
+	cfg, _ := taskConfigLoad(config.DefaultConfigPath())
 	if runtimeErr == nil {
-		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
 		applyBindingFirstVerifyVerdicts(d, result, cfg, runtimePath)
 	}
 
@@ -749,7 +752,7 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 			return fmt.Errorf("tasks status: %w", err)
 		}
 		tasks.AttachBound(d, result.Rows)
-		tasks.RenderTaskSetDetail(d, w, id, tasks.FindRow(result, id), result.Manifests[id])
+		tasks.RenderTaskSetDetail(d, cfg, w, id, tasks.FindRow(result, id), result.Manifests[id])
 		return nil
 	}
 

@@ -35,7 +35,7 @@ func TestVerifyPointerReachesTheHuman(t *testing.T) {
 	gate, _ := hitlGateOutput(t, d, m, "0\n")
 
 	var detail bytes.Buffer
-	RenderTaskSetDetail(d, &detail, "demo", nil, m)
+	RenderTaskSetDetail(d, nil, &detail, "demo", nil, m)
 
 	for _, s := range []struct {
 		surface string
@@ -112,7 +112,7 @@ func TestVerifyPointerStaysOutOfAgentPrompts(t *testing.T) {
 		{"failed assistance", BuildFailedAssistancePrompt(d, "demo", m, hitl, "/rt")},
 		{"verify-failed assistance", BuildVerifyFailedAssistancePrompt(d, "demo", m, "abc123abc123", "findings", "/rt")},
 		{"interrupt assistance", BuildInterruptAssistancePrompt(d, "demo", m, hitl, "/rt")},
-		{"assist", BuildAssistPrompt(d, "demo", m, StatusAwaitingApproval, "/rt", "")},
+		{"assist", BuildAssistPrompt(d, nil, "demo", m, StatusAwaitingApproval, "/rt", "")},
 		{"verifier", buildVerifierPrompt(d, m, "abc123abc123", work, "", "")},
 	} {
 		if strings.Contains(s.text, path) || strings.Contains(s.text, VerifyDirName+"/verify-") {
@@ -129,7 +129,7 @@ func TestNeverVerifiedSetShowsNoPointer(t *testing.T) {
 
 	gate, _ := hitlGateOutput(t, d, m, "0\n")
 	var detail bytes.Buffer
-	RenderTaskSetDetail(d, &detail, "demo", nil, m)
+	RenderTaskSetDetail(d, nil, &detail, "demo", nil, m)
 
 	for _, s := range []struct {
 		surface string
@@ -161,13 +161,13 @@ func TestVerifyReportStalenessIsNotASecondVerdict(t *testing.T) {
 	d, m := hitlFixture(t)
 
 	var before bytes.Buffer
-	RenderTaskSetDetail(d, &before, "demo", nil, m)
+	RenderTaskSetDetail(d, nil, &before, "demo", nil, m)
 
 	// The fixture's checkout is at sha1; the report was written against a commit
 	// that is not it.
 	seedVerifyReport(t, d, m, "def456def456")
 	var after bytes.Buffer
-	RenderTaskSetDetail(d, &after, "demo", nil, m)
+	RenderTaskSetDetail(d, nil, &after, "demo", nil, m)
 
 	if !strings.Contains(after.String(), "def456d") {
 		t.Fatalf("detail view dropped the pointer to a stale report:\n%s", after.String())

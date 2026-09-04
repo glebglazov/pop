@@ -765,7 +765,7 @@ func TestBuildAssistPromptOmitsTaskBodies(t *testing.T) {
 	}, nil)
 	writePromptTestFile(t, filepath.Join(m.Dir, "01-a.md"), "## Secret body\n\nDo not inline me.\n\n## Acceptance criteria\n\n- [ ] ok\n")
 
-	prompt := BuildAssistPrompt(d, "demo", m, StatusReady, "/rt", "cached findings")
+	prompt := BuildAssistPrompt(d, nil, "demo", m, StatusReady, "/rt", "cached findings")
 	for _, want := range []string{
 		"You are assisting a human in an Assist session",
 		"Task set: demo",

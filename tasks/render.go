@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/glebglazov/pop/config"
 )
 
 // RefreshResult is the outcome of a task status refresh.
@@ -707,13 +709,15 @@ func renderTaskList(out *output, taskSetID string, m *Manifest) {
 // this drills into a single set and shows every task's status, type, identifier,
 // title, and blockers in manifest (dependency) order, so a set's aggregate
 // state can be read down to the task that holds it.
-// It closes with the set's Artifact summary when one exists — d is what
-// resolves it, and a nil d falls back to the default dependencies.
-func RenderTaskSetDetail(d *Deps, w io.Writer, taskSetID string, row *Row, m *Manifest) {
-	renderTaskSetDetail(d, outputFor(w), taskSetID, row, m)
+// It closes with the set's Refine mark, Verify pointer and Artifact summary
+// when it has them — d is what resolves them, and a nil d falls back to the
+// default dependencies. cfg is the merged config the Refine mark resolves
+// under; a nil one reads as Refine undeclared, which carries no mark.
+func RenderTaskSetDetail(d *Deps, cfg *config.Config, w io.Writer, taskSetID string, row *Row, m *Manifest) {
+	renderTaskSetDetail(d, cfg, outputFor(w), taskSetID, row, m)
 }
 
-func renderTaskSetDetail(d *Deps, out *output, taskSetID string, row *Row, m *Manifest) {
+func renderTaskSetDetail(d *Deps, cfg *config.Config, out *output, taskSetID string, row *Row, m *Manifest) {
 	status := DeriveStatus(m)
 	progress := ""
 	bound := false
@@ -777,8 +781,24 @@ func renderTaskSetDetail(d *Deps, out *output, taskSetID string, row *Row, m *Ma
 		fmt.Fprintln(out, out.styled(taskStyle(m, task), line))
 	}
 
+	renderRefineMark(d, cfg, out, m)
 	renderVerifyReportPointer(d, out, m)
 	renderArtifactSummarySection(d, out, taskSetID, m)
+}
+
+// renderRefineMark says whether anything held this set's changeset to the
+// implementation standard, in the words the sign-off gate uses and from the same
+// resolution it reads (ADR-0260 decision 5). A reader who reaches a set here
+// rather than through the gate is the reason it is worth saying twice: a set
+// whose Refine pass died looks, on the table above, exactly like one that was
+// refined and found clean. A set carrying no mark renders nothing.
+func renderRefineMark(d *Deps, cfg *config.Config, out *output, m *Manifest) {
+	phrase := refineMarkPhrase(ResolveRefineMark(d, cfg, m))
+	if phrase == "" {
+		return
+	}
+	fmt.Fprintln(out)
+	out.line(ansiCyan, "📝 %s", phrase)
 }
 
 // renderVerifyReportPointer puts the set's latest Verify report where a human

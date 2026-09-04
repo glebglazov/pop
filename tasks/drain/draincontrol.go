@@ -47,8 +47,12 @@ func StatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
 		return nil, err
 	}
 	detailRow := tasks.FindRow(refresh, row.ID)
+	var cfg *config.Config
+	if d.LoadConfig != nil {
+		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+	}
 	var buf bytes.Buffer
-	tasks.RenderTaskSetDetail(d.Tasks, &buf, row.ID, detailRow, refresh.Manifests[row.ID])
+	tasks.RenderTaskSetDetail(d.Tasks, cfg, &buf, row.ID, detailRow, refresh.Manifests[row.ID])
 	text := strings.TrimRight(buf.String(), "\n")
 	if text == "" {
 		text = fmt.Sprintf("%s: no status detail available", row.ID)

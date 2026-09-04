@@ -67,9 +67,9 @@ func TestRefinePointerReachesEverySurface(t *testing.T) {
 	gate, _ := hitlGateOutput(t, d, m, "0\n")
 
 	var detail bytes.Buffer
-	RenderTaskSetDetail(d, &detail, "demo", nil, m)
+	RenderTaskSetDetail(d, nil, &detail, "demo", nil, m)
 
-	assist := BuildAssistPrompt(d, "demo", m, StatusAwaitingApproval, "/rt", "")
+	assist := BuildAssistPrompt(d, nil, "demo", m, StatusAwaitingApproval, "/rt", "")
 
 	for _, s := range []struct {
 		surface string
@@ -103,9 +103,9 @@ func TestSetWithNoArtifactsShowsNothingExtra(t *testing.T) {
 	gate, _ := hitlGateOutput(t, d, m, "0\n")
 
 	var detail bytes.Buffer
-	RenderTaskSetDetail(d, &detail, "demo", nil, m)
+	RenderTaskSetDetail(d, nil, &detail, "demo", nil, m)
 
-	assist := BuildAssistPrompt(d, "demo", m, StatusAwaitingApproval, "/rt", "")
+	assist := BuildAssistPrompt(d, nil, "demo", m, StatusAwaitingApproval, "/rt", "")
 
 	for _, s := range []struct {
 		surface string
@@ -181,7 +181,7 @@ func TestRefinePointerReadsTheReportsOwnHeader(t *testing.T) {
 // the block.
 func attendedPrompts(d *Deps, m *Manifest) map[string]string {
 	return map[string]string{
-		"assist prompt":         BuildAssistPrompt(d, "demo", m, StatusAwaitingApproval, "/rt", ""),
+		"assist prompt":         BuildAssistPrompt(d, nil, "demo", m, StatusAwaitingApproval, "/rt", ""),
 		"HITL gate prompt":      BuildHITLAssistancePrompt(d, "demo", m, m.Tasks[1], "/rt"),
 		"failed gate prompt":    BuildFailedAssistancePrompt(d, "demo", m, m.Tasks[0], "/rt"),
 		"verify-failed prompt":  BuildVerifyFailedAssistancePrompt(d, "demo", m, "sha1", "01-a: naming", "/rt"),
@@ -287,7 +287,7 @@ func TestAssistPromptPointsAtTheImplementationConvention(t *testing.T) {
 	t.Parallel()
 	m := &Manifest{Stem: "demo", Dir: t.TempDir(), Valid: true,
 		Tasks: []Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: TaskOpen}}}
-	prompt := BuildAssistPrompt(&Deps{FS: &promptFixtureFS{files: map[string]string{}}}, "demo", m, StatusReady, "/rt", "")
+	prompt := BuildAssistPrompt(&Deps{FS: &promptFixtureFS{files: map[string]string{}}}, nil, "demo", m, StatusReady, "/rt", "")
 
 	for _, want := range []string{
 		"`pop conventions get implementation`",
@@ -295,6 +295,76 @@ func TestAssistPromptPointsAtTheImplementationConvention(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("assist prompt is missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+// TestRefineMarkReachesEverySurface drives the mark onto the three surfaces a
+// reader can walk into a set from without passing the sign-off gate: the detail
+// view, the gate's paging entry, and the Assist prompt (ADR-0260 decision 5).
+// Each set here has a report on disk, which is the situation the mark exists
+// for: an interrupted pass publishes nothing and leaves the previous report in
+// place, so a report alone cannot say whether this changeset was refined.
+func TestRefineMarkReachesEverySurface(t *testing.T) {
+	at := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		stream string
+		answer string
+		want   string
+	}{
+		{name: "refined", stream: streamOutcomeCompleted, answer: refineReply("refined"), want: "Refined"},
+		{name: "a pass that did not finish", stream: streamOutcomeInterrupted, want: "Not refined"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			d, m := hitlFixture(t)
+			seedRefineReport(t, d, m)
+			recordRefinePass(t, d, m.Dir, at, tc.stream, tc.answer)
+			cfg := refineEnabledConfig()
+
+			var detail bytes.Buffer
+			RenderTaskSetDetail(d, cfg, &detail, "demo", nil, m)
+			assist := BuildAssistPrompt(d, cfg, "demo", m, StatusAwaitingApproval, "/rt", "")
+			gate, _ := hitlGateOutputWithConfig(t, d, m, cfg, "0\n")
+			// Everything below the entry's label is the entry's own detail, which
+			// keeps this assertion off the preamble printed above the menu.
+			_, entry, found := strings.Cut(gate, "Read the refine report")
+			if !found {
+				t.Fatalf("gate offered no paging entry:\n%s", gate)
+			}
+
+			for surface, text := range map[string]string{
+				"detail view":   detail.String(),
+				"paging entry":  entry,
+				"assist prompt": assist,
+			} {
+				if !strings.Contains(text, tc.want) {
+					t.Fatalf("%s does not say %q:\n%s", surface, tc.want, text)
+				}
+				if tc.want == "Refined" && strings.Contains(text, "Not refined") {
+					t.Fatalf("%s calls a refined set unrefined:\n%s", surface, text)
+				}
+			}
+		})
+	}
+}
+
+// TestRefineMarkIsSilentOnTheSurfacesWhenAbsent: a set Refine does not apply to
+// carries no mark, and no surface invents one — the same silence a set with no
+// report gets.
+func TestRefineMarkIsSilentOnTheSurfacesWhenAbsent(t *testing.T) {
+	t.Parallel()
+	d, m := hitlFixture(t)
+	seedRefineReport(t, d, m)
+
+	var detail bytes.Buffer
+	RenderTaskSetDetail(d, nil, &detail, "demo", nil, m)
+	assist := BuildAssistPrompt(d, nil, "demo", m, StatusAwaitingApproval, "/rt", "")
+
+	for surface, text := range map[string]string{"detail view": detail.String(), "assist prompt": assist} {
+		if strings.Contains(text, "Not refined") || strings.Contains(text, "\U0001F4DD") {
+			t.Fatalf("%s marked a set Refine does not apply to:\n%s", surface, text)
 		}
 	}
 }
