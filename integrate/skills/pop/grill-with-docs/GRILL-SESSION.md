@@ -79,3 +79,6 @@ To commit:
    leave it for a separate step (`to-tasks` is the usual one) — and wait for the
    answer. Either answer is an instruction this session then carries out, and
    "now" means implement it here, where the grilled context still lives.
+   A licence the user granted mid-session covers the act it named and stops
+   there — being told to write the text is not being told to close the session —
+   so this ask happens however much permission is already in play.
