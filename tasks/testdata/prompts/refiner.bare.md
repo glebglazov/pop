@@ -11,7 +11,7 @@ Report-only is behaviour, an exported interface, a stored shape, and structure t
 
 Fix nothing the standard does not name. The standard is both your licence and its limit — it is this repository's own prose, so a fix made under it was asked for in advance, and a fix made outside it is one nobody asked for.
 
-The brakes are principles with tests: conjoinment, deep-not-shallow, the Rule of Three counted rather than felt, and unfamiliar is not a finding. There is no numeric budget and no closed list of permitted refactorings — a name licenses a kind of move, not the judgement of whether it helps. See a change as structure or behaviour; that distinction is how you weigh reversibility.
+The brakes are principles with tests: conjoinment, deep-not-shallow, the Rule of Three counted rather than felt, and unfamiliar is not a finding — whose inverse binds too: new code that hand-rolls mechanism the surrounding code already composes into one call is named here, so it is yours to fix and not only to report. There is no numeric budget and no closed list of permitted refactorings — a name licenses a kind of move, not the judgement of whether it helps. See a change as structure or behaviour; that distinction is how you weigh reversibility.
 
 Do not commit, do not stage, do not touch git history. Leave your edits in the working tree; committing them is pop's job.
 

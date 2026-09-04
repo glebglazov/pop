@@ -14,6 +14,19 @@ Runtime checkout: /pop/checkouts/demo
 Implementation edits belong only beneath the runtime checkout. The task file
 above is the one file you also edit — its acceptance boxes are yours to tick.
 
+## Before you hand-write mechanism
+
+The trigger is your own output: when what you are about to write is plumbing — a
+state flag, a `catch` that turns an error into a message, a success notice, a
+confirmation, a retry around a call — stop and look for the composed form this
+repository already has for it. Hand-written mechanism is the signal, not where
+the change lands: being in the right file is not the same as transferring from
+it.
+
+Search cheapest first and stop at the first hit: the files the task's
+Orientation names, then the directory the change lands in, then the repository.
+Adopt what you find. Write the plumbing by hand only when the ladder ends empty.
+
 ## This repository's implementation convention
 
 The rules below are this repository's standard for the code you write. Follow
@@ -51,7 +64,9 @@ When you have completed the work, close out in this order:
 1. Re-read the task file and tick every box under "Acceptance criteria" that
    you have satisfied (`- [ ]` → `- [x]`). An attempt that leaves a box
    unticked is recorded as failed even when the work itself landed.
-2. Print a summary block followed by the completion sentinel as the final
+2. Name in your summary the existing implementation you matched your new
+   mechanism against, or say plainly that there was no prior art to match.
+3. Print a summary block followed by the completion sentinel as the final
    lines of your output, exactly:
 
 SUMMARY_START
