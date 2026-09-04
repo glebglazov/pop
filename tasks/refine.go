@@ -435,24 +435,39 @@ func runConfiguredRefiner(d *Deps, cfg *config.Config, sel verifierSelection, ta
 //
 // Its runs are filed exactly as the Verifier's are, and for the same reason: a
 // Refiner spends the same agent quota on the same set, so hiding it would make
-// `pop tasks spend` understate what a drain cost. No verdict rides along,
-// because Refine reaches none.
+// `pop tasks spend` understate what a drain cost. What rides along is not a
+// verdict — Refine reaches none — but the pass outcome the invocation reported,
+// which is what a Refine mark is resolved from once the pass is over.
 func refinerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) agentRole {
 	return agentRole{
 		Noun:   "Refiner agent",
 		Gerund: "Refining",
 		Phase:  spendPhaseRefine,
 		Persist: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int) {
-			_ = persistRefineRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode)
+			_ = persistRefineRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode, "")
 		},
-		PersistAnswer: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int, _ string) {
-			_ = persistRefineRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode)
+		PersistAnswer: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int, answer string) {
+			_ = persistRefineRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode, refineRunOutcome(answer))
 		},
 		PersistSkipped: func(rec *streamRecorder, invocation *AgentInvocation, model string, try int, reason string, exitCode int) {
 			_ = persistSkippedRefineRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, reason, exitCode)
 		},
 		RetryEligible: refineAttemptRetryEligible,
 	}
+}
+
+// refineRunOutcome is the pass outcome filed on one Refiner invocation's
+// Captured run: the outcome pop would act on were this attempt's prose the
+// report, which is the Refiner's own REFINE-OUTCOME line or refined when it
+// wrote none. An attempt that produced no prose at all files nothing, and that
+// absence is the fact keeping a run which answered nothing from later reading as
+// a pass that refined.
+func refineRunOutcome(answer string) string {
+	if strings.TrimSpace(answer) == "" {
+		return ""
+	}
+	_, outcome, _ := splitRefinerReply(answer)
+	return outcome
 }
 
 // refineAttemptRetryEligible reports whether a Refiner invocation should be

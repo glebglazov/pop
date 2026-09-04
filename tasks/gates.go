@@ -141,15 +141,15 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		showReverify := gateReverifyEnabled(rv, m)
 		// Re-resolved each time round the menu: a Re-verify may land a Remediation
 		// task and a report written since the gate opened is still the one to point at.
-		refine, hasRefine := latestRefinePointer(d, m)
+		refine := resolveGateRefineState(d, env.cfg, m)
 		verify, hasVerify := latestVerifyPointer(d, m)
-		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, refine, hasRefine, verify, hasVerify)
+		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, refine, verify, hasVerify)
 		if err != nil {
 			return true, err
 		}
 		switch action {
 		case hitlGateReadRefine:
-			pageReportDocument(d, in, runtimePath, out, refine)
+			pageReportDocument(d, in, runtimePath, out, refine.Pointer)
 			// A read changes nothing — loop back to the menu with the set as it was.
 		case hitlGateReadVerify:
 			pageReportDocument(d, in, runtimePath, out, verify)
@@ -376,7 +376,7 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine RefinePointer, hasRefine bool, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Complete task"},
@@ -395,8 +395,8 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 	if showReverify {
 		add(hitlGateReverify, "Re-verify (re-run the Verifier against the current work)")
 	}
-	if hasRefine {
-		add(hitlGateReadRefine, "Read the refine report (no agent runs)", refine.Path)
+	if refine.HasReport {
+		add(hitlGateReadRefine, "Read the refine report (no agent runs)", refine.Pointer.Path)
 	}
 	if hasVerify {
 		add(hitlGateReadVerify, "Read the verify report (no agent runs)", verify.Path)
@@ -410,7 +410,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 			gateWaiterPreamble(d, runtimePath),
 			gateTaskBodyPreamble(hitl.File, body),
 			gateRemediationPreamble(d, taskSetID, m),
-			gateRefinePreamble(refine, hasRefine),
+			gateRefinePreamble(refine),
 			gateVerifyPreamble(verify, hasVerify),
 		),
 		Items: items,

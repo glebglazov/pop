@@ -222,8 +222,10 @@ func TestRefineRunIsCapturedUnderItsOwnPhase(t *testing.T) {
 	if meta.Phase != "refine" || meta.TaskSetID != "demo" || meta.WorkSHA != "sha1" {
 		t.Fatalf("run meta = %+v, want a set-level refine run at sha1", meta)
 	}
-	if meta.Verdict != "" || meta.TaskFile != "" {
-		t.Fatalf("run meta = %+v, want no verdict and no task file", meta)
+	// What rides in the run's outcome slot is the pass outcome, never a verdict:
+	// this report named none, which is pop's own refined (ADR-0260 decision 4).
+	if meta.Verdict != refineOutcomeRefined || meta.TaskFile != "" {
+		t.Fatalf("run meta = %+v, want the pass outcome and no task file", meta)
 	}
 
 	// The spend lens gives it its own row and its own bucket: a refine pass is not

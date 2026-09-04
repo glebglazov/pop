@@ -466,7 +466,7 @@ func sortSpendRollupCandidates(candidates []spendRollupCandidate) {
 
 // taskSetSpendMeta builds a rollup candidate from Captured-run metadata alone.
 func taskSetSpendMeta(d *Deps, taskSetID, taskSetDir string) (spendRollupCandidate, error) {
-	metas, err := listSpendRunMetas(d, taskSetDir)
+	metas, err := listCapturedRunMetas(d, taskSetDir)
 	if err != nil {
 		return spendRollupCandidate{}, err
 	}

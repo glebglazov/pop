@@ -104,15 +104,47 @@ func gateRemediationPreamble(d *Deps, taskSetID string, m *Manifest) []string {
 	return strings.Split(text, "\n")
 }
 
-// gateRefinePreamble tells the human deciding on a set that a Refine report of
-// it exists, and against which commit — a pointer, never the document, which is
-// long enough to bury the menu it would be printed above (ADR-0252). Returns no
-// lines for a set that has never been refined.
-func gateRefinePreamble(p RefinePointer, ok bool) []string {
-	if !ok {
+// gateRefineState is what the sign-off gate knows about Refine for one set:
+// whether anything held its changeset to the standard, and the report of the
+// last pass when there is one. The three travel together — the menu entry, the
+// document the entry pages and the preamble line above them all say parts of the
+// same answer — so they are resolved once, here, and handed round as one value.
+type gateRefineState struct {
+	Resolution RefineResolution
+	Pointer    RefinePointer
+	// HasReport is false for a set no pass has ever published a document for,
+	// which is not the same as a set nothing has refined: an interrupted pass
+	// leaves the previous report in place.
+	HasReport bool
+}
+
+// resolveGateRefineState reads both halves through their own single
+// resolutions. It runs each time round the gate menu: a report written while the
+// gate was open is still the one to point at.
+func resolveGateRefineState(d *Deps, cfg *config.Config, m *Manifest) gateRefineState {
+	pointer, ok := latestRefinePointer(d, m)
+	return gateRefineState{Resolution: ResolveRefineMark(d, cfg, m), Pointer: pointer, HasReport: ok}
+}
+
+// gateRefinePreamble tells the human deciding on a set whether its changeset was
+// refined, and where the last pass's report is — a pointer, never the document,
+// which is long enough to bury the menu it would be printed above (ADR-0252).
+//
+// The mark refuses nothing and holds nothing back (ADR-0260 decision 6). It is
+// here because the human at this gate is the only one who can act on a set the
+// standard was never applied to, and because a set whose pass died looked, until
+// now, exactly like one that was refined and found clean.
+func gateRefinePreamble(refine gateRefineState) []string {
+	phrase := refineMarkPhrase(refine.Resolution)
+	switch {
+	case phrase == "" && !refine.HasReport:
 		return nil
+	case phrase == "":
+		return []string{"📝 " + refine.Pointer.Summary()}
+	case !refine.HasReport:
+		return []string{"📝 " + phrase}
 	}
-	return []string{"📝 " + p.Summary()}
+	return []string{"📝 " + phrase + " · " + refine.Pointer.Summary()}
 }
 
 // gateVerifyPreamble tells the same human that a Verify report of the set

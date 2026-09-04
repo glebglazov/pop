@@ -108,6 +108,10 @@ type capturedRunMeta struct {
 	Model   string `json:"model,omitempty"`
 	Attempt int    `json:"attempt"`
 	WorkSHA string `json:"work_sha,omitempty"`
+	// Verdict is what the run's own role read out of the agent's answer — the
+	// Verifier's verdict, the Refiner's pass outcome — and is empty for a role
+	// that reads none and for a run that answered nothing. Each phase's readers
+	// filter on Phase first, so the two vocabularies never meet.
 	Verdict string `json:"verdict,omitempty"`
 }
 
@@ -400,15 +404,20 @@ func persistSkippedVerifyRun(d *Deps, errOut io.Writer, taskSetDir, setID, workS
 }
 
 // persistRefineRun writes one Captured run pair for a Refiner invocation under
-// the `refine` phase label, best-effort. A nil recorder records nothing. It
-// stores no verdict, because a refine pass reaches none — the run's product is
-// the Refine report, and what is captured here is only what it cost and how it
-// ended. Returns the written meta file's path, or "" when nothing was persisted.
-func persistRefineRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int) string {
+// the `refine` phase label, best-effort. A nil recorder records nothing.
+// Returns the written meta file's path, or "" when nothing was persisted.
+//
+// refineOutcome is the pass outcome this invocation reported, filed in the run's
+// outcome slot the way a verify run files its verdict there. It is what a Refine
+// mark is later resolved from (ADR-0260 decision 4): a pass that did not refine
+// records no episode, and the report it may still have published carries nothing
+// a machine reads, so the run is the only place left that can say the standard
+// was not applied.
+func persistRefineRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int, refineOutcome string) string {
 	if rec == nil {
 		return ""
 	}
-	metaPath, _, err := writeCapturedRun(d, taskSetDir, "refine", setID, "", "", rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, workSHA, "")
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, "refine", setID, "", "", rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, workSHA, refineOutcome)
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "warning: persist refine run for %s: %v\n", setID, err)

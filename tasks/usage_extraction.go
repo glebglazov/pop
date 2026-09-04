@@ -96,9 +96,9 @@ func loadCapturedRunMeta(d *Deps, dir, metaName string) (capturedRunMeta, error)
 	return meta, nil
 }
 
-// listSpendRunMetas returns every Captured run meta under streams/runs/ for a
+// listCapturedRunMetas returns every Captured run meta under streams/runs/ for a
 // task set, sorted chronologically. Event streams are never opened.
-func listSpendRunMetas(d *Deps, taskSetDir string) ([]capturedRunMeta, error) {
+func listCapturedRunMetas(d *Deps, taskSetDir string) ([]capturedRunMeta, error) {
 	runsDir := capturedRunsDir(taskSetDir)
 	entries, err := d.FS.ReadDir(runsDir)
 	if err != nil {
@@ -132,7 +132,7 @@ func listSpendRunMetas(d *Deps, taskSetDir string) ([]capturedRunMeta, error) {
 // streams/<task-stem>/attempt-NNN.jsonl.gz layout is out of scope for spend
 // (ADR-0160) and is never read here.
 func collectSpendRuns(d *Deps, taskSetDir string) ([]capturedRun, error) {
-	metas, err := listSpendRunMetas(d, taskSetDir)
+	metas, err := listCapturedRunMetas(d, taskSetDir)
 	if err != nil {
 		return nil, err
 	}

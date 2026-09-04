@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/glebglazov/pop/config"
 )
 
 // refineProse is the one string no surface may print: the document's body. Every
@@ -35,12 +37,19 @@ func hitlFixture(t *testing.T) (*Deps, *Manifest) {
 
 func hitlGateOutput(t *testing.T, d *Deps, m *Manifest, input string) (string, hitlGateAction) {
 	t.Helper()
+	return hitlGateOutputWithConfig(t, d, m, nil, input)
+}
+
+// hitlGateOutputWithConfig drives the gate under a named configuration — the
+// Refine mark is resolved through one, so a test about it cannot use the
+// unconfigured default.
+func hitlGateOutputWithConfig(t *testing.T, d *Deps, m *Manifest, cfg *config.Config, input string) (string, hitlGateAction) {
+	t.Helper()
 	var out strings.Builder
 	in := strings.NewReader(input)
-	refine, hasRefine := latestRefinePointer(d, m)
 	verify, hasVerify := latestVerifyPointer(d, m)
-	action, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[1],
-		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, refine, hasRefine, verify, hasVerify)
+	action, err := promptHITLGateAction(&out, in, d, cfg, "/rt", newPromptReader(in), "demo", m, &m.Tasks[1],
+		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, resolveGateRefineState(d, cfg, m), verify, hasVerify)
 	if err != nil {
 		t.Fatalf("promptHITLGateAction: %v", err)
 	}
