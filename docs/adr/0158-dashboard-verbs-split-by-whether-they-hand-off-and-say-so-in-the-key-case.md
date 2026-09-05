@@ -3,8 +3,8 @@
 Every **Work dashboard** row verb is either a **Handoff verb** — it moves the
 operator into a tmux pane and quits the dashboard — or an **In-place verb**,
 which acts and leaves the dashboard standing. Handoff verbs take an uppercase
-key (`I` drain, `V` verify, `F` fold, `S` assist, `O` shell, `I` wayfinder on a
-map row), in-place verbs a lowercase one (`b` bind, `u` unbind, `a` auto-drain,
+key (`I` drain, `V` verify, `F` fold, `A` assist, `O` shell, `I` wayfinder on a
+map row; assist was `S` until the 2026-09-05 amendment below), in-place verbs a lowercase one (`b` bind, `u` unbind, `a` auto-drain,
 `s` status, `r` unpark, `x` archive, `y` copy name). Every handoff runs the same
 sequence in the same order: spawn or focus the pane, `SelectPane` +
 `SwitchClient`, quit. When it moves the operator nowhere it does not quit — it
@@ -59,3 +59,28 @@ busy enough to have several, which is when you would reach for it.
 **Exempting handoff verbs from quitting while the action menu is pinned** (`A`).
 Rejected: a verb that behaves differently inside a mode is the per-verb
 inconsistency this decision removes, reintroduced one level down.
+
+## Amendment (2026-09-05): assist is `A`, and fan-out moves to `W`/`w`
+
+**Assist takes `A` on every kind that offers it** — the Task set and the Map —
+because the letter should say the word: `A` for assist, where `S` said nothing.
+It stays uppercase, so the case rule above is untouched: assist quits the
+dashboard, and an operator still reads the case to know that.
+
+`A` was not free. On a Map row it meant `fan out frontier and go`, paired with
+lowercase `a` for the in-place twin, exactly as `I`/`i` pair for working one
+ticket. So **the Map's fan-out pair moves to `W`/`w`** — "work the whole
+frontier", against `I`/`i` "work one ticket" — which is unused in every kind's
+run menu.
+
+The trade-off, and why the pair moved rather than assist taking a per-kind key:
+`S` was chosen on both kinds deliberately (ADR-0184), so that one letter means
+one verb wherever the operator finds it. Letting assist be `A` on a Task set and
+`S` on a Map would buy the mnemonic and spend the uniformity that made the
+mnemonic worth having. Seating assist on `A` beside an `a` that still meant
+fan-out was rejected for the same reason: a case pair that is not a pair is a
+worse collision than the meaningless letter it replaced. Giving fan-out the
+freed `S`/`s` was rejected too — it silently reassigns `S` on the very row where
+`S` used to be assist, which is the rebinding that misleads muscle memory
+hardest. `W`/`w` costs one relearned key on Map rows and leaves no letter
+meaning two things across kinds.

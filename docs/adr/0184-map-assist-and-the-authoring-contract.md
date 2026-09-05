@@ -86,7 +86,9 @@ One pane per Map in the **Map session**'s single `map` window, tagged
 is a jump target and is never re-sent work (ADR-0158), a bare shell is respawned.
 Structural writes take the existing per-Map file lock the resolve path uses.
 Skill: `wayfinder` in a third mode, `assist`, alongside chart and work, seeded by
-the CLI verb. Dashboard key `S` — matching `pop tasks assist`'s `S`, uppercase per
+the CLI verb. Dashboard key `S` (now `A`, and `MapKind.Actions` `I W A O` then `i w y` —
+see ADR-0158's 2026-09-05 amendment) — matching `pop tasks assist`'s key,
+uppercase per
 ADR-0158 because it quits the dashboard — ungated by frontier size, since a Map
 with an empty or fully-claimed frontier is when assist is most needed.
 `MapKind.Actions` becomes `I A S O` then `i a y`.
