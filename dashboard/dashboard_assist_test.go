@@ -17,7 +17,7 @@ import (
 )
 
 // TestDashboardAssistMenuPlacement asserts Assist sits in the spawning cluster,
-// immediately before shell and after drain/verify — the `I V F S O` order the
+// immediately before shell and after drain/verify — the `I V F A O` order the
 // action list now guarantees (06-action-order-and-copy-path), rather than beside
 // the in-place status verb the interleaved order used to place it next to.
 func TestDashboardAssistMenuPlacement(t *testing.T) {
@@ -34,7 +34,7 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 		}
 		return -1
 	}
-	assist, o, drain, verify, preview := idx("S"), idx("O"), idx("I"), idx("V"), idx("p")
+	assist, o, drain, verify, preview := idx("A"), idx("O"), idx("I"), idx("V"), idx("p")
 	if assist < 0 || o < 0 {
 		t.Fatalf("menu missing assist/shell keys: %+v", keys)
 	}
@@ -57,7 +57,7 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	view := got.View().Content
-	if !strings.Contains(view, "S  assist") {
+	if !strings.Contains(view, "A  assist") {
 		t.Fatalf("menu view missing assist verb:\n%s", view)
 	}
 }

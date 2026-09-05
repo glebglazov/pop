@@ -400,7 +400,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{ID: "plain", RuntimePath: "/wt"})
-	if want := []string{"I", "S", "O", "b", "a"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"I", "A", "O", "b", "a"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -5242,7 +5242,7 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	for _, item := range items {
 		keys = append(keys, item.key)
 	}
-	if want := []string{"I", "A", "S", "O", "i", "a"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"I", "W", "A", "O", "i", "w"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("map menu keys = %v, want %v", keys, want)
 	}
 	for _, item := range items {

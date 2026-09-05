@@ -141,7 +141,7 @@ func styleHandoffKey(key string, state livePaneState) string {
 
 // dashboardActivityClusterPlain is the fixed-width, ANSI-free activity cluster
 // used for column-width math and the static status table.
-const dashboardActivityClusterPlain = "IVFS"
+const dashboardActivityClusterPlain = "IVFA"
 
 // dashboardMapWayfinderKeyPlain is the fixed-width wayfinder handoff key shown
 // on map rows in the activity-cluster column.
@@ -158,12 +158,12 @@ var rowActivityCluster = []rowActivityClusterItem{
 	{key: "I", tag: tmuxmod.TagSet},
 	{key: "V", tag: tmuxmod.TagVerify},
 	{key: "F", tag: tmuxmod.TagFold},
-	{key: "S", tag: tmuxmod.TagAssist},
+	{key: "A", tag: tmuxmod.TagAssist},
 }
 
 // dashboardActivityCluster renders the compact per-activity cluster for a row.
 // Map rows carry a single wayfinder handoff key (I) coloured from the map
-// window's liveness. Task-set rows carry IVFS from tagged panes. When styled is
+// window's liveness. Task-set rows carry IVFA from tagged panes. When styled is
 // false the cluster is plain text for width measurement; when true each key is
 // coloured by the cached live-pane state using the same rules as the Run menu.
 func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool) string {

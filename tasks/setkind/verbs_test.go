@@ -18,7 +18,7 @@ func verbsOffered(actions []work.Action) []work.Verb {
 }
 
 // TestActionsOrderSpawningFirst pins the ordering rule: every spawning (handoff)
-// verb before every in-place one, `I V F S O` then `b u a r` — the fix for
+// verb before every in-place one, `I V F A O` then `b u a r` — the fix for
 // the old interleaved `I V b u a s S F r O x y`. The container below trips every
 // conditional verb so the full list is exercised in one pass.
 func TestActionsOrderSpawningFirst(t *testing.T) {

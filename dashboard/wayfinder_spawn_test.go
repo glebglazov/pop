@@ -419,10 +419,10 @@ func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 	}
 }
 
-// `S` on a map row opens the Map-scoped assist session and quits to it — and it
+// `A` on a map row opens the Map-scoped assist session and quits to it — and it
 // does so with the frontier resolved away, which is the state the frontier keys
 // disappear in and assist is most wanted in (ADR-0184).
-func TestDashboardMapRowSAssistsWithNoFrontier(t *testing.T) {
+func TestDashboardMapRowAAssistsWithNoFrontier(t *testing.T) {
 	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
 	withWayfinderMaps(t, d, storageDir, map[string]string{
 		filepath.Join(storageDir, "repo.json"): `{"common_dir":"/repo/.git"}`,
@@ -434,9 +434,9 @@ func TestDashboardMapRowSAssistsWithNoFrontier(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 
 	opened, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	updated, cmd := opened.(QueueDashboard).update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	updated, cmd := opened.(QueueDashboard).update(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	if cmd == nil {
-		t.Fatal("S on a map row with no frontier did not return a command")
+		t.Fatal("A on a map row with no frontier did not return a command")
 	}
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)

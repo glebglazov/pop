@@ -48,7 +48,7 @@ const (
 )
 
 // Actions returns the container-level verbs that apply to one task set right now,
-// spawning (handoff) verbs first and in-place verbs last: `I V F S O` then
+// spawning (handoff) verbs first and in-place verbs last: `I V F A O` then
 // `b u a r`, mirroring the order handoffAfterLaunch already names (drain,
 // verify, fold, assist, shell) so the two lists never drift apart. Conditional
 // verbs are filtered to the set's context: verify only for NEEDS-VERIFY /
@@ -93,7 +93,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 		actions = append(actions, work.Action{Verb: VerbFold, Key: "F", Label: "fold"})
 	}
 	actions = append(actions,
-		work.Action{Verb: VerbAssist, Key: "S", Label: "assist"},
+		work.Action{Verb: VerbAssist, Key: "A", Label: "assist"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
 		work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"},
 	)

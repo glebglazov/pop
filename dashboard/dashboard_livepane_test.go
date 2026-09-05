@@ -26,11 +26,11 @@ func TestLivePaneMenuKeyColours(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 
 	greenI := livePaneRunningStyle.Render("I")
-	greyS := livePaneIdleStyle().Render("S")
+	greyA := livePaneIdleStyle().Render("A")
 	if !strings.Contains(joined, greenI) {
 		t.Fatalf("drain key must be green when running:\n%s", joined)
 	}
-	if !strings.Contains(joined, greyS) {
+	if !strings.Contains(joined, greyA) {
 		t.Fatalf("assist key must be grey when idle:\n%s", joined)
 	}
 	if strings.Contains(joined, livePaneRunningStyle.Render("O")) || strings.Contains(joined, livePaneIdleStyle().Render("O")) {
@@ -164,7 +164,7 @@ func TestLivePaneMenuReloadUsesCache(t *testing.T) {
 		t.Fatalf("live cache not stored on reload")
 	}
 	view := got.View().Content
-	if !strings.Contains(view, livePaneRunningStyle.Render("S")) {
+	if !strings.Contains(view, livePaneRunningStyle.Render("A")) {
 		t.Fatalf("menu must colour assist green from cached live:\n%s", view)
 	}
 }
@@ -267,7 +267,7 @@ func TestLivePaneRowClusterInView(t *testing.T) {
 	if !strings.Contains(view, livePaneRunningStyle.Render("I")) {
 		t.Fatalf("view must show green drain in row cluster:\n%s", view)
 	}
-	if !strings.Contains(view, livePaneIdleStyle().Render("S")) {
+	if !strings.Contains(view, livePaneIdleStyle().Render("A")) {
 		t.Fatalf("view must show grey assist in row cluster:\n%s", view)
 	}
 }

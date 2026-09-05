@@ -21,7 +21,7 @@ import (
 
 // The Run menu offers neither the status opener nor an archive of its own:
 // both live in the Status menu, which `s` opens from the row list (ADR-0236
-// decisions 1 and 4). `S` assist is untouched, on a task set and on a Map alike.
+// decisions 1 and 4). `A` assist is untouched, on a task set and on a Map alike.
 func TestRunMenuKeepsAssistAndLosesStatusAndArchive(t *testing.T) {
 	for _, row := range []DashboardRow{
 		{ID: "demo", RawStatus: tasks.StatusReady, Bound: true},
@@ -39,20 +39,20 @@ func TestRunMenuKeepsAssistAndLosesStatusAndArchive(t *testing.T) {
 		if _, ok := keys["x"]; ok {
 			t.Fatalf("%s row still offers archive beside the status opener: %q", row.ID, labels["x"])
 		}
-		if keys["S"] == "" {
-			t.Fatalf("%s row lost its assist key S", row.ID)
+		if keys["A"] == "" {
+			t.Fatalf("%s row lost its assist key A", row.ID)
 		}
 	}
 	if got := dashboardMenuItems(testKinds(), DashboardRow{Kind: ref.KindMap, ID: "map-1"}); !mapAssistOffered(got) {
-		t.Fatalf("map row should offer its own assist verb on S: %v", got)
+		t.Fatalf("map row should offer its own assist verb on A: %v", got)
 	}
 }
 
-// mapAssistOffered reports whether `S` is the Map's own assist session rather
+// mapAssistOffered reports whether `A` is the Map's own assist session rather
 // than a Task set's — the opener is shared, the sessions behind the keys are not.
 func mapAssistOffered(items []dashboardMenuItem) bool {
 	for _, item := range items {
-		if item.key == "S" && item.verb == wayfinder.VerbAssist {
+		if item.key == "A" && item.verb == wayfinder.VerbAssist {
 			return true
 		}
 	}

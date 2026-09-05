@@ -252,17 +252,17 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 	if c.MapFrontier > 0 {
 		actions = append(actions,
 			work.Action{Verb: VerbWork, Key: "I", Label: "work frontier ticket and go"},
-			work.Action{Verb: VerbFanOut, Key: "A", Label: "fan out frontier and go"},
+			work.Action{Verb: VerbFanOut, Key: "W", Label: "fan out frontier and go"},
 		)
 	}
 	actions = append(actions,
-		work.Action{Verb: VerbAssist, Key: "S", Label: "assist the map and go"},
+		work.Action{Verb: VerbAssist, Key: "A", Label: "assist the map and go"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
 	)
 	if c.MapFrontier > 0 {
 		actions = append(actions,
 			work.Action{Verb: VerbWorkHere, Key: "i", Label: "work frontier ticket"},
-			work.Action{Verb: VerbFanOutHere, Key: "a", Label: "fan out frontier"},
+			work.Action{Verb: VerbFanOutHere, Key: "w", Label: "fan out frontier"},
 		)
 	}
 	return actions

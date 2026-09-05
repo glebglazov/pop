@@ -27,9 +27,9 @@ func TestDashboardHandoffAssistSpawnsFocusesAndQuits(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	if cmd == nil {
-		t.Fatal("S did not return a command")
+		t.Fatal("A did not return a command")
 	}
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
@@ -75,9 +75,9 @@ func TestDashboardHandoffAssistReusesWithoutResend(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	if cmd == nil {
-		t.Fatal("S did not return a command")
+		t.Fatal("A did not return a command")
 	}
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
@@ -110,9 +110,9 @@ func TestDashboardHandoffAssistOutsideTmuxStays(t *testing.T) {
 	m.width, m.height = 120, 40
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	if cmd == nil {
-		t.Fatal("S did not return a command")
+		t.Fatal("A did not return a command")
 	}
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)

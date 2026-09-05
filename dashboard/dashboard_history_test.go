@@ -112,7 +112,7 @@ func TestDashboardHandoffVerbsRecordTheSetsCheckout(t *testing.T) {
 			row.RawStatus = tasks.StatusDone
 			row.Provisioned = true
 		}},
-		{name: "assist", key: "S", rows: doneTask},
+		{name: "assist", key: "A", rows: doneTask},
 		{name: "shell", key: "O", rows: doneTask},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,7 +150,7 @@ func TestDashboardHandoffVerbsRecordTheSetsCheckout(t *testing.T) {
 func TestDashboardMapHandoffRecordsTheMapsTrunk(t *testing.T) {
 	for _, tc := range []struct{ name, key string }{
 		{name: "work frontier ticket", key: "I"},
-		{name: "assist", key: "S"},
+		{name: "assist", key: "A"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, cfg, row, f, _ := wayfinderSpawnFixture(t)
