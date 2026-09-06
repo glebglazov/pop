@@ -4116,10 +4116,6 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, body
 	}
 
-	// The item menu is a Block, the same reserved region the table view's menus
-	// render as (ADR-0224 decision 4): BodyHeight shrinks the item list by exactly
-	// its height, so opening a menu scrolls rows out from the top and closing it
-	// scrolls them back, and the list can never paint past the pane.
 	if !d.searchTyping && d.searchTerm != "" {
 		// The term in force rides the title line for the reason it rides the page
 		// header one level up: a narrowed list that does not say what narrowed it
@@ -4134,6 +4130,10 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	if d.searchTyping {
 		hints = searchTypingHint
 	}
+	// Either menu is a Block, the same reserved region the table view's menus
+	// render as (ADR-0224 decision 4): BodyHeight shrinks the item list by exactly
+	// its height, so opening a menu scrolls rows out from the top and closing it
+	// scrolls them back, and the list can never paint past the pane.
 	var block []string
 	switch {
 	case m.menu != nil:
