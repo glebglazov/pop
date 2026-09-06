@@ -51,7 +51,7 @@ Keybindings:
   ctrl-y                - yank path to a tmux pane
   ctrl-d                - delete worktree
   ctrl-x                - force delete worktree
-  alt-c                 - open the Config dashboard over the picker
+  alt-C                 - open the Config dashboard over the picker
   alt-1..9              - quick select (modifier is configurable)
   esc, ctrl-c           - cancel
 

@@ -48,7 +48,7 @@ Projects with git worktrees are expanded to show individual worktrees.
 Choosing a project opens or switches to a tmux session.
 
 Keybindings:
-  alt-c    - open the Config dashboard over the picker
+  alt-C    - open the Config dashboard over the picker
 
 While the Config dashboard is open it owns the keyboard: no picker key does
 anything. Closing it returns to the picker with the filter and cursor

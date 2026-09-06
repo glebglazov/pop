@@ -83,6 +83,12 @@ func typeIntoPicker(p *Picker, text string) {
 }
 
 func altKey(r rune) tea.KeyPressMsg  { return tea.KeyPressMsg{Code: r, Mod: tea.ModAlt} }
+
+// altShiftKey is the shifted half of the same chord as a terminal's legacy
+// escape path reports it: the lowered rune plus both modifiers.
+func altShiftKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Mod: tea.ModAlt | tea.ModShift}
+}
 func ctrlKey(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
 
 var escKey = tea.KeyPressMsg{Code: tea.KeyEscape}
@@ -96,11 +102,11 @@ func TestPickerConfigDashboardOpensOnTheGlobalChord(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			p, _ := pickerHosting(t, &scriptedEditor{}, opts...)
 
-			if quit := drivePicker(p, altKey('c')); quit {
+			if quit := drivePicker(p, altShiftKey('c')); quit {
 				t.Fatal("the chord quit the picker")
 			}
 			if !p.ConfigModalOpen() {
-				t.Fatal("alt+c opened no Config dashboard")
+				t.Fatal("alt+shift+c opened no Config dashboard")
 			}
 			if view := p.View().Content; !strings.Contains(view, "Config · what is in force here") {
 				t.Fatalf("view over the picker:\n%s", view)
@@ -112,14 +118,17 @@ func TestPickerConfigDashboardOpensOnTheGlobalChord(t *testing.T) {
 		p, _ := pickerHosting(t, &scriptedEditor{}, worktreePickerOpts()...)
 		drivePicker(p, altKey('x'))
 		drivePicker(p, ctrlKey('c'))
+		// Shift is what keeps the chord off a slipped finger: the unshifted
+		// alt+c must do nothing here.
+		drivePicker(p, altKey('c'))
 		if p.ConfigModalOpen() {
-			t.Fatal("a chord that is not alt+c opened the Config dashboard")
+			t.Fatal("a chord that is not alt+shift+c opened the Config dashboard")
 		}
 	})
 
 	t.Run("a picker with no opener ignores it", func(t *testing.T) {
 		p := sizedPicker(worktreePickerOpts()...)
-		if quit := drivePicker(p, altKey('c')); quit {
+		if quit := drivePicker(p, altShiftKey('c')); quit {
 			t.Fatal("the chord quit a picker that hosts nothing")
 		}
 		if p.ConfigModalOpen() {
@@ -149,7 +158,7 @@ func TestPickerConfigDashboardSuspendsTheDeleteKeys(t *testing.T) {
 			}
 
 			p, writer := pickerHosting(t, &scriptedEditor{}, worktreePickerOpts()...)
-			drivePicker(p, altKey('c'))
+			drivePicker(p, altShiftKey('c'))
 			if quit := drivePicker(p, tc.key); quit {
 				t.Fatalf("%s quit the picker while the modal was open", tc.name)
 			}
@@ -190,7 +199,7 @@ func TestPickerConfigDashboardSuspendsEveryOtherKey(t *testing.T) {
 			}
 
 			p, _ := pickerHosting(t, &scriptedEditor{}, worktreePickerOpts()...)
-			drivePicker(p, altKey('c'))
+			drivePicker(p, altShiftKey('c'))
 			if quit := drivePicker(p, tc.key); quit {
 				t.Fatalf("%s quit the picker while the modal was open", tc.name)
 			}
@@ -214,7 +223,7 @@ func TestPickerConfigDashboardReturnsTheStateItFound(t *testing.T) {
 	filter, cursor := p.input.Value(), p.cursor
 	before := p.View().Content
 
-	drivePicker(p, altKey('c'))
+	drivePicker(p, altShiftKey('c'))
 	drivePicker(p, tea.KeyPressMsg{Code: tea.KeyDown})
 	drivePicker(p, enterKey)    // an edit, through the scripted editor
 	typeIntoPicker(p, "verify") // filtering inside the component, not the picker
@@ -263,7 +272,7 @@ func TestPickerConfigDashboardLeavesStdoutToThePicker(t *testing.T) {
 
 				p, writer := pickerHosting(t, &scriptedEditor{replies: []string{`work.implement.agents = ["codex"]`}}, opts...)
 				typeIntoPicker(p, "fea")
-				drivePicker(p, altKey('c'))
+				drivePicker(p, altShiftKey('c'))
 				drivePicker(p, enterKey)     // edit
 				drivePicker(p, ctrlKey('y')) // copy the source down
 				drivePicker(p, escKey)
@@ -304,13 +313,13 @@ func TestPickerConfigDashboardInHelp(t *testing.T) {
 	// The human's own label is on the chord now, so what must be gone is this
 	// component's entry, not the key.
 	if hasHelpEntry(taken.helpEntries(), ConfigDashboardKeyLabel, "Config overrides") {
-		t.Errorf("a user-bound alt+c still advertises the Config dashboard")
+		t.Errorf("a user-bound alt+shift+c still advertises the Config dashboard")
 	}
-	if quit := drivePicker(taken, altKey('c')); !quit {
-		t.Fatal("a user-bound alt+c did not run the human's own command")
+	if quit := drivePicker(taken, altShiftKey('c')); !quit {
+		t.Fatal("a user-bound alt+shift+c did not run the human's own command")
 	}
 	if taken.ConfigModalOpen() {
-		t.Fatal("a user-bound alt+c opened the Config dashboard instead")
+		t.Fatal("a user-bound alt+shift+c opened the Config dashboard instead")
 	}
 }
 

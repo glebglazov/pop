@@ -862,7 +862,7 @@ func TestWorktreeHelpAndReadmeListCurrentBindings(t *testing.T) {
 	for _, binding := range []string{
 		"ctrl-p", "ctrl-n", "ctrl-b", "ctrl-f", "ctrl-u", "alt-backspace",
 		"ctrl-h", "enter", "ctrl-a", "ctrl-t", "ctrl-l", "ctrl-k", "ctrl-r",
-		"ctrl-y", "ctrl-d", "ctrl-x", "alt-c", "alt-1..9", "esc", "ctrl-c",
+		"ctrl-y", "ctrl-d", "ctrl-x", "alt-C", "alt-1..9", "esc", "ctrl-c",
 	} {
 		if !strings.Contains(worktreeDashboardCmd.Long, binding) {
 			t.Errorf("worktree dashboard long help omits %s", binding)

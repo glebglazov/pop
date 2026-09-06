@@ -22,7 +22,7 @@ func TestPickerHelpDocumentsTheConfigDashboard(t *testing.T) {
 		"worktree dashboard": worktreeDashboardCmd.Long,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if !strings.Contains(long, ui.ConfigDashboardKeyLabel) && !strings.Contains(long, "alt-c") {
+			if !strings.Contains(long, ui.ConfigDashboardKeyLabel) && !strings.Contains(long, "alt-C") {
 				t.Errorf("%s help names no chord for the Config dashboard:\n%s", name, long)
 			}
 			// The picker's own popup is 60%; the Config dashboard wants the roomier
@@ -66,9 +66,9 @@ func assertChordOpensConfigDashboard(t *testing.T, opts []ui.PickerOption) {
 	p := ui.NewPicker([]ui.Item{{Name: "one", Path: "/one"}}, opts...)
 	p.Init()
 	p.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	p.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModAlt})
+	p.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModAlt | tea.ModShift})
 	if !p.ConfigModalOpen() {
-		t.Error("alt+c opened no Config dashboard on this picker")
+		t.Error("alt+shift+c opened no Config dashboard on this picker")
 	}
 }
 

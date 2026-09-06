@@ -41,23 +41,32 @@ import (
 // list of addresses (ADR-0226).
 
 // ConfigDashboardKeyLabel is how the chord that opens this component from a host
-// reads in chrome — `alt+c` (ADR-0202 decision 10), in ui's A- prefix form. Any
-// surface that tells a human where a setting is changed points here rather than
-// spelling the chord itself.
-const ConfigDashboardKeyLabel = "A-c"
+// reads in chrome — `alt+shift+c` (ADR-0202 decision 10), in ui's A- prefix form.
+// Any surface that tells a human where a setting is changed points here rather
+// than spelling the chord itself. Shift is part of the chord because the
+// unshifted `alt+c` sits one slipped finger away from a terminal's copy chord and
+// was pressed by accident.
+const ConfigDashboardKeyLabel = "A-C"
 
 // ConfigDashboardKey is that same chord as a key string, for a host that names
 // its bindings in text rather than matching them.
-const ConfigDashboardKey = "alt+c"
+const ConfigDashboardKey = "alt+shift+c"
 
 // IsConfigDashboardKey reports whether msg is the chord that opens this
 // component from a host (ADR-0202 decision 10). Hosts match through this rather
 // than spelling the chord, so the three of them cannot drift apart.
+//
+// A terminal reports the shifted letter two ways: the legacy escape path lowers
+// the rune and sets ModShift, while a protocol that reports the base layout key
+// leaves the rune uppercase. Either shape counts; alt+c without shift does not.
 func IsConfigDashboardKey(msg tea.KeyPressMsg) bool {
 	if msg.Code != 'c' && msg.Code != 'C' {
 		return false
 	}
-	return msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl)
+	if !msg.Mod.Contains(tea.ModAlt) || msg.Mod.Contains(tea.ModCtrl) {
+		return false
+	}
+	return msg.Mod.Contains(tea.ModShift) || msg.Code == 'C'
 }
 
 // configOverrideMarker marks a row whose key currently carries an override, so

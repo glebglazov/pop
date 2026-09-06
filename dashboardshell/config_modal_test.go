@@ -84,7 +84,9 @@ func press(t *testing.T, s Shell, msg tea.KeyPressMsg) Shell {
 	return updated.(Shell)
 }
 
-func altC() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'c', Mod: tea.ModAlt} }
+func altShiftC() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'c', Mod: tea.ModAlt | tea.ModShift}
+}
 func esc() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyEscape} }
 
 // The chord opens the component from either page, and closing it puts the human
@@ -96,9 +98,9 @@ func TestConfigModalOpensFromEitherPageAndReturnsToIt(t *testing.T) {
 		cursor := s.PageDashboard(start).ListCursor()
 		before := s.View().Content
 
-		s = press(t, s, altC())
+		s = press(t, s, altShiftC())
 		if !s.ConfigModalOpen() {
-			t.Fatalf("alt+c on page %v opened no modal", start)
+			t.Fatalf("alt+shift+c on page %v opened no modal", start)
 		}
 		if view := s.View().Content; !strings.Contains(view, "Config · what is in force here") {
 			t.Fatalf("modal view on page %v:\n%s", start, view)
@@ -144,7 +146,7 @@ func TestConfigModalSuspendsEveryHostKey(t *testing.T) {
 
 	s := shellWithConfigModal(t, PageWork, &stubOverrideWriter{}, nil)
 	cursor := s.PageDashboard(PageWork).ListCursor()
-	s = press(t, s, altC())
+	s = press(t, s, altShiftC())
 
 	for _, key := range []tea.KeyPressMsg{
 		{Code: 'v', Text: "v"}, // the shell's page toggle
@@ -193,8 +195,8 @@ func TestHelpOverlaySwallowsShellKeys(t *testing.T) {
 	if press(t, live(), toggle).ActivePage() != PageRoutines {
 		t.Fatal("`v` does not page this shell — the fixture proves nothing")
 	}
-	if !press(t, live(), altC()).ConfigModalOpen() {
-		t.Fatal("alt+c opens no modal on this shell — the fixture proves nothing")
+	if !press(t, live(), altShiftC()).ConfigModalOpen() {
+		t.Fatal("alt+shift+c opens no modal on this shell — the fixture proves nothing")
 	}
 
 	withHelp := func() Shell {
@@ -213,12 +215,12 @@ func TestHelpOverlaySwallowsShellKeys(t *testing.T) {
 		t.Fatal("v built the other page while help was open")
 	}
 
-	s = press(t, withHelp(), altC())
+	s = press(t, withHelp(), altShiftC())
 	if s.ConfigModalOpen() {
-		t.Fatal("alt+c opened the Config modal while help was open")
+		t.Fatal("alt+shift+c opened the Config modal while help was open")
 	}
 	if !s.PageDashboard(PageWork).HelpOpen() {
-		t.Fatal("alt+c closed the help overlay instead of being swallowed by it")
+		t.Fatal("alt+shift+c closed the help overlay instead of being swallowed by it")
 	}
 
 	// The overlay's own keys still work, so the swallow is not a lock-in.
@@ -263,14 +265,14 @@ func TestConfigModalWriteReReadsConfigForThePages(t *testing.T) {
 	}
 
 	// Open, close without writing: nothing to re-read.
-	s = press(t, s, altC())
+	s = press(t, s, altShiftC())
 	s = press(t, s, esc())
 	if reloads != 0 {
 		t.Fatalf("re-read config %d times after a modal that wrote nothing", reloads)
 	}
 
 	// Open, copy the source down — a write — and close.
-	s = press(t, s, altC())
+	s = press(t, s, altShiftC())
 	s = press(t, s, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	s = press(t, s, esc())
 	if reloads != 1 {
@@ -296,7 +298,7 @@ func TestConfigModalReReadFailureShowsOnThePage(t *testing.T) {
 	reload := func() (*config.Config, error) { return nil, errors.New("config.toml is not readable") }
 	s := shellWithConfigModal(t, PageWork, &stubOverrideWriter{}, reload)
 
-	s = press(t, s, altC())
+	s = press(t, s, altShiftC())
 	s = press(t, s, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	s = press(t, s, esc())
 
