@@ -1457,32 +1457,30 @@ func dashboardTestLineIndex(lines []string, needle string) int {
 	return -1
 }
 
-func TestDashboardQAndSAreUnbound(t *testing.T) {
+// `q` is bound on neither level: quitting is h/esc, and a stray q must not do it.
+// `s` used to be unbound beside it and is now the Status menu on both levels
+// (ADR-0261 decision 1).
+func TestDashboardQIsUnbound(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "pop", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set"},
 	}})
-	got := m
-	for _, key := range []string{"q", "s"} {
-		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
-		got = updated.(QueueDashboard)
-		if cmd != nil {
-			t.Fatalf("%s at top level returned command, want no-op", key)
-		}
-		if got.list.Cursor() != 0 || got.detail != nil {
-			t.Fatalf("%s changed model: cursor=%d detail=%+v", key, got.list.Cursor(), got.detail)
-		}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	got := updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatal("q at top level returned command, want no-op")
+	}
+	if got.list.Cursor() != 0 || got.detail != nil {
+		t.Fatalf("q changed model: cursor=%d detail=%+v", got.list.Cursor(), got.detail)
 	}
 
 	got.detail = newDetailView(got.snap.Containers[0])
-	for _, key := range []string{"q", "s"} {
-		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
-		got = updated.(QueueDashboard)
-		if cmd != nil {
-			t.Fatalf("%s in detail returned command, want no-op", key)
-		}
-		if got.detail == nil {
-			t.Fatalf("%s in detail closed detail view", key)
-		}
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	got = updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatal("q in detail returned command, want no-op")
+	}
+	if got.detail == nil {
+		t.Fatal("q in detail closed detail view")
 	}
 }
 

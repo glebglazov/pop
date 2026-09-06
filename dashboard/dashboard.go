@@ -279,11 +279,6 @@ func newDashboardStatusMenu(kinds workKinds, row DashboardRow) *dashboardStatusM
 // kind's status vocabulary; over a Selection it offers what every marked row
 // offers and declares plural, exactly as the opener did from inside the action
 // menu (ADR-0236 decision 10).
-//
-// A kind with no status to write answers in a flash. Inside a menu the absence
-// explained itself — the line simply was not in the list — but a key that reaches
-// the whole surface has to say why it did nothing, or it reads as broken
-// (decision 7).
 func (m QueueDashboard) openStatusMenu() (tea.Model, tea.Cmd) {
 	if m.selection.Active() {
 		return m.openSelectionStatusMenu()
@@ -292,8 +287,22 @@ func (m QueueDashboard) openStatusMenu() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	return m.openStatusMenuOver(row)
+}
+
+// openStatusMenuOver opens the Status menu over one container, whichever level
+// asked: the row list's cursored row, or the container a detail view is open over
+// (ADR-0261 decision 1). A Selection is a row-list concept, resolved before this
+// point, so a menu opened from a detail is singular however many rows are marked
+// behind it.
+//
+// A kind with no status to write answers in a flash. Inside a menu the absence
+// explained itself — the line simply was not in the list — but a key that reaches
+// the whole surface has to say why it did nothing, or it reads as broken
+// (ADR-0236 decision 7).
+func (m QueueDashboard) openStatusMenuOver(row DashboardRow) (tea.Model, tea.Cmd) {
 	if len(m.kinds.statusActionsFor(row)) == 0 {
-		m.flash.Set(fmt.Sprintf("a %s has no status to write", detailKindNoun(row.Kind)))
+		m.containerFlash().Set(fmt.Sprintf("a %s has no status to write", detailKindNoun(row.Kind)))
 		return m, nil
 	}
 	m.err = nil
@@ -327,11 +336,6 @@ func newDashboardCopyMenu(kinds workKinds, row DashboardRow) *dashboardCopyMenu 
 // keypress away (`y` `n`), and the paths beside it were reachable from nowhere
 // (decision 6). Over a Selection it offers what every marked row offers and
 // declares plural, which in practice is the name.
-//
-// A kind that can copy nothing answers in a flash rather than opening an empty
-// menu, the rule every top-level opener follows (decision 7). No wired kind is in
-// that state — every one of them has a name — so this is the guard for a future
-// kind, not a case on the board today.
 func (m QueueDashboard) openCopyMenu() (tea.Model, tea.Cmd) {
 	if m.selection.Active() {
 		return m.openSelectionCopyMenu()
@@ -340,8 +344,19 @@ func (m QueueDashboard) openCopyMenu() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	return m.openCopyMenuOver(row)
+}
+
+// openCopyMenuOver opens the Copy menu over one container, from the row list or
+// from the detail the container's own view is open in (ADR-0261 decision 1).
+//
+// A kind that can copy nothing answers in a flash rather than opening an empty
+// menu, the rule every top-level opener follows (ADR-0236 decision 7). No wired
+// kind is in that state — every one of them has a name — so this is the guard for
+// a future kind, not a case on the board today.
+func (m QueueDashboard) openCopyMenuOver(row DashboardRow) (tea.Model, tea.Cmd) {
 	if len(m.kinds.copyActionsFor(row)) == 0 {
-		m.flash.Set(fmt.Sprintf("a %s has nothing to copy", detailKindNoun(row.Kind)))
+		m.containerFlash().Set(fmt.Sprintf("a %s has nothing to copy", detailKindNoun(row.Kind)))
 		return m, nil
 	}
 	m.err = nil
@@ -353,10 +368,6 @@ func (m QueueDashboard) openCopyMenu() (tea.Model, tea.Cmd) {
 // windows and, on an already-muted row, `u` to clear; over a Selection one window
 // answers for every marked row, exactly as the opener did from inside the action
 // menu (ADR-0236 decisions 1 and 10).
-//
-// A kind with no mute answers in a flash, for the same reason a kind with no
-// status does: at top level the absence can no longer explain itself by a line
-// simply not being in a list (decision 7).
 func (m QueueDashboard) openMuteMenu() (tea.Model, tea.Cmd) {
 	if m.selection.Active() {
 		return m.openSelectionMuteMenu()
@@ -365,8 +376,18 @@ func (m QueueDashboard) openMuteMenu() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	return m.openMuteMenuOver(row)
+}
+
+// openMuteMenuOver opens the Mute menu over one container, from the row list or
+// from the detail the container's own view is open in (ADR-0261 decision 1).
+//
+// A kind with no mute answers in a flash, for the same reason a kind with no
+// status does: at top level the absence can no longer explain itself by a line
+// simply not being in a list (ADR-0236 decision 7).
+func (m QueueDashboard) openMuteMenuOver(row DashboardRow) (tea.Model, tea.Cmd) {
 	if m.kinds.muterFor(row) == nil {
-		m.flash.Set(fmt.Sprintf("a %s cannot be muted", detailKindNoun(row.Kind)))
+		m.containerFlash().Set(fmt.Sprintf("a %s cannot be muted", detailKindNoun(row.Kind)))
 		return m, nil
 	}
 	m.err = nil
@@ -377,11 +398,14 @@ func (m QueueDashboard) openMuteMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dashboardMenu is the layered menu overlay the row list opens: `r` for the Run
-// menu (its own verb list), or straight into the Status, Copy or Mute menu when
-// one of those keys opens it instead. It carries the snapshot of the row it was
-// opened on and the verbs applicable to that row on a ui.List whose cursor
-// drives j/k + Enter selection. The menu closes as soon as a verb fires.
+// dashboardMenu is the layered menu overlay a container-level key opens: `r` for
+// the Run menu (its own verb list), or straight into the Status, Copy or Mute
+// menu when one of those keys opens it instead. A detail view opens the same
+// three over the container it is showing (ADR-0261 decision 1), so which surface
+// draws the overlay is read off the open detail rather than recorded here.
+// It carries the snapshot of the row it was opened on and the verbs applicable
+// to that row on a ui.List whose cursor drives j/k + Enter selection. The menu
+// closes as soon as a verb fires.
 // A menu opened straight as the Status, Copy or Mute menu carries no run list of
 // its own: that menu is the only thing it is showing, so there is nothing
 // underneath it to go back to and esc leaves the overlay.
@@ -1279,6 +1303,18 @@ func (m *QueueDashboard) flashes() []*ui.Flash {
 	return out
 }
 
+// containerFlash is where a container-level key's one-line reply belongs: the
+// detail's own hint line when the key was pressed inside a detail, the row
+// list's otherwise. The menus and the flat verb answer from both levels now
+// (ADR-0261 decision 1), and a reply on a line that is not on screen reads as a
+// dead key.
+func (m *QueueDashboard) containerFlash() *ui.Flash {
+	if m.detail != nil {
+		return &m.detail.flash
+	}
+	return &m.flash
+}
+
 func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1439,17 +1475,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			if item, ok := dashboardShortcutItem(m.kinds, row, "I"); ok {
-				return m.dispatchVerb(item.verb, row)
-			}
-			// The Map keeps its unconditional answer: with an empty frontier it offers
-			// no I item, and the "no frontier tickets" report is a better reply than a
-			// dead key.
-			if !mapRow(row) {
-				return m, nil
-			}
-			m.err = nil
-			return m, m.launchWayfinderSession(row, "")
+			return m.runShortcutVerb(row)
 		case "l", "enter":
 			if m.refuseSingular("the detail view") {
 				return m, nil
@@ -1708,13 +1734,17 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
 	}
-	switch msg.String() {
-	case "J":
-		m.list.MoveDown()
-		return m, nil
-	case "K":
-		m.list.MoveUp()
-		return m, nil
+	if m.detail == nil {
+		// Moving the live rows underneath is the row list's own affordance: a menu
+		// opened over a detail has no rows on screen to move (ADR-0261 decision 1).
+		switch msg.String() {
+		case "J":
+			m.list.MoveDown()
+			return m, nil
+		case "K":
+			m.list.MoveUp()
+			return m, nil
+		}
 	}
 	if m.menu.status != nil {
 		return m.updateStatusMenu(msg)
@@ -1994,7 +2024,9 @@ func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
 }
 
 // dispatchVerb runs the verb the menu (or a flat shortcut) selected, keyed by
-// verb id and never by kind. The Task-set verbs that drive a modal the dashboard
+// verb id and never by kind. It is the one dispatch both levels share: the row
+// list's menus and flat keys, and the detail's openers over the container it is
+// showing (ADR-0261). The Task-set verbs that drive a modal the dashboard
 // owns — the drain picker, the bind picker, the unbind confirm — plus the ones
 // that spawn through queue's own launchers stay here by decision (ADR-0173):
 // moving them behind Kind.Perform needs a modal-capable Outcome and is deferred.
@@ -2011,13 +2043,13 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	}
 	switch verb {
 	case setkind.VerbDrain:
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 		return m, m.launchDrain(row)
 	case setkind.VerbVerify:
 		if !dashboardVerifyEligible(row) {
 			return m, nil
 		}
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 		return m, m.launchVerify(row)
 	case setkind.VerbBind:
 		m.bind = &dashboardBindModal{row: row, loading: true}
@@ -2034,7 +2066,7 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		}
 		return m, m.ToggleSetAutoDrain(row)
 	case setkind.VerbAssist:
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 		return m, m.launchAssist(row)
 	case setkind.VerbFold:
 		if !dashboardFoldEligible(row) {
@@ -2044,31 +2076,31 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 			m.actionErr = err
 			return m, nil
 		}
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 		return m, m.launchFold(row)
 	case setkind.VerbUnpark:
 		if !row.Parked {
-			m.flash.Set("task set is not parked")
+			m.containerFlash().Set("task set is not parked")
 			return m, nil
 		}
 		return m, m.unparkSet(row)
 	case wayfinder.VerbWork:
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 		return m, m.launchWayfinderSession(row, "")
 	case wayfinder.VerbWorkHere:
-		m.flash.Set(dashboardSpawnPending)
+		m.containerFlash().Set(dashboardSpawnPending)
 		return m, m.spawnWayfinderSession(row, "")
 	case wayfinder.VerbFanOut:
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 		return m, m.launchWayfinderFanOut(row)
 	case wayfinder.VerbFanOutHere:
-		m.flash.Set(dashboardSpawnPending)
+		m.containerFlash().Set(dashboardSpawnPending)
 		return m, m.spawnWayfinderFanOut(row)
 	case wayfinder.VerbAssist:
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 		return m, m.launchWayfinderAssist(row)
 	case work.VerbCopyName:
-		m.flash.Set(m.copyRowName(row))
+		m.containerFlash().Set(m.copyRowName(row))
 		return m, nil
 	}
 	// Every other verb is the kind's own to run: it performs it and the dashboard
@@ -2076,15 +2108,42 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	// needs no case here (ADR-0173). A kind's handoff earns the same pending flash
 	// as a dashboard-owned one — the spawn is just as slow and just as invisible.
 	if dashboardVerbHandsOff(m.kinds, row, verb) {
-		m.flash.Set(dashboardHandoffPending)
+		m.containerFlash().Set(dashboardHandoffPending)
 	}
 	return m, m.performKindVerb(row, verb)
+}
+
+// runShortcutVerb answers `I` over one container: the verb that container's own
+// kind advertises under the key, dispatched exactly as the menu would, so the
+// flat key never means something the menu does not advertise. Both levels reach
+// it — the row list over its cursored row, a detail over the container it is
+// open on (ADR-0261 decision 4).
+//
+// The Map keeps its unconditional answer: with an empty frontier it offers no I
+// item, and the "no frontier tickets" report is a better reply than a dead key.
+func (m QueueDashboard) runShortcutVerb(row DashboardRow) (tea.Model, tea.Cmd) {
+	if item, ok := dashboardShortcutItem(m.kinds, row, "I"); ok {
+		return m.dispatchVerb(item.verb, row)
+	}
+	if !mapRow(row) {
+		return m, nil
+	}
+	m.err = nil
+	return m, m.launchWayfinderSession(row, "")
 }
 
 func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.itemMenu != nil {
 		m.pendingG = false
 		return m.updateItemMenu(msg)
+	}
+	if m.menu != nil {
+		// A container menu the detail opened over its own container. `update`
+		// reaches the detail before the menu, so the detail hands the keyboard to
+		// the one driver both levels share; esc closes the menu and leaves the
+		// detail standing underneath it (ADR-0261 decision 1).
+		m.pendingG = false
+		return m.updateMenu(msg)
 	}
 	if m.detail != nil && m.detail.peek != nil {
 		if msg.String() == "g" {
@@ -2134,19 +2193,6 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.itemMenu = newItemMenu(item, actions, true)
-		case "y", "p":
-			if m.detail.peek.artifactPath != "" {
-				artifact, ok := m.detail.artifactByPath(m.detail.peek.artifactPath)
-				if !ok {
-					return m, nil
-				}
-				return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, true)
-			}
-			item, ok := m.detail.itemByID(m.detail.peek.itemID)
-			if !ok {
-				return m, nil
-			}
-			return m.dispatchItemKey(msg.String(), m.detail.row, item, true)
 		}
 		return m, nil
 	}
@@ -2257,22 +2303,30 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.itemMenu = newItemMenu(item, actions, false)
 		return m, nil
-	case "y", "p":
+	case "s":
+		// The three openers mean over the container what they mean over its row
+		// (ADR-0261 decision 1) — same menus, same entries, same refusals. `r` above
+		// is the exception: it stays the cursored item's own menu, which is where
+		// copying an item lives now that `y` and `p` no longer copy outright.
 		if m.detail == nil {
 			return m, nil
 		}
-		if m.detail.artifacts {
-			artifact, ok := m.detail.artifactList.Selected()
-			if !ok {
-				return m, nil
-			}
-			return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, false)
-		}
-		item, ok := m.detail.list.Selected()
-		if !ok {
+		return m.openStatusMenuOver(m.detail.row)
+	case "y":
+		if m.detail == nil {
 			return m, nil
 		}
-		return m.dispatchItemKey(msg.String(), m.detail.row, item, false)
+		return m.openCopyMenuOver(m.detail.row)
+	case "m":
+		if m.detail == nil {
+			return m, nil
+		}
+		return m.openMuteMenuOver(m.detail.row)
+	case "I":
+		if m.detail == nil {
+			return m, nil
+		}
+		return m.runShortcutVerb(m.detail.row)
 	}
 	return m, nil
 }
@@ -2331,28 +2385,6 @@ func (m QueueDashboard) invokeItemMenuItem(idx int) (tea.Model, tea.Cmd) {
 		return m.dispatchArtifactVerb(verb, m.detail.row, *artifact, inPeek)
 	}
 	return m.dispatchItemVerb(verb, m.detail.row, item, inPeek)
-}
-
-// dispatchArtifactKey resolves a direct key through the kind's advertised
-// actions, so the direct route and the row menu always execute the same verb.
-func (m QueueDashboard) dispatchArtifactKey(key string, row work.Container, artifact work.Artifact, inPeek bool) (tea.Model, tea.Cmd) {
-	for _, action := range m.kinds.artifactActionsFor(row, artifact) {
-		if action.Key == key {
-			return m.dispatchArtifactVerb(action.Verb, row, artifact, inPeek)
-		}
-	}
-	return m, nil
-}
-
-// dispatchItemKey resolves a direct key through the kind's advertised actions,
-// so the direct route and the row menu always execute the same verb.
-func (m QueueDashboard) dispatchItemKey(key string, row work.Container, item work.Item, inPeek bool) (tea.Model, tea.Cmd) {
-	for _, action := range m.kinds.itemActionsFor(row, item) {
-		if action.Key == key {
-			return m.dispatchItemVerb(action.Verb, row, item, inPeek)
-		}
-	}
-	return m, nil
 }
 
 func (m QueueDashboard) dispatchArtifactVerb(verb work.Verb, row work.Container, artifact work.Artifact, inPeek bool) (tea.Model, tea.Cmd) {
@@ -3273,6 +3305,35 @@ func dashboardTick(page Page) tea.Cmd {
 	return tea.Tick(dashboardPollInterval, func(time.Time) tea.Msg { return dashboardTickMsg{page: page} })
 }
 
+// menuHelpTail is the navigation half of every container menu's help. J/K moves
+// the rows the menu is drawn over, so it is only named where there are rows on
+// screen to move — a menu opened from a detail is drawn over the detail
+// (ADR-0261 decision 1).
+func (m QueueDashboard) menuHelpTail(runDesc string) []ui.HelpEntry {
+	entries := []ui.HelpEntry{{Key: "j/k", Desc: "navigate"}}
+	if m.detail == nil {
+		entries = append(entries, ui.HelpEntry{Key: "J/K", Desc: "navigate rows"})
+	}
+	return append(entries,
+		ui.HelpEntry{Key: "enter", Desc: runDesc},
+		ui.HelpEntry{Key: "esc", Desc: "close menu"},
+	)
+}
+
+// shortcutHelpEntry names what `I` does over row, in that row's own kind's words
+// (ADR-0204), for the two surfaces the key answers on. A Map with an empty
+// frontier advertises no I item but still answers the key with its frontier
+// report, so it keeps the entry.
+func shortcutHelpEntry(kinds workKinds, row DashboardRow) (ui.HelpEntry, bool) {
+	if item, found := dashboardShortcutItem(kinds, row, "I"); found {
+		return ui.HelpEntry{Key: "I", Desc: item.label}, true
+	}
+	if mapRow(row) {
+		return ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"}, true
+	}
+	return ui.HelpEntry{}, false
+}
+
 func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 	// Determine current mode and return contextual help entries
 	switch {
@@ -3343,12 +3404,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		for _, action := range items {
 			entries = append(entries, ui.HelpEntry{Key: action.Key, Desc: action.Label})
 		}
-		return append(entries,
-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
-			ui.HelpEntry{Key: "enter", Desc: "run entry"},
-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
-		)
+		return append(entries, m.menuHelpTail("run entry")...)
 	case m.menu != nil && m.menu.mute != nil:
 		// The Mute menu's entries are dates derived from today, so the help lists the
 		// windows actually on offer rather than a fixed roster that would be wrong by
@@ -3358,13 +3414,8 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		for _, entry := range items {
 			entries = append(entries, ui.HelpEntry{Key: entry.key, Desc: entry.label})
 		}
-		return append(entries,
-			ui.HelpEntry{Key: "", Desc: muteMenuFooter()},
-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
-			ui.HelpEntry{Key: "enter", Desc: "run entry"},
-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
-		)
+		entries = append(entries, ui.HelpEntry{Key: "", Desc: muteMenuFooter()})
+		return append(entries, m.menuHelpTail("run entry")...)
 	case m.menu != nil && m.menu.status != nil:
 		// The Status menu's verbs are the focused row's own kind's, so the help
 		// lists the menu that is actually open rather than one kind's vocabulary
@@ -3374,12 +3425,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		for _, action := range items {
 			entries = append(entries, ui.HelpEntry{Key: action.Key, Desc: action.Label})
 		}
-		return append(entries,
-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
-			ui.HelpEntry{Key: "enter", Desc: "run action"},
-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
-		)
+		return append(entries, m.menuHelpTail("run action")...)
 	case m.menu != nil:
 		// Dashboard Run menu. Its verbs are the focused row's own kind's, so the
 		// help lists the menu that is actually open rather than one kind's vocabulary
@@ -3389,13 +3435,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		for _, item := range items {
 			entries = append(entries, ui.HelpEntry{Key: item.key, Desc: item.label})
 		}
-		entries = append(entries,
-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
-			ui.HelpEntry{Key: "enter", Desc: "run action"},
-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
-		)
-		return entries
+		return append(entries, m.menuHelpTail("run action")...)
 	case m.filter != nil:
 		// Work view preset list (ADR-0197)
 		return []ui.HelpEntry{
@@ -3406,18 +3446,16 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 	case m.detail != nil && m.detail.peek != nil:
 		// Detail peek view (item or artifact)
+		// Copying is `r` and a menu entry here: the peek's flat copies retired with
+		// the detail's (ADR-0261 decision 3).
 		entries := []ui.HelpEntry{
 			{Key: "j/k", Desc: "scroll line"},
 			{Key: "ctrl+d", Desc: "page down"},
 			{Key: "ctrl+u", Desc: "page up"},
 			{Key: "gg", Desc: "top"},
 			{Key: "G", Desc: "bottom"},
-			{Key: "y", Desc: "copy name"},
+			{Key: "h/esc", Desc: "close peek"},
 		}
-		if m.detail.peek.artifactPath != "" {
-			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
-		}
-		entries = append(entries, ui.HelpEntry{Key: "h/esc", Desc: "close peek"})
 		runDesc := "item run menu"
 		if m.detail.peek.artifactPath != "" {
 			runDesc = "artifact run menu"
@@ -3425,23 +3463,29 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		entries = append(entries, ui.HelpEntry{Key: "r", Desc: runDesc})
 		return entries
 	case m.detail != nil:
-		// Detail view (one container's item list or Artifact view)
+		// Detail view (one container's item list or Artifact view). `r` is the
+		// cursored row's own menu; the three openers under it act on the container
+		// the detail is open over, exactly as they do one level up, and `I` runs
+		// that container's own flat verb (ADR-0261 decisions 1, 2 and 4).
 		noun := "items"
+		runDesc := "item run menu"
+		if m.detail.artifacts {
+			noun = "artifacts"
+			runDesc = "artifact run menu"
+		}
 		entries := []ui.HelpEntry{
 			{Key: "j/k", Desc: "navigate " + noun},
 			{Key: "ctrl+d/ctrl+u", Desc: "half page down/up"},
 			{Key: "gg", Desc: "first " + strings.TrimSuffix(noun, "s")},
 			{Key: "G", Desc: "last " + strings.TrimSuffix(noun, "s")},
 			{Key: "l/enter", Desc: "peek document"},
-			{Key: "r", Desc: "item run menu"},
-			{Key: "y", Desc: "copy name"},
+			{Key: "r", Desc: runDesc},
+			{Key: "s", Desc: "status menu"},
+			{Key: "y", Desc: "copy menu"},
+			{Key: "m", Desc: "mute menu"},
 		}
-		if m.detail.artifacts {
-			entries[0].Desc = "navigate artifacts"
-			entries[2].Desc = "first artifact"
-			entries[3].Desc = "last artifact"
-			entries[5].Desc = "artifact run menu"
-			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
+		if entry, ok := shortcutHelpEntry(m.kinds, m.detail.row); ok {
+			entries = append(entries, entry)
 		}
 		if m.detail.hasArtifacts() {
 			desc := "show artifacts"
@@ -3509,15 +3553,9 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "v", Desc: m.page.toggleWord + " view"},
 			ui.HelpEntry{Key: "h/esc", Desc: "quit"},
 		)
-		// I is bound to whatever the cursored row's own kind offers under that key,
-		// so the overlay names that action rather than one kind's (ADR-0204). A Map
-		// with an empty frontier advertises no I item but still answers the key with
-		// its frontier report, so it keeps the entry.
 		if row, ok := m.list.Selected(); ok {
-			if item, found := dashboardShortcutItem(m.kinds, row, "I"); found {
-				entries = append(entries, ui.HelpEntry{Key: "I", Desc: item.label})
-			} else if mapRow(row) {
-				entries = append(entries, ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"})
+			if entry, found := shortcutHelpEntry(m.kinds, row); found {
+				entries = append(entries, entry)
 			}
 		}
 		return entries
@@ -3634,7 +3672,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	// screen rows and only one can be open at a time.
 	var block []string
 	switch {
-	case m.menu != nil:
+	case m.menu != nil && m.detail == nil:
 		block = dashboardMenuLines(m.menu, m.width, m.liveCache())
 		// No menu nests under another any more (ADR-0236 decision 1), so esc always
 		// means the same thing: back to the rows.
@@ -3923,7 +3961,15 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	// scrolls them back, and the list can never paint past the pane.
 	hints := detailHints(d)
 	var block []string
-	if m.itemMenu != nil && !m.itemMenu.inPeek {
+	switch {
+	case m.menu != nil:
+		// A container menu the detail opened is the detail's own reserved block, at
+		// the position and under the rule grammar every other menu draws in
+		// (ADR-0261 decision 1). It names no J/K: the rows those move are the row
+		// list's, and the row list is not on screen.
+		block = dashboardMenuLines(m.menu, m.width, m.liveCache())
+		hints = "j/k move · enter/letter run · esc close"
+	case m.itemMenu != nil && !m.itemMenu.inPeek:
 		block = itemMenuLines(m.itemMenu, m.width)
 		hints = "j/k move · enter/letter run · esc close"
 	}
@@ -3966,11 +4012,15 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	return frame, strings.Join(parts, "\n")
 }
 
+// detailHints names the detail's four menu openers in the order the row list
+// names them (ADR-0261 decision 1). Only `r` reads differently one level down —
+// it opens the cursored item's or artifact's own menu, which is where copying one
+// lives now that the flat copies are retired (decision 3).
 func detailHints(d *detailView) string {
+	hint := "j/k · gg/G top/bottom · l/enter peek · r run ▸ · s status ▸ · y copy ▸ · m mute ▸"
 	if d.artifacts {
-		return "j/k · gg/G top/bottom · l/enter peek · r run · y copy name · p copy path · v tasks · h/esc back"
+		return hint + " · v tasks · h/esc back"
 	}
-	hint := "j/k · gg/G top/bottom · l/enter peek · r run · y copy name"
 	if d.hasArtifacts() {
 		hint += " · v artifacts"
 	}
@@ -4141,11 +4191,10 @@ func (menu *itemMenu) target() string {
 // the page by exactly the lines it takes off screen.
 func (m QueueDashboard) documentPeekChrome() ui.Frame {
 	p := m.detail.peek
-	hints := "  j/k · C-d/C-u · gg/G · y copy name"
-	if p.artifactPath != "" {
-		hints += " · p copy path"
-	}
-	hints += " · r run · h/esc back"
+	// The peek is the item's own surface and keeps the item's own key: `r` opens
+	// the menu both copies live on, and neither of them is a flat key any more
+	// (ADR-0261 decision 3).
+	hints := "  j/k · C-d/C-u · gg/G · r run · h/esc back"
 	var block []string
 	if m.itemMenu != nil && m.itemMenu.inPeek {
 		block = itemMenuLines(m.itemMenu, m.width)

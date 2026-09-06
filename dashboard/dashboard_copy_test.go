@@ -249,28 +249,46 @@ func detailCopyModel(setID string, task tasks.Task) QueueDashboard {
 	return m
 }
 
-// TestQueueDashboardCopyDetailTask covers the `y` verb in the task-set detail
-// view: the cursored task's <task-set>/<file>.md reference is copied.
-func TestQueueDashboardCopyDetailTask(t *testing.T) {
-	task := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
-	m := detailCopyModel("my-set", task)
+// TestDetailFlatCopyKeysRetire is the inverse of what `y` and `p` used to do one
+// level down (ADR-0261 decision 3): neither copies the cursored item any more, in
+// the detail list or inside a Document peek. `p` goes inert on both, and `y` in
+// the list is the container's Copy menu instead.
+func TestDetailFlatCopyKeysRetire(t *testing.T) {
+	task := tasks.Task{ID: "01-a", File: "/repo/tasks/my-set/01-a.md", Status: "open"}
 
-	var captured string
-	m.copyFunc = func(s string) error {
-		captured = s
-		return nil
-	}
+	for _, inPeek := range []bool{false, true} {
+		name := "detail list"
+		if inPeek {
+			name = "document peek"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := detailCopyModel("my-set", task)
+			if inPeek {
+				m.detail.peek = &documentPeek{itemID: "01-a", text: "body\n"}
+			}
+			copies := 0
+			m.copyFunc = func(string) error { copies++; return nil }
 
-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if cmd != nil {
-		t.Fatal("y should not schedule a command")
-	}
-	got := updated.(QueueDashboard)
-	if captured != "my-set/01-a.md" {
-		t.Fatalf("copyFunc captured %q, want my-set/01-a.md", captured)
-	}
-	if got.detail.flash.Text() != "copied my-set/01-a.md" {
-		t.Fatalf("flash = %q, want copied confirmation", got.detail.flash.Text())
+			for _, key := range []string{"y", "p"} {
+				updated, cmd := m.update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+				m = updated.(QueueDashboard)
+				for cmd != nil {
+					msg := cmd()
+					if msg == nil {
+						break
+					}
+					updated, cmd = m.update(msg)
+					m = updated.(QueueDashboard)
+				}
+			}
+			if copies != 0 {
+				t.Fatalf("the flat keys wrote the clipboard %d times, want none", copies)
+			}
+			wantMenu := !inPeek
+			if (m.menu != nil && m.menu.copy != nil) != wantMenu {
+				t.Fatalf("copy menu open = %v, want %v", m.menu != nil && m.menu.copy != nil, wantMenu)
+			}
+		})
 	}
 }
 
@@ -315,24 +333,9 @@ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if cmd == nil {
-		t.Fatal("p did not dispatch through the kind command seam")
-	}
-	updated, _ = updated.(QueueDashboard).update(cmd())
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
-	if captured != task.File {
-		t.Fatalf("copyFunc captured %q, want %q", captured, task.File)
-	}
-	if got.detail.flash.Text() != "copied "+task.File {
-		t.Fatalf("flash = %q, want copied confirmation", got.detail.flash.Text())
-	}
-
-	m = detailCopyModel("my-set", task)
-	m.copyFunc = func(s string) error { captured = s; return nil }
-	updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	got = updated.(QueueDashboard)
-	updated, cmd = got.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	if cmd == nil {
 		t.Fatal("p in task menu did not dispatch through the kind command seam")
 	}
@@ -340,32 +343,6 @@ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
 	got = updated.(QueueDashboard)
 	if captured != task.File || got.detail.flash.Text() != "copied "+task.File {
 		t.Fatalf("task menu copy path = %q, flash = %q", captured, got.detail.flash.Text())
-	}
-}
-
-// TestQueueDashboardCopyPeekTask covers the `y` verb inside the Document peek.
-func TestQueueDashboardCopyPeekTask(t *testing.T) {
-	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "open"}
-	m := detailCopyModel("set-peek", task)
-	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
-
-	var captured string
-	m.copyFunc = func(s string) error { captured = s; return nil }
-
-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if cmd != nil {
-		t.Fatal("y should not schedule a command")
-	}
-	got := updated.(QueueDashboard)
-	if captured != "set-peek/02-b.md" {
-		t.Fatalf("copyFunc captured %q, want set-peek/02-b.md", captured)
-	}
-	if got.detail.peek.flash.Text() != "copied set-peek/02-b.md" {
-		t.Fatalf("peek flash = %q, want copied confirmation", got.detail.peek.flash.Text())
-	}
-	view := got.View().Content
-	if !strings.Contains(view, "copied set-peek/02-b.md") {
-		t.Fatalf("peek view missing status line:\n%s", view)
 	}
 }
 
@@ -391,6 +368,9 @@ func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 	if got.detail.peek.flash.Text() != "copied set-peek-menu/02-b.md" {
 		t.Fatalf("peek flash = %q, want copied confirmation", got.detail.peek.flash.Text())
 	}
+	if view := got.View().Content; !strings.Contains(view, "copied set-peek-menu/02-b.md") {
+		t.Fatalf("peek view missing status line:\n%s", view)
+	}
 }
 
 func TestQueueDashboardCopyPeekTaskPath(t *testing.T) {
@@ -400,6 +380,8 @@ func TestQueueDashboardCopyPeekTaskPath(t *testing.T) {
 
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	m = updated.(QueueDashboard)
 	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	if cmd == nil {
 		t.Fatal("p did not dispatch through the kind command seam")
@@ -414,8 +396,8 @@ func TestQueueDashboardCopyPeekTaskPath(t *testing.T) {
 	}
 }
 
-// TestQueueDashboardCopyMapDetailTicket covers the `y` verb on a Map detail
-// ticket list: the bare ticket id is copied.
+// TestQueueDashboardCopyMapDetailTicket covers the copy-name verb on a Map detail
+// ticket list: the bare ticket id is copied, from the ticket's own `r` menu.
 func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
 	got := openMapDetail(t, m)
@@ -423,6 +405,8 @@ func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
 
+	updated, _ := got.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	got = updated.(QueueDashboard)
 	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
@@ -436,8 +420,8 @@ func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 	}
 }
 
-// TestQueueDashboardCopyMapPeekTicket covers the `y` verb inside a Map ticket
-// text peek: the bare ticket id is copied.
+// TestQueueDashboardCopyMapPeekTicket covers the same verb inside a Map ticket
+// text peek: the bare ticket id is copied and the confirmation stays on the peek.
 func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
 	got := openMapDetail(t, m)
@@ -446,6 +430,8 @@ func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
 
+	updated, _ := got.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	got = updated.(QueueDashboard)
 	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")

@@ -171,26 +171,27 @@ func (m QueueDashboard) handoffOutcome(row DashboardRow, h work.Handoff) tea.Cmd
 	}
 }
 
-// reportVerbStatus puts a verb's one-line result where the operator is looking.
+// reportVerbStatus puts a verb's one-line result where the operator is looking:
+// the peek's line for a verb the peek dispatched, and otherwise the line the
+// surface in front is showing — which a container verb reaches too, now that the
+// detail's own openers dispatch them (ADR-0261 decision 1).
 func (m *QueueDashboard) reportVerbStatus(msg dashboardKindVerbMsg, status string) {
 	if status == "" {
 		return
 	}
-	switch {
-	case (msg.item != nil || msg.artifact != nil) && msg.inPeek && m.detail != nil && m.detail.peek != nil:
+	if msg.inPeek && m.detail != nil && m.detail.peek != nil {
 		m.detail.peek.flash.Set(status)
-	case (msg.item != nil || msg.artifact != nil) && m.detail != nil:
-		m.detail.flash.Set(status)
-	default:
-		m.flash.Set(status)
+		return
 	}
+	m.containerFlash().Set(status)
 }
 
-// reportVerbError surfaces a refused verb. A container verb's failure is sticky
-// on the dashboard's action-error line; an item or artifact verb stays inside the
-// detail surface where it ran.
+// reportVerbError surfaces a refused verb. Inside a detail it stays on that
+// surface, container verb and item verb alike: the detail draws no warning
+// region, so a sticky error line behind it would never be read. On the row list
+// a container verb's failure is sticky on the dashboard's action-error line.
 func (m *QueueDashboard) reportVerbError(msg dashboardKindVerbMsg, err error) {
-	if (msg.item != nil || msg.artifact != nil) && m.detail != nil {
+	if m.detail != nil {
 		m.reportVerbStatus(msg, fmt.Sprintf("error: %v", err))
 		return
 	}

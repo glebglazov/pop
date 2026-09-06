@@ -197,24 +197,23 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 		return updated.(QueueDashboard)
 	}
 
-	// Both artifact verbs run from the row itself.
-	m = run(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if copied != "refine/"+filepath.Base(path) || !strings.Contains(m.detail.flash.Text(), copied) {
-		t.Fatalf("row y copied %q with flash %q", copied, m.detail.flash.Text())
+	// Both artifact verbs run from the artifact row's own menu, which is the only
+	// route left: the flat copies under it retired with the detail's (ADR-0261
+	// decision 3).
+	copies := []struct{ key, want string }{
+		{"y", "refine/" + filepath.Base(path)},
+		{"p", path},
 	}
-	m = run(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if copied != path || !strings.Contains(m.detail.flash.Text(), path) {
-		t.Fatalf("row p copied %q with flash %q", copied, m.detail.flash.Text())
-	}
-
-	// Both entries in the row menu dispatch through the same artifact seam.
-	for _, key := range []string{"y", "p"} {
+	for _, c := range copies {
 		updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		m = updated.(QueueDashboard)
 		if m.itemMenu == nil || m.itemMenu.artifact == nil {
 			t.Fatal("artifact row did not open its own run menu")
 		}
-		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+		m = run(t, m, tea.KeyPressMsg{Code: rune(c.key[0]), Text: c.key})
+		if copied != c.want || !strings.Contains(m.detail.flash.Text(), c.want) {
+			t.Fatalf("row menu %s copied %q with flash %q", c.key, copied, m.detail.flash.Text())
+		}
 	}
 
 	// Enter opens the existing Document peek, and its existing movement scrolls it.
@@ -234,23 +233,18 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 		t.Fatalf("artifact peek scroll = %d, want 1", m.detail.peek.scroll)
 	}
 
-	// Direct copy and the peek's menu both report on the peek, not the detail.
-	for _, key := range []string{"y", "p"} {
+	// The peek's own menu copies the same two payloads and reports on the peek,
+	// not on the detail behind it.
+	for _, c := range copies {
 		m.detail.flash.Set("")
-		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
-		if m.detail.peek.flash.Text() == "" || m.detail.flash.Text() != "" {
-			t.Fatalf("peek %s flash landed on the wrong surface: peek=%q detail=%q", key, m.detail.peek.flash.Text(), m.detail.flash.Text())
-		}
-	}
-	for _, key := range []string{"y", "p"} {
 		updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		m = updated.(QueueDashboard)
 		if m.itemMenu == nil || m.itemMenu.artifact == nil || !m.itemMenu.inPeek {
 			t.Fatal("artifact peek did not open its artifact run menu")
 		}
-		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
-		if m.detail.peek.flash.Text() == "" {
-			t.Fatalf("peek menu %s did not report on the peek", key)
+		m = run(t, m, tea.KeyPressMsg{Code: rune(c.key[0]), Text: c.key})
+		if copied != c.want || m.detail.peek.flash.Text() == "" || m.detail.flash.Text() != "" {
+			t.Fatalf("peek menu %s copied %q, flash peek=%q detail=%q", c.key, copied, m.detail.peek.flash.Text(), m.detail.flash.Text())
 		}
 	}
 }

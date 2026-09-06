@@ -279,7 +279,8 @@ func TestDocumentPeekItemMenuIsBottomChrome(t *testing.T) {
 }
 
 // TestItemCopyNamePayloadComesFromTheKind pins that the clipboard reference is
-// the kind's answer rather than a shape the dashboard assumes.
+// the kind's answer rather than a shape the dashboard assumes. Copying an item is
+// the `r` menu's now (ADR-0261 decision 3), so that is the route it is driven by.
 func TestItemCopyNamePayloadComesFromTheKind(t *testing.T) {
 	m := genericDetailDashboard(&itemVerbKind{})
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'l', Text: "l"})
@@ -287,9 +288,11 @@ func TestItemCopyNamePayloadComesFromTheKind(t *testing.T) {
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
 
+	updated, _ = got.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	got = updated.(QueueDashboard)
 	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
-		t.Fatal("y should not schedule a command")
+		t.Fatal("y in the item menu should not schedule a command")
 	}
 	if captured != "thing#01" {
 		t.Fatalf("copied %q, want the kind's own reference thing#01", captured)
