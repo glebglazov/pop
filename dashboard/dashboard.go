@@ -671,9 +671,20 @@ type detailView struct {
 	row          work.Container
 	list         *ui.List[work.Item]
 	artifactList *ui.List[work.Artifact]
+	// allArtifacts is every artifact the kind published, which the search
+	// subtracts from: the List holds only what the query leaves, so the two must
+	// not be the same slice.
+	allArtifacts []work.Artifact
 	artifacts    bool
 	cols         *detailColumns
 	peek         *documentPeek
+	// searchTyping, searchInput and searchTerm are the detail's own search, the
+	// row list's shape one level down (ADR-0261 decision 5). They are the detail's
+	// and not the dashboard's so the two searches never share a buffer or a term:
+	// closing a detail takes its query with it and leaves the rows as they were.
+	searchTyping bool
+	searchInput  ui.TextField
+	searchTerm   string
 	// flash is the detail view's transient feedback: a hint on an invalid
 	// transition, a confirmation on success. It takes the hint line for three
 	// seconds and expires itself (ADR-0204).
@@ -755,21 +766,102 @@ func (m QueueDashboard) syncDetailView(row work.Container) {
 func (d *detailView) sync(row work.Container) {
 	d.row = row
 	d.cols.idW = detailIDWidth(row.Items)
-	d.list.ReplaceItems(row.Items)
+	d.applySearch(d.activeQuery())
 }
 
 // syncArtifacts adopts the kind's current artifact list. When the last artifact
 // disappears during a refresh, the detail returns to its item list instead of
 // leaving the human in a blank view that no longer has a valid switch (ADR-0217).
 func (d *detailView) syncArtifacts(artifacts []work.Artifact) {
-	d.artifactList.ReplaceItems(artifacts)
+	d.allArtifacts = artifacts
 	if len(artifacts) == 0 {
 		d.artifacts = false
 	}
+	d.applySearch(d.activeQuery())
 }
 
+// hasArtifacts answers off the published list rather than the narrowed one: a
+// search hides artifact rows, it does not take the Artifact view away, and `v`
+// has to stay the way back out of a view the query emptied.
 func (d *detailView) hasArtifacts() bool {
-	return d != nil && d.artifactList != nil && d.artifactList.Len() > 0
+	return d != nil && len(d.allArtifacts) > 0
+}
+
+// beginSearch opens the detail's search on an empty buffer, so the lists widen
+// back to the whole container the moment `/` is pressed and applying that empty
+// buffer is how a search is cleared — the row list's rule, one level down.
+func (d *detailView) beginSearch() {
+	d.searchTyping = true
+	d.searchInput = ui.NewTextField()
+	d.applySearch("")
+}
+
+// commitSearch ends the typing phase on term: the buffer's value on Enter, the
+// term that was in force on Esc.
+func (d *detailView) commitSearch(term string) {
+	d.searchTerm = term
+	d.searchTyping = false
+	d.searchInput = ui.TextField{}
+	d.applySearch(term)
+}
+
+// activeQuery is the query the rows on screen answer to: the live buffer while
+// the human types, the applied term the rest of the time. A poll landing
+// mid-type therefore rebuilds the lists the half-typed query selects instead of
+// widening them under the typing.
+func (d *detailView) activeQuery() string {
+	if d.searchTyping {
+		return d.searchInput.Value()
+	}
+	return d.searchTerm
+}
+
+// applySearch feeds both lists what query leaves of the container's items and
+// its published artifacts. It is the one place either list is filled, so the
+// narrowing survives the poll that rebuilds the detail: sync re-applies the
+// query rather than putting the whole container back.
+func (d *detailView) applySearch(query string) {
+	d.list.ReplaceItems(filterBySearch(d.row.Items, query, detailItemSearchFields))
+	d.artifactList.ReplaceItems(filterBySearch(d.allArtifacts, query, detailArtifactSearchFields))
+}
+
+// detailItemSearchFields is everything one item can be found by, already
+// lower-cased: what the reader sees on its row, less its status. Status is
+// filter vocabulary at row level and the same reasoning holds here — a reader
+// narrowing by status wants a filter, and two grammars for one question let the
+// two answers disagree.
+func detailItemSearchFields(item work.Item) []string {
+	return []string{
+		strings.ToLower(item.ID),
+		strings.ToLower(item.Title),
+		strings.ToLower(item.Type),
+	}
+}
+
+// detailArtifactSearchFields is the artifact row's half of the same grammar: the
+// document's name and the kind's classification of it.
+func detailArtifactSearchFields(artifact work.Artifact) []string {
+	return []string{
+		strings.ToLower(artifact.Name),
+		strings.ToLower(artifact.Type),
+	}
+}
+
+// shownLen and shownNoun answer for whichever of the two lists is on screen, so
+// a caller that only cares about "the list the human is looking at" does not
+// branch on the toggle itself.
+func (d *detailView) shownLen() int {
+	if d.artifacts {
+		return d.artifactList.Len()
+	}
+	return d.list.Len()
+}
+
+func (d *detailView) shownNoun() string {
+	if d.artifacts {
+		return "artifacts"
+	}
+	return "items"
 }
 
 func (d *detailView) toggleArtifacts() {
@@ -2196,6 +2288,10 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.detail != nil && m.detail.searchTyping {
+		m.pendingG = false
+		return m.updateDetailSearchTyping(msg)
+	}
 	if msg.String() == "g" {
 		if m.pendingG {
 			m.pendingG = false
@@ -2327,6 +2423,15 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.runShortcutVerb(m.detail.row)
+	case "/":
+		// The list on screen narrows the way the rows one level up do (ADR-0261
+		// decision 5). Both lists are filtered by the one term, so `v` mid-search
+		// crosses to the other list already narrowed.
+		if m.detail == nil {
+			return m, nil
+		}
+		m.detail.beginSearch()
+		return m, nil
 	}
 	return m, nil
 }
@@ -2479,6 +2584,28 @@ func (m QueueDashboard) updateSearchTyping(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		m.applySearch(m.searchInput.Value())
 		return m, nil
 	}
+}
+
+// updateDetailSearchTyping is the detail search's typing phase, holding to the
+// same rule as the row list's: only Enter, Esc and ctrl+c are reserved, and
+// every other key is a character, so `j`, `k`, `v` and `r` type rather than act
+// (ADR-0213). Nothing here navigates — the whole detail keymap comes back on
+// Enter, over the narrowed items.
+func (m QueueDashboard) updateDetailSearchTyping(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		m.detail.commitSearch(m.detail.searchInput.Value())
+	case "esc":
+		// Abandoning the edit puts back the term that was in force when `/` was
+		// pressed — which is no term at all when there was none.
+		m.detail.commitSearch(m.detail.searchTerm)
+	default:
+		m.detail.searchInput.Update(msg)
+		m.detail.applySearch(m.detail.searchInput.Value())
+	}
+	return m, nil
 }
 
 // activeQuery is the query the rows on screen answer to: the live buffer while
@@ -2725,14 +2852,23 @@ func (m QueueDashboard) documentPeekBudget() int {
 // across five fields returns nearly everything, and the order of the page is not
 // the search's to touch. A query of nothing but whitespace narrows nothing.
 func (w workKinds) filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
+	return filterBySearch(rows, query, w.searchFields)
+}
+
+// filterBySearch is the search grammar itself, over anything that can name the
+// fields it is found by: whitespace splits the query into terms, every term must
+// be a case-insensitive substring of some field, and a query of nothing but
+// whitespace narrows nothing. The rows, the detail's items and its artifacts all
+// come through here, so the three surfaces cannot drift into three grammars.
+func filterBySearch[T any](entries []T, query string, fields func(T) []string) []T {
 	terms := strings.Fields(strings.ToLower(query))
 	if len(terms) == 0 {
-		return rows
+		return entries
 	}
-	var filtered []DashboardRow
-	for _, row := range rows {
-		if matchesEveryTerm(w.searchFields(row), terms) {
-			filtered = append(filtered, row)
+	var filtered []T
+	for _, entry := range entries {
+		if matchesEveryTerm(fields(entry), terms) {
+			filtered = append(filtered, entry)
 		}
 	}
 	return filtered
@@ -3462,6 +3598,15 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 		entries = append(entries, ui.HelpEntry{Key: "r", Desc: runDesc})
 		return entries
+	case m.detail != nil && m.detail.searchTyping:
+		// Detail search, typing phase. Every other key is text, so there is nothing
+		// else to list (ADR-0213).
+		return []ui.HelpEntry{
+			{Key: "typing", Desc: "narrow " + m.detail.shownNoun() + " by name"},
+			{Key: "enter", Desc: "apply search"},
+			{Key: "esc", Desc: "cancel search"},
+			{Key: "ctrl+c", Desc: "quit"},
+		}
 	case m.detail != nil:
 		// Detail view (one container's item list or Artifact view). `r` is the
 		// cursored row's own menu; the three openers under it act on the container
@@ -3486,6 +3631,10 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 		if entry, ok := shortcutHelpEntry(m.kinds, m.detail.row); ok {
 			entries = append(entries, entry)
+		}
+		entries = append(entries, ui.HelpEntry{Key: "/", Desc: "search " + noun})
+		if m.detail.searchTerm != "" {
+			entries = append(entries, ui.HelpEntry{Key: "/ enter", Desc: "clear search"})
 		}
 		if m.detail.hasArtifacts() {
 			desc := "show artifacts"
@@ -3571,6 +3720,8 @@ func (m QueueDashboard) View() tea.View {
 		title := "Help · " + page
 		if m.searchTyping {
 			title = "Help · " + page + " · search"
+		} else if m.detail != nil && m.detail.searchTyping {
+			title = "Help · " + page + " · detail · search"
 		} else if m.detail != nil && m.detail.peek != nil {
 			title = "Help · " + page + " · peek"
 		} else if m.detail != nil {
@@ -3751,6 +3902,11 @@ func (m QueueDashboard) pageHeader() string {
 	return strings.Join(parts, " · ")
 }
 
+// searchTypingHint is the hint line of either search's typing phase: the three
+// reserved keys, and nothing about j/k or v, which are letters while typing
+// (ADR-0213).
+const searchTypingHint = "enter apply search · esc cancel · C-h help"
+
 // mainHint returns the footer hint for the main (non-modal, non-menu) view.
 func (m QueueDashboard) mainHint() string {
 	toggle := "v " + m.page.toggleWord
@@ -3760,9 +3916,7 @@ func (m QueueDashboard) mainHint() string {
 		return ui.ConfirmPrompt(m.bulkPrompt.label)
 	}
 	if m.searchTyping {
-		// The three reserved keys, and nothing about j/k or v: while typing those
-		// are letters (ADR-0213).
-		return "enter apply search · esc cancel · C-h help"
+		return searchTypingHint
 	}
 	if len(m.snap.Containers) == 0 {
 		if m.searchTerm != "" {
@@ -3791,7 +3945,14 @@ func (m QueueDashboard) mainHint() string {
 // an empty table is the one state where the way out cannot be left to the help
 // overlay, because nothing else on screen says what happened.
 func (m QueueDashboard) emptySearchLine(query string) string {
-	return fmt.Sprintf("No %s match search %q — / then enter to clear.", m.page.searchNoun, query)
+	return emptySearchLine(m.page.searchNoun, query)
+}
+
+// emptySearchLine words that state for any list that a query emptied — the rows
+// of a page, the items or artifacts of a detail — so the way out is written the
+// same everywhere it has to be written at all.
+func emptySearchLine(noun, query string) string {
+	return fmt.Sprintf("No %s match search %q — / then enter to clear.", noun, query)
 }
 
 // mainBody renders the table body (a blank line, the column header, the
@@ -3959,7 +4120,20 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	// render as (ADR-0224 decision 4): BodyHeight shrinks the item list by exactly
 	// its height, so opening a menu scrolls rows out from the top and closing it
 	// scrolls them back, and the list can never paint past the pane.
+	if !d.searchTyping && d.searchTerm != "" {
+		// The term in force rides the title line for the reason it rides the page
+		// header one level up: a narrowed list that does not say what narrowed it
+		// reads as a container with fewer items than it has.
+		header += "  · search: " + d.searchTerm
+	}
+	inputBox := ""
+	if d.searchTyping {
+		inputBox = d.searchInput.View()
+	}
 	hints := detailHints(d)
+	if d.searchTyping {
+		hints = searchTypingHint
+	}
 	var block []string
 	switch {
 	case m.menu != nil:
@@ -3974,17 +4148,25 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 		hints = "j/k move · enter/letter run · esc close"
 	}
 	frame := ui.Frame{
-		Width:  m.width,
-		TermH:  m.height,
-		Header: header,
-		Flash:  d.flash,
-		Block:  block,
-		Hints:  hints,
+		Width:    m.width,
+		TermH:    m.height,
+		Header:   header,
+		InputBox: inputBox,
+		Flash:    d.flash,
+		Block:    block,
+		Hints:    hints,
 	}
 	budget := frame.BodyHeight(m.height)
 	// The item list is the point of the view, so prose yields to it: sections are
 	// cut (with an elision marker) before the list is squeezed below one row.
 	sections := clampDetailSections(detailSectionLines(d.row.DetailSections, m.width), budget-detailTableChromeLines-1)
+	if query := d.activeQuery(); query != "" && d.shownLen() == 0 {
+		// A query that hides every row takes the table with it: column headers over
+		// nothing read as a container with no items, and this is the one state where
+		// the way out cannot be left to the help overlay.
+		parts := append([]string{}, sections...)
+		return frame, strings.Join(append(parts, "", "  "+emptySearchLine(d.shownNoun(), query)), "\n")
+	}
 	listH := budget - detailTableChromeLines - len(sections)
 	if listH < 1 {
 		listH = 1
@@ -4017,7 +4199,7 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 // it opens the cursored item's or artifact's own menu, which is where copying one
 // lives now that the flat copies are retired (decision 3).
 func detailHints(d *detailView) string {
-	hint := "j/k · gg/G top/bottom · l/enter peek · r run ▸ · s status ▸ · y copy ▸ · m mute ▸"
+	hint := "j/k · gg/G top/bottom · l/enter peek · r run ▸ · s status ▸ · y copy ▸ · m mute ▸ · / search"
 	if d.artifacts {
 		return hint + " · v tasks · h/esc back"
 	}
