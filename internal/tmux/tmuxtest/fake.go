@@ -743,6 +743,24 @@ func (f *Fake) FindTaggedPane(session, window string, tag tmux.PaneTag, value st
 	return "", nil
 }
 
+func (f *Fake) ListTaggedPanes(session, window string, tag tmux.PaneTag, value string) ([]tmux.TaggedPane, error) {
+	var out []tmux.TaggedPane
+	for _, id := range f.Windows[session][window] {
+		tags := f.PaneTagValues[id]
+		if tags == nil || tags[tag] != value {
+			continue
+		}
+		p := tmux.TaggedPane{PaneID: id, Slot: tmux.ParsePaneSlot(tags[tmux.TagSlot])}
+		if info, ok := f.PaneInfos[id]; ok {
+			p.Command = info.Command
+		} else if cmd, ok := f.PaneCommandMap[id]; ok {
+			p.Command = cmd
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 func (f *Fake) ListActivityPanes() ([]tmux.ActivityPane, error) {
 	seen := map[string]bool{}
 	var out []tmux.ActivityPane

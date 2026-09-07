@@ -1,6 +1,7 @@
 package tmux_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/glebglazov/pop/internal/tmux"
@@ -366,5 +367,118 @@ func TestSpawnFreshPaneAlwaysCreatesUntagged(t *testing.T) {
 	}
 	if len(f.SentCommands[first]) != 0 || len(f.SentCommands[second]) != 0 {
 		t.Fatalf("empty command must not send-keys, got %v", f.SentCommands)
+	}
+}
+
+// EnsureSlottedPane and LowestFreePaneSlot are the plural of the tagged-pane
+// flow: one container holds up to nine panes for an activity, each addressed by
+// its own digit (ADR-0263).
+
+func TestSlottedPanesFillTheRangeAndRefuseATenth(t *testing.T) {
+	f := &tmuxtest.Fake{}
+
+	byslot := map[tmux.PaneSlot]string{}
+	for i := tmux.FirstPaneSlot; i <= tmux.LastPaneSlot; i++ {
+		slot, err := tmux.LowestFreePaneSlot(f, tmux.TagAssist, "work", tmux.DrainWindow, "set-1")
+		if err != nil {
+			t.Fatalf("free slot %d: %v", i, err)
+		}
+		if slot != i {
+			t.Fatalf("free slot = %d, want the lowest free %d", slot, i)
+		}
+		pane, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, slot, "work", tmux.DrainWindow, "/proj", "set-1", "talk")
+		if err != nil {
+			t.Fatalf("spawn slot %d: %v", slot, err)
+		}
+		byslot[slot] = pane
+	}
+
+	if panes := f.Windows["work"]["pop-work"]; len(panes) != int(tmux.LastPaneSlot) {
+		t.Fatalf("panes = %v, want %d distinct panes", panes, tmux.LastPaneSlot)
+	}
+	if _, err := tmux.LowestFreePaneSlot(f, tmux.TagAssist, "work", tmux.DrainWindow, "set-1"); !errors.Is(err, tmux.ErrNoFreePaneSlot) {
+		t.Fatalf("tenth slot error = %v, want ErrNoFreePaneSlot", err)
+	}
+
+	// Every pane still carries the bare container id, so every existing reader
+	// of the activity tag sees what it always saw; the digit sits beside it.
+	for slot, pane := range byslot {
+		if got := f.PaneTagValues[pane][tmux.TagAssist]; got != "set-1" {
+			t.Errorf("pane %s @pop_assist = %q, want set-1", pane, got)
+		}
+		if got := f.PaneTagValues[pane][tmux.TagSlot]; got != slot.String() {
+			t.Errorf("pane %s slot = %q, want %s", pane, got, slot)
+		}
+	}
+
+	// A named slot reaches the same pane for as long as that pane lives.
+	reused, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, 3, "work", tmux.DrainWindow, "/proj", "set-1", "again")
+	if err != nil {
+		t.Fatalf("reuse slot 3: %v", err)
+	}
+	if reused != byslot[3] {
+		t.Fatalf("slot 3 = %q, want the pane already there %q", reused, byslot[3])
+	}
+	if panes := f.Windows["work"]["pop-work"]; len(panes) != int(tmux.LastPaneSlot) {
+		t.Fatalf("reuse spawned a twin: %v", panes)
+	}
+}
+
+func TestLowestFreePaneSlotSkipsOnlyLiveSiblings(t *testing.T) {
+	f := &tmuxtest.Fake{}
+
+	first, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, tmux.FirstPaneSlot, "work", tmux.DrainWindow, "/proj", "set-1", "talk")
+	if err != nil {
+		t.Fatalf("slot 1: %v", err)
+	}
+	if _, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, 2, "work", tmux.DrainWindow, "/proj", "set-1", "talk"); err != nil {
+		t.Fatalf("slot 2: %v", err)
+	}
+	// A pane spawned for another container never occupies this one's digits.
+	if _, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, tmux.FirstPaneSlot, "work", tmux.DrainWindow, "/proj", "set-2", "talk"); err != nil {
+		t.Fatalf("other set slot 1: %v", err)
+	}
+	slot, err := tmux.LowestFreePaneSlot(f, tmux.TagAssist, "work", tmux.DrainWindow, "set-1")
+	if err != nil {
+		t.Fatalf("free slot: %v", err)
+	}
+	if slot != 3 {
+		t.Fatalf("free slot = %d, want 3", slot)
+	}
+
+	// Closing the middle pane leaves its digit free rather than renumbering.
+	f.Windows["work"]["pop-work"] = []string{first}
+	if slot, err = tmux.LowestFreePaneSlot(f, tmux.TagAssist, "work", tmux.DrainWindow, "set-1"); err != nil || slot != 2 {
+		t.Fatalf("free slot after close = %d (%v), want 2", slot, err)
+	}
+}
+
+func TestEnsureSlottedPaneRefusesSlotOutsideRange(t *testing.T) {
+	f := &tmuxtest.Fake{}
+	if _, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, tmux.LastPaneSlot+1, "work", tmux.DrainWindow, "/proj", "set-1", "talk"); err == nil {
+		t.Fatal("slot 10 spawned a pane, want a refusal")
+	}
+	if panes := f.Windows["work"]["pop-work"]; len(panes) != 0 {
+		t.Fatalf("panes = %v, want none", panes)
+	}
+}
+
+func TestEnsureSlottedPaneAdoptsThePreSlotPane(t *testing.T) {
+	// The single-pane assist paths tagged their pane with no slot at all. Asking
+	// for the lowest slot must land in that pane rather than beside it.
+	f := &tmuxtest.Fake{}
+	legacy, err := tmux.EnsureTaggedPane(f, tmux.TagAssist, "work", tmux.DrainWindow, "/proj", "set-1", "talk")
+	if err != nil {
+		t.Fatalf("legacy spawn: %v", err)
+	}
+	if got := f.PaneTagValues[legacy][tmux.TagSlot]; got != "" {
+		t.Fatalf("EnsureTaggedPane stamped a slot %q, want none", got)
+	}
+	pane, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, tmux.FirstPaneSlot, "work", tmux.DrainWindow, "/proj", "set-1", "again")
+	if err != nil {
+		t.Fatalf("slot 1: %v", err)
+	}
+	if pane != legacy {
+		t.Fatalf("slot 1 = %q, want the pre-slot pane %q", pane, legacy)
 	}
 }

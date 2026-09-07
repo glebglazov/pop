@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"fmt"
+	"sort"
 	"strings"
 
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
@@ -94,6 +95,29 @@ func (rt *RecordingTmux) FindTaggedPane(session, window string, tag tmuxmod.Pane
 		}
 	}
 	return "", nil
+}
+
+// ListTaggedPanes scans the whole fake the way this fixture's FindTaggedPane
+// does — its NewWindow and SplitWindow mint pane ids without registering a
+// window — ordered by pane id so a caller sees the same list every run.
+func (rt *RecordingTmux) ListTaggedPanes(session, window string, tag tmuxmod.PaneTag, value string) ([]tmuxmod.TaggedPane, error) {
+	rt.record("list-panes", "-t", session+":"+window)
+	var ids []string
+	for paneID, tags := range rt.PaneTagValues {
+		if tags[tag] == value {
+			ids = append(ids, paneID)
+		}
+	}
+	sort.Strings(ids)
+	panes := make([]tmuxmod.TaggedPane, 0, len(ids))
+	for _, paneID := range ids {
+		panes = append(panes, tmuxmod.TaggedPane{
+			PaneID:  paneID,
+			Slot:    tmuxmod.ParsePaneSlot(rt.PaneTagValues[paneID][tmuxmod.TagSlot]),
+			Command: rt.PaneInfos[paneID].Command,
+		})
+	}
+	return panes, nil
 }
 
 func (rt *RecordingTmux) TagPane(paneID string, tag tmuxmod.PaneTag, value string) error {

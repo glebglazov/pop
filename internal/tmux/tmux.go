@@ -134,6 +134,10 @@ type Tmux interface {
 	FindTaggedPane(session, window string, tag PaneTag, value string) (string, error)
 	// PaneTagValue reads one pane's @pop_* tag, empty when it carries none.
 	PaneTagValue(paneID string, tag PaneTag) (string, error)
+	// ListTaggedPanes returns every pane in session's window tagged tag=value,
+	// with its slot and foreground command — the plural of FindTaggedPane, for
+	// the activities one container may hold several panes for.
+	ListTaggedPanes(session, window string, tag PaneTag, value string) ([]TaggedPane, error)
 	// ListActivityPanes returns every pane across all sessions that carries at
 	// least one Work-dashboard activity tag, with its current foreground
 	// command — one list-panes -a round-trip for the live-pane affordance.

@@ -64,3 +64,43 @@ var errNoWindow = errTest("can't find window")
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
+
+func TestListTaggedPanesReadsSlotAndLiveness(t *testing.T) {
+	r := &recordingRunner{out: "other-set\t1\t%1\tclaude\nset-1\t\t%4\tzsh\nset-1\t3\t%7\tclaude\n"}
+	tm := &realTmux{run: r}
+
+	panes, err := tm.ListTaggedPanes("proj", DrainWindow, TagAssist, "set-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArgs := [][]string{{"list-panes", "-t", "proj:pop-work", "-F", "#{@pop_assist}\t#{@pop_slot}\t#{pane_id}\t#{pane_current_command}"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+	// The slotless pane is the pre-slot single pane: it reads as slot 1 and its
+	// bare shell reads as not live.
+	want := []TaggedPane{
+		{PaneID: "%4", Slot: FirstPaneSlot, Command: "zsh"},
+		{PaneID: "%7", Slot: 3, Command: "claude"},
+	}
+	if !reflect.DeepEqual(panes, want) {
+		t.Fatalf("panes = %+v, want %+v", panes, want)
+	}
+	if panes[0].Live() {
+		t.Errorf("bare shell pane reports live")
+	}
+	if !panes[1].Live() {
+		t.Errorf("running pane reports not live")
+	}
+}
+
+func TestListTaggedPanesMissingWindowIsNoPanesNotError(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: errNoWindow}}
+	panes, err := tm.ListTaggedPanes("proj", DrainWindow, TagAssist, "set-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(panes) != 0 {
+		t.Fatalf("panes = %+v, want none", panes)
+	}
+}
