@@ -1399,6 +1399,22 @@ func TestExplorerSteeringFlagsRegistered(t *testing.T) {
 	}
 }
 
+// TestSkipExploreFlagRegistered pins the drain-side door out of the Explore
+// park: a boolean on `implement` alone, since exploring by hand and retracting
+// the declaration are the other two and neither is a flag (ADR-0262).
+func TestSkipExploreFlagRegistered(t *testing.T) {
+	skip := taskImplementCmd.Flags().Lookup("skip-explore")
+	if skip == nil {
+		t.Fatal("tasks implement --skip-explore flag not registered")
+	}
+	if skip.Value.Type() != "bool" {
+		t.Fatalf("tasks implement --skip-explore type = %q, want bool", skip.Value.Type())
+	}
+	if taskExploreCmd.Flags().Lookup("skip-explore") != nil {
+		t.Fatal("--skip-explore steers a drain, not a hand-run explore pass")
+	}
+}
+
 func TestVerifierSteeringFlagsRegistered(t *testing.T) {
 	// `pop tasks verify --task-runtime-path <checkout>` pins the Verifier to a
 	// specific checkout root instead of resolving from the repo root.

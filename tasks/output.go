@@ -68,7 +68,7 @@ func statusStyle(status TaskSetStatus) string {
 	switch status {
 	case StatusDone:
 		return ansiGreen
-	case StatusFailed, StatusMalformed, StatusVerifyFailed:
+	case StatusFailed, StatusMalformed, StatusVerifyFailed, StatusExploreFailed:
 		return ansiRed
 	case StatusReady, StatusNeedsVerify:
 		return ansiCyan

@@ -34,6 +34,13 @@ const (
 	// NEEDS-HUMAN verdict at the current work SHA (ADR-0086/0087). It parks with
 	// the findings for a human. Appears only when Agent verification is enabled.
 	StatusVerifyFailed TaskSetStatus = "VERIFY-FAILED"
+	// StatusExploreFailed is a set whose Explore pass gave up: its author declared
+	// the tasks interrelated, the pass spent its retry cap, and there is no
+	// Exploration report (ADR-0262). It parks rather than letting builders start
+	// from separate maps, and it is deliberately not BLOCKED — that one says a
+	// human owes a decision, and one word cannot carry both. It is resolved by
+	// exploreParked, so it appears only on a set carrying the Explore directive.
+	StatusExploreFailed TaskSetStatus = "EXPLORE-FAILED"
 )
 
 // Row is one line in the task status table.

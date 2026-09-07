@@ -38,8 +38,17 @@ const (
 //
 // A human-completed set is declined, as refinement declines one: exploration
 // exists to shape work that is about to be built, and there is none.
+//
+// It is the one agent phase that can stop a drain (ADR-0262 decision 5): a set
+// whose author said the tasks are interrelated and which has no report parks
+// rather than letting its builders start from separate maps. The gate is asked
+// of exploreParked, so what stops the drain here is the same fact the status
+// table shows and the daemon passes over.
 func (r *implementRun) explorePhase() (exploreDirective, error) {
-	if !r.plan.cfg.ExploreEnabled() {
+	// --skip-explore is the door that drains a declared set once unexplored. It
+	// is a choice about this invocation, so it writes no report and clears no
+	// park: the next drain asks the question again.
+	if r.opts.SkipExplore {
 		return exploreFallThrough, nil
 	}
 	m := r.refresh.Manifests[r.taskSetID]
@@ -58,26 +67,62 @@ func (r *implementRun) explorePhase() (exploreDirective, error) {
 		return exploreFallThrough, nil
 	}
 
-	_, err := exploreResolvedSet(r.d, r.plan.cfg, exploreCoreOptions{
-		DefPath:     r.resolved.DefinitionPath,
-		RuntimePath: r.runtimePath,
-		SetID:       r.taskSetID,
-		Timeout:     r.timeout,
-		Output:      r.out,
-		probeMemo:   r.agentProbeMemo,
-		runExplorer: r.opts.exploreRunner,
-		// The drain is already holding this checkout for this set, so the explore
-		// step reads under that claim rather than asking for it again (ADR-0238).
-		checkoutHeld: true,
-	})
-	if err == nil {
+	if r.plan.cfg.ExploreEnabled() {
+		_, err := exploreResolvedSet(r.d, r.plan.cfg, exploreCoreOptions{
+			DefPath:     r.resolved.DefinitionPath,
+			RuntimePath: r.runtimePath,
+			SetID:       r.taskSetID,
+			Timeout:     r.timeout,
+			Output:      r.out,
+			probeMemo:   r.agentProbeMemo,
+			runExplorer: r.opts.exploreRunner,
+			// The drain is already holding this checkout for this set, so the explore
+			// step reads under that claim rather than asking for it again (ADR-0238).
+			checkoutHeld: true,
+		})
+		if err == nil {
+			return exploreFallThrough, nil
+		}
+		if isInterrupted(err) {
+			return exploreReturn, err
+		}
+		// An Explorer that could not answer is named in the drain's output; whether
+		// that ends the drain is the park's question, asked below.
+		outputFor(r.out).line(ansiYellow, "━━ Exploration did not run for %s: %v", r.taskSetID, err)
+	}
+	// The pass just gave up, or an earlier one did and the group is switched off
+	// so this drain ran none. Either way the park is re-derived rather than
+	// inferred from the error: a run the machinery cut short (a quota pause, an
+	// agent nothing could start) is a condition a later drain finds gone, and the
+	// drain carries on unexplored as it did before this gate existed.
+	if !exploreParked(r.d, m) {
 		return exploreFallThrough, nil
 	}
-	if isInterrupted(err) {
-		return exploreReturn, err
-	}
-	// An Explorer that could not answer is named in the drain's output and the
-	// drain carries on unexplored.
-	outputFor(r.out).line(ansiYellow, "━━ Exploration did not run for %s: %v", r.taskSetID, err)
-	return exploreFallThrough, nil
+	return exploreReturn, r.parkUnexplored(m)
 }
+
+// parkUnexplored stops the drain at the Explore gate: it appends the one
+// set-level Progress record that says why the work stopped — so the reason is
+// readable without opening a Captured run — names the three doors out, and
+// returns the no-runnable error the drain exits on.
+//
+// The record is the park's only write. The status is derived, not stored
+// (exploreParked), so there is nothing to persist and nothing to clear when a
+// later pass writes the report.
+func (r *implementRun) parkUnexplored(m *Manifest) error {
+	out := outputFor(r.out)
+	out.line(ansiRed, "✗ Task set %s is parked: the explore phase produced no Exploration report", r.taskSetID)
+	out.line(ansiDim, "   Explore it by hand:  pop tasks explore %s", r.taskSetID)
+	out.line(ansiDim, "   Drain it unexplored: pop tasks implement %s --skip-explore", r.taskSetID)
+	out.line(ansiDim, "   Retract it:          set \"explore\": false in %s", m.Path)
+	if err := AppendSetProgress(r.d, m.Dir, string(StatusExploreFailed), exploreParkSummary); err != nil {
+		return exitErr(ExitOperational, "record the explore park for task set %s: %v", r.taskSetID, err)
+	}
+	return exitErr(ExitNoRunnable, "Task set %q is parked: the explore phase produced no Exploration report, and the set declares its tasks interrelated", r.taskSetID)
+}
+
+// exploreParkSummary is what the park writes into the set's Progress record. It
+// names the phase, the reason and the ways out in full, because a human reading
+// progress.txt weeks later has neither the drain's output nor the Captured run
+// in front of them.
+const exploreParkSummary = "Explore phase: the pass spent its retry cap without producing an Exploration report, and the set declares its tasks interrelated, so nothing was built against separate maps. Explore it by hand, drain it once with --skip-explore, or retract the explore declaration."

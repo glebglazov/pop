@@ -116,6 +116,12 @@ func selectExplicitTaskSet(refresh *RefreshResult, taskSetID string) (string, er
 		// below. The loop's StatusFailed branch runs the interactive recovery
 		// prompt (re-run / finish by hand / exit) or the static advice fallback.
 		return taskSetID, nil
+	case StatusExploreFailed:
+		// An explicitly targeted parked set is allowed through, as a Failed one is:
+		// the drain's own Explore step is what retries the pass, and with
+		// --skip-explore it is what drains the set unexplored. A pass that gives up
+		// again parks the set a second time rather than building it (ADR-0262).
+		return taskSetID, nil
 	case StatusMalformed:
 		return "", exitErr(ExitNoRunnable, "Task set %q is malformed", taskSetID)
 	case StatusMissing:

@@ -49,10 +49,14 @@ func TestSelectReadySet(t *testing.T) {
 			ok:   true,
 		},
 		{
+			// The Explore park is among the statuses dispatch never picks, at any
+			// priority: a set whose pass gave up would otherwise be re-explored by
+			// every scan of the daemon (ADR-0262).
 			name: "highest priority wins, non-ready ignored",
 			rows: []tasks.Row{
 				{ID: "low", Status: tasks.StatusReady, AutoDrain: true, Priority: 1, RegIndex: 0},
 				{ID: "blocked-high", Status: tasks.StatusBlocked, Priority: 100, RegIndex: 1},
+				{ID: "parked-high", Status: tasks.StatusExploreFailed, AutoDrain: true, Priority: 100, RegIndex: 4},
 				{ID: "high", Status: tasks.StatusReady, AutoDrain: true, Priority: 50, RegIndex: 2},
 				{ID: "mid", Status: tasks.StatusReady, AutoDrain: true, Priority: 10, RegIndex: 3},
 			},
