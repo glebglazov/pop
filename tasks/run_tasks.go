@@ -86,6 +86,9 @@ type RunTaskSetOptions struct {
 	// refineRunner overrides the refine phase's agent spawn, mirroring
 	// refineCoreOptions.runRefiner. Unexported and test-only.
 	refineRunner func(prompt string) (string, string, error)
+	// exploreRunner overrides the explore phase's agent spawn, mirroring
+	// exploreCoreOptions.runExplorer. Unexported and test-only.
+	exploreRunner func(prompt string) (string, string, error)
 }
 
 // RunTaskSetResult is the outcome of a run-tasks invocation.
@@ -177,18 +180,28 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 }
 
 // loop drains the resolved Task set sequentially through eligible AFK tasks. It
-// runs after setup and reads as pure orchestration: each iteration re-Refreshes,
-// then dispatches to one of four methods — the Refine phase, the pre-approval
-// Verifier phase, the terminal-status switch, or the task-execution branch —
-// each of which owns its choreography and hands back a continue/return directive.
-// The methods mutate the run's Drain / prompt-reader / result state through the
-// receiver so the deferred finalize sees the latest values.
+// runs after setup and reads as pure orchestration: the Explore phase once at
+// the head, then each iteration re-Refreshes and dispatches to one of four
+// methods — the Refine phase, the pre-approval Verifier phase, the
+// terminal-status switch, or the task-execution branch — each of which owns its
+// choreography and hands back a continue/return directive. The methods mutate
+// the run's Drain / prompt-reader / result state through the receiver so the
+// deferred finalize sees the latest values.
 func (r *implementRun) loop() (*RunTaskSetResult, error) {
 	d := r.d
 	resolved := r.resolved
 	statePath := r.statePath
 	taskSetID := r.taskSetID
 	result := r.result
+
+	// Explore phase (ADR-0262): a set carrying the Explore directive and no
+	// Exploration report gets one written here, before the first task is
+	// selected, so every builder in the set reads the same map. It runs once per
+	// drain rather than per iteration — the pass's product is the report, and a
+	// set that has one is explored.
+	if directive, exploreErr := r.explorePhase(); directive == exploreReturn {
+		return result, exploreErr
+	}
 
 	for {
 		currentRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)

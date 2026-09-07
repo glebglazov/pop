@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 )
 
@@ -273,6 +274,15 @@ func TestExploreRefusesASetItCannotResolve(t *testing.T) {
 	}
 }
 
+// implementAgentsConfig is what a human configured for building this
+// repository — the end of the Explorer chain, exploring being the same reading
+// skill as building.
+func implementAgentsConfig(cmds ...string) *config.Config {
+	return &config.Config{Work: &config.WorkConfig{
+		Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands(cmds...)},
+	}}
+}
+
 // TestResolveExplorerPrecedence covers the Explorer chain (ADR-0262), highest
 // first: CLI flags → the per-set `explorer` object → the implement agents /
 // heavy, with agents and effort resolving independently of one another.
@@ -283,6 +293,7 @@ func TestResolveExplorerPrecedence(t *testing.T) {
 		cliAgents  []string
 		cliEffort  string
 		manifest   *Manifest
+		cfg        *config.Config
 		wantAgents []string
 		wantEffort string
 	}{
@@ -290,6 +301,27 @@ func TestResolveExplorerPrecedence(t *testing.T) {
 			name:       "default when nothing steers the pass",
 			wantAgents: []string{DefaultAgentPreset},
 			wantEffort: DefaultExploreEffort,
+		},
+		{
+			name:       "the configured build agents when nothing steers the pass",
+			cfg:        implementAgentsConfig("codex", "claude"),
+			wantAgents: []string{"codex", "claude"},
+			wantEffort: DefaultExploreEffort,
+		},
+		{
+			name:       "the per-set explorer object beats the configured agents",
+			cfg:        implementAgentsConfig("codex", "claude"),
+			manifest:   manifestWithAgentDirective(t, "explorer", []string{"pi"}, "light"),
+			wantAgents: []string{"pi"},
+			wantEffort: "light",
+		},
+		{
+			name:       "CLI beats the per-set object and the configured agents",
+			cliAgents:  []string{"opencode"},
+			cfg:        implementAgentsConfig("codex", "claude"),
+			manifest:   manifestWithAgentDirective(t, "explorer", []string{"pi"}, "light"),
+			wantAgents: []string{"opencode"},
+			wantEffort: "light",
 		},
 		{
 			name:       "the per-set explorer object steers both",
@@ -316,7 +348,7 @@ func TestResolveExplorerPrecedence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			sel, err := resolveExplorer(tt.cliAgents, tt.cliEffort, tt.manifest, nil)
+			sel, err := resolveExplorer(tt.cliAgents, tt.cliEffort, tt.manifest, tt.cfg)
 			if err != nil {
 				t.Fatalf("resolveExplorer: %v", err)
 			}

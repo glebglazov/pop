@@ -76,6 +76,14 @@ type exploreCoreOptions struct {
 	// admission is the policy the Explorer acquires the checkout under
 	// (ADR-0238/0239).
 	admission AdmissionPolicy
+	// checkoutHeld says the caller is already inside a claim on this checkout —
+	// the drain's own explore step, which runs under the drain's running Drain
+	// row. Explore then takes nothing: a second acquisition for the same set
+	// would be refused by the Set claim the caller itself holds.
+	checkoutHeld bool
+	// runExplorer returns the report and the agent that wrote it, replacing the
+	// real agent spawn in tests.
+	runExplorer func(prompt string) (string, string, error)
 }
 
 // ExploreTaskSet explores a set using default dependencies.
@@ -131,22 +139,20 @@ func exploreResolvedSet(d *Deps, cfg *config.Config, opts exploreCoreOptions) (*
 	// a Tree-stable operation and takes the checkout for its duration, waiting at
 	// a terminal when something else holds it (ADR-0238). A map drawn from files
 	// another drain is rewriting describes a tree that never existed, which is
-	// the one failure this document cannot afford.
-	hold, err := AcquireTreeStable(d, opts.RuntimePath, opts.SetID, opts.Output, opts.admission)
-	if err != nil {
-		return nil, err
+	// the one failure this document cannot afford. A caller already holding the
+	// checkout for this set — the drain's own explore step — takes nothing.
+	if !opts.checkoutHeld {
+		hold, err := AcquireTreeStable(d, opts.RuntimePath, opts.SetID, opts.Output, opts.admission)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = hold.Release() }()
 	}
-	defer func() { _ = hold.Release() }()
 	// The work SHA is read before the Explorer runs: it is the commit the report
 	// describes, and an Explorer that moved it would be doing something this pass
 	// must not do.
 	workSHA := verifyWorkSHA(d, opts.RuntimePath)
-	sel, err := resolveExplorer(opts.Agents, opts.Effort, m, cfg)
-	if err != nil {
-		return nil, err
-	}
-	body, agent, err := runConfiguredExplorer(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath,
-		buildExplorerPrompt(d, m, workSHA), opts.Output, opts.Timeout, opts.probeMemo)
+	body, agent, err := runExplorer(d, cfg, opts, m, workSHA)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +177,30 @@ func writeExplorationReport(d *Deps, setDir, body string) (string, error) {
 		return "", exitErr(ExitOperational, "write exploration report: %v", err)
 	}
 	return path, nil
+}
+
+// runExplorer builds the prompt and invokes the Explorer, returning the report
+// and the agent that wrote it.
+func runExplorer(d *Deps, cfg *config.Config, opts exploreCoreOptions, m *Manifest, workSHA string) (string, string, error) {
+	text := buildExplorerPrompt(d, m, workSHA)
+	run := opts.runExplorer
+	if run == nil {
+		sel, err := resolveExplorer(opts.Agents, opts.Effort, m, cfg)
+		if err != nil {
+			return "", "", err
+		}
+		run = func(prompt string) (string, string, error) {
+			return runConfiguredExplorer(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Timeout, opts.probeMemo)
+		}
+	}
+	body, agent, err := run(text)
+	if err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(body) == "" {
+		return "", "", exitErr(ExitOperational, "the Explorer produced no report for %q", opts.SetID)
+	}
+	return body, agent, nil
 }
 
 // resolveExplorer applies the Explorer precedence chain (ADR-0262), highest
