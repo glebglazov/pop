@@ -61,6 +61,14 @@ type SetStatus string
 // the vocabulary (`tasks.VerifyMark` is an alias of it).
 type VerifyMark string
 
+// ExploreMark is the exploration-outcome vocabulary a container's ExploreMark
+// carries — the third independent fact beside a Task-set's status and its
+// Verification mark: whether a set that asked to be explored has a map. Like
+// SetStatus and VerifyMark it is declared here with no constants, so the seam
+// can hold the cell without importing the kind that owns the vocabulary
+// (`tasks.ExploreMark` is an alias of it).
+type ExploreMark string
+
 // DestKind selects how the WORKTREE destination column is styled. The plain
 // label lives on Container.Worktree; the styled wrapper lives queue-side
 // (ADR-0143).

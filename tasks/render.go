@@ -199,9 +199,10 @@ func buildRefreshResult(d *Deps, canon string, disc *Discovery, state *GlobalSta
 		ShowArchived: archived == archivedOnly,
 	}
 	result.Rows = buildRows(state, canon, disc, manifests, archived)
-	// The Explore park is layered on before the next pick is marked, so a set
-	// nothing may drain is not offered as the next one (ADR-0262).
-	applyExploreParks(d, result.Rows, manifests)
+	// The Exploration mark is resolved, and the park it implies layered on, before
+	// the next pick is marked, so a set nothing may drain is not offered as the
+	// next one (ADR-0262).
+	applyExploreMarks(d, result.Rows, manifests)
 	MarkNextPick(result.Rows)
 	return result
 }
@@ -504,15 +505,23 @@ func statusColumnText(row Row) string {
 	return label
 }
 
+// rowDetail is the DETAILS cell: what the row's status has to say, then the
+// marks and faults that ride beside it rather than inside it.
 func rowDetail(out *output, row Row) string {
-	if row.ConfigError != "" {
-		base := rowStatusDetail(out, row)
-		if base == "" {
-			return "config error: " + row.ConfigError
-		}
-		return base + " — config error: " + row.ConfigError
+	var parts []string
+	if base := rowStatusDetail(out, row); base != "" {
+		parts = append(parts, base)
 	}
-	return rowStatusDetail(out, row)
+	// The Exploration mark reads as its reason here — a table cell is where a human
+	// asks why, and "unexplored" alone would send them looking for the answer
+	// somewhere else (ADR-0262).
+	if phrase := exploreMarkPhrase(row.Explore); phrase != "" {
+		parts = append(parts, phrase)
+	}
+	if row.ConfigError != "" {
+		parts = append(parts, "config error: "+row.ConfigError)
+	}
+	return strings.Join(parts, " — ")
 }
 
 func rowStatusDetail(out *output, row Row) string {
@@ -787,6 +796,7 @@ func renderTaskSetDetail(d *Deps, cfg *config.Config, out *output, taskSetID str
 	}
 
 	renderRefineMark(d, cfg, out, m)
+	renderExploreMark(d, out, row, m)
 	renderVerifyReportPointer(d, out, m)
 	renderArtifactSummarySection(d, out, taskSetID, m)
 }
@@ -804,6 +814,29 @@ func renderRefineMark(d *Deps, cfg *config.Config, out *output, m *Manifest) {
 	}
 	fmt.Fprintln(out)
 	out.line(ansiCyan, "📝 %s", phrase)
+}
+
+// renderExploreMark says whether the map this set's tasks were meant to share
+// was ever drawn, and where it is — the mark and the pointer from the one
+// resolution every other surface reads (ADR-0262). A set that never asked to be
+// explored and holds no report renders nothing.
+//
+// The row is preferred over the manifest when the caller has one: the refresh
+// resolved the mark already, and resolving it a second time here is the drift
+// the single resolution exists to prevent.
+func renderExploreMark(d *Deps, out *output, row *Row, m *Manifest) {
+	res := ExploreResolution{}
+	if row != nil {
+		res = row.Explore
+	} else {
+		res = ResolveExploreMark(d, m)
+	}
+	line := explorationLine(res)
+	if line == "" {
+		return
+	}
+	fmt.Fprintln(out)
+	out.line(ansiCyan, "🧭 %s", line)
 }
 
 // renderVerifyReportPointer puts the set's latest Verify report where a human

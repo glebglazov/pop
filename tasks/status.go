@@ -84,6 +84,11 @@ type Row struct {
 	// ResolveVerifiedStatus. On a human-completed set it is the only place the
 	// verdict shows: the status stays DONE.
 	VerifyMark VerifyMark
+	// Explore is the set's Exploration mark with its reason and its report pointer,
+	// resolved by ResolveExploreMark at refresh time (ADR-0262). It is the whole
+	// of what a surface may say about exploration: the mark rides beside the
+	// status, and the pointer is how the report reaches a human.
+	Explore ExploreResolution
 	// Bound is true when the set holds a Worktree binding with a non-blank
 	// runtime path. Populated at refresh from the store (no git); Unfolded reads
 	// it with Provisioned and Status so `pop tasks status` can show the same

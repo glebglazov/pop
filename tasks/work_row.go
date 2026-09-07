@@ -202,6 +202,12 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	if row.QueuedCommand {
 		segments = append(segments, work.StatusSegment{Text: QueuedMark, Tone: work.TonePlain})
 	}
+	// The Exploration mark rides where the Verification badge does, and for the same
+	// reason: a set that asked for a map and has none is a fact about the set
+	// that its status does not carry (ADR-0262).
+	if text := ExploreMarkBadgeText(row); text != "" {
+		segments = append(segments, work.StatusSegment{Text: text, Tone: exploreMarkTone(row.ExploreMark)})
+	}
 	// Unfolded rides beside the status the way the Verification mark does
 	// (ADR-0197): derived from a provisioned binding plus FoldEligibleStatus,
 	// never persisted.
@@ -250,6 +256,21 @@ func verifiedAtTone(state VerifiedAtBadgeState) work.StatusTone {
 		return work.ToneWarn
 	case VerifiedAtUnverified, VerifiedAtFailed:
 		return work.ToneBad
+	default:
+		return work.TonePlain
+	}
+}
+
+// exploreMarkTone maps the Exploration marks onto the seam's attention tones: a set
+// with the map it asked for is good, and one without it warns rather than
+// alarms — the pass may simply not have run yet, and the park has a status of
+// its own for the case that will not resolve itself.
+func exploreMarkTone(mark ExploreMark) work.StatusTone {
+	switch mark {
+	case ExploreMarkExplored:
+		return work.ToneGood
+	case ExploreMarkUnexplored:
+		return work.ToneWarn
 	default:
 		return work.TonePlain
 	}
