@@ -193,6 +193,56 @@ func (t *realTmux) ListTaggedPanes(session, window string, tag PaneTag, value st
 	return panes, nil
 }
 
+// FindSlottedPane returns the id of the pane tagged tag=value sitting on slot,
+// or "" when the container holds none there. It is FindTaggedPane addressed by
+// slot, and the one place the question is asked: a pane stamped with no slot
+// reads as the first, so the answer for FirstPaneSlot is the pane a pre-slot
+// caller always found.
+func FindSlottedPane(t Tmux, tag PaneTag, slot PaneSlot, session, window, value string) (string, error) {
+	panes, err := t.ListTaggedPanes(session, window, tag, value)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range panes {
+		if p.Slot == slot {
+			return p.PaneID, nil
+		}
+	}
+	return "", nil
+}
+
+// LowestHeldPaneSlot is LowestFreePaneSlot's twin: where a caller that asked for
+// *the* pane rather than a particular one lands. It is the lowest slot tag=value
+// already holds a pane on — one still running its command for preference, so a
+// live conversation is never passed over for an idle sibling below it — and
+// FirstPaneSlot when the container holds no pane at all. It refuses nothing: a
+// full container still has a lowest held slot.
+func LowestHeldPaneSlot(t Tmux, tag PaneTag, session, window, value string) (PaneSlot, error) {
+	panes, err := t.ListTaggedPanes(session, window, tag, value)
+	if err != nil {
+		return FirstPaneSlot, err
+	}
+	live, idle := anyPaneSlot, anyPaneSlot
+	for _, p := range panes {
+		if p.Live() {
+			if live == anyPaneSlot || p.Slot < live {
+				live = p.Slot
+			}
+			continue
+		}
+		if idle == anyPaneSlot || p.Slot < idle {
+			idle = p.Slot
+		}
+	}
+	if live != anyPaneSlot {
+		return live, nil
+	}
+	if idle != anyPaneSlot {
+		return idle, nil
+	}
+	return FirstPaneSlot, nil
+}
+
 // ErrNoFreePaneSlot is the refusal of a pane beyond the addressable range.
 var ErrNoFreePaneSlot = fmt.Errorf("all %d pane slots are taken", LastPaneSlot)
 
@@ -312,16 +362,7 @@ func findPaneOnSlot(t Tmux, tag PaneTag, slot PaneSlot, session, window, value s
 	if slot == anyPaneSlot {
 		return t.FindTaggedPane(session, window, tag, value)
 	}
-	panes, err := t.ListTaggedPanes(session, window, tag, value)
-	if err != nil {
-		return "", err
-	}
-	for _, p := range panes {
-		if p.Slot == slot {
-			return p.PaneID, nil
-		}
-	}
-	return "", nil
+	return FindSlottedPane(t, tag, slot, session, window, value)
 }
 
 // SpawnFreshPane ensures the session and shared drain window, then always

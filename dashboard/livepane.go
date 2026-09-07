@@ -24,21 +24,23 @@ const (
 )
 
 // livePaneCache holds per-poll activity liveness keyed by pane tag then set id,
-// the assist panes each set holds keyed by slot, plus Map liveness keyed by map
-// id (its session). It is rebuilt from tmux list queries per dashboard poll —
+// the assist panes each container holds keyed by slot, plus Map liveness keyed by
+// map id (its session). It is rebuilt from tmux list queries per dashboard poll —
 // never from the DrainPane store.
 type livePaneCache struct {
 	byTag map[tmuxmod.PaneTag]map[string]livePaneState
-	// assist keeps every assist pane a set holds rather than one state for the
-	// set, because the Assist pane menu puts each of them on its own digit
-	// (ADR-0263). byTag still carries the set's single answer, which is what the
-	// row's fixed-width activity cluster shows.
+	// assist keeps every assist pane a container holds rather than one state for
+	// it, because the Assist pane menu puts each of them on its own digit
+	// (ADR-0263). A Map's assist panes are in here beside a Task set's: they
+	// carry the same tag keyed by the container id, and the menu is one menu.
+	// byTag still carries the container's single answer, which is what a set
+	// row's fixed-width activity cluster shows — a map row shows its session.
 	assist    map[string]map[tmuxmod.PaneSlot]livePaneState
 	wayfinder map[string]livePaneState
 }
 
-// assistPane is one of a set's assist panes as the last poll saw it: the slot
-// that addresses it, and whether the session in it is still running.
+// assistPane is one of a container's assist panes as the last poll saw it: the
+// slot that addresses it, and whether the session in it is still running.
 type assistPane struct {
 	slot  tmuxmod.PaneSlot
 	state livePaneState
@@ -99,7 +101,7 @@ func (c *livePaneCache) setAssistPane(setID string, slot tmuxmod.PaneSlot, state
 	}
 }
 
-// assistPanes lists the assist panes a set is holding, in slot order — the
+// assistPanes lists the assist panes a container is holding, in slot order — the
 // roster the Assist pane menu puts on digits. A slot no pane sits on is absent
 // rather than dark: a digit that reaches nothing is not offered.
 func (c livePaneCache) assistPanes(setID string) []assistPane {

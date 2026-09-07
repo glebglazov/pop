@@ -235,3 +235,40 @@ func TestRowAssistKeyReadsTheWholeSet(t *testing.T) {
 		})
 	}
 }
+
+// The Assist pane menu is one menu over both kinds. A map row's assist verb
+// lists the Map's own assist panes on the same digits, and a digit lands in the
+// Map's session on that slot rather than in the shared drain window (ADR-0263).
+func TestAssistMenuOverAMapRowReachesTheMapsSession(t *testing.T) {
+	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
+	f.Inside = true
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
+
+	got := openAssistMenuOverRow(t, m, map[tmuxmod.PaneSlot]livePaneState{
+		1: livePaneRunning,
+		3: livePaneIdle,
+	}, row.ID)
+	view := got.View().Content
+	if !strings.Contains(view, livePaneRunningStyle.Render("1")) || !strings.Contains(view, livePaneIdleStyle().Render("3")) {
+		t.Fatalf("a map row's menu must colour the Map's own panes by slot:\n%s", view)
+	}
+
+	updated, cmd := got.update(tea.KeyPressMsg{Code: '3', Text: "3"})
+	if cmd == nil {
+		t.Fatalf("a digit did not launch:\n%s", updated.(QueueDashboard).View().Content)
+	}
+	handoff, ok := cmd().(dashboardHandoffMsg)
+	if !ok || handoff.err != nil || !handoff.quit {
+		t.Fatalf("handoff = %+v (%T), want a quit into the Map's assist pane", handoff, cmd())
+	}
+	panes := f.Windows[wayfinderMapSession()][mapPaneWindow]
+	if len(panes) != 1 {
+		t.Fatalf("panes = %v, want the one pane the digit addressed", f.Windows[wayfinderMapSession()])
+	}
+	if slot, _ := f.PaneTagValue(panes[0], tmuxmod.TagSlot); slot != "3" {
+		t.Fatalf("pane slot = %q, want the digit that was pressed", slot)
+	}
+	if mapID, _ := f.PaneTagValue(panes[0], tmuxmod.TagAssist); mapID != row.ID {
+		t.Fatalf("pane tag = %q, want the map id", mapID)
+	}
+}

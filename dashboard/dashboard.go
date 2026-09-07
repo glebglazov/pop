@@ -398,14 +398,16 @@ func (m QueueDashboard) openMuteMenuOver(row DashboardRow) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// openAssistMenu answers the assist verb over a Task set. A set may hold up to
-// nine assist panes, so the verb picks among them instead of launching: the
-// menu names the panes it is already holding on their own slot digits and offers
-// `n` for another (ADR-0263).
+// openAssistMenu answers the assist verb over a Task set or a Map. Either may
+// hold up to nine assist panes, so the verb picks among them instead of
+// launching: the menu names the panes the container is already holding on their
+// own slot digits and offers `n` for another (ADR-0263). A Map's panes are in its
+// own session and a set's in the shared drain window, but both carry @pop_assist
+// keyed by the container id, so one roster and one menu answer for both.
 //
-// It opens over a set holding nothing, showing only `n` — the keystrokes must
-// not change shape with tmux state the row cannot show, and the pane the operator
-// wanted is one keypress away either way.
+// It opens over a container holding nothing, showing only `n` — the keystrokes
+// must not change shape with tmux state the row cannot show, and the pane the
+// operator wanted is one keypress away either way.
 func (m QueueDashboard) openAssistMenu(row DashboardRow) (tea.Model, tea.Cmd) {
 	m.err = nil
 	m.menu = &dashboardMenu{
@@ -504,12 +506,12 @@ func dashboardMenuItemsWith(kinds workKinds, row DashboardRow, enrich func(work.
 
 // menuOpenerLabel marks a verb that opens a menu instead of acting, in the
 // grammar the top-level openers are named in (`run ▸`). Assist is the one row
-// verb that opens one: a Task set may hold nine assist panes, so `A` picks among
-// them rather than launching (ADR-0263). The mark is the surface's, not the
-// kind's — the kind offers a verb, and this surface is where opening a menu is
-// what happens next.
+// verb that opens one, on either kind that offers it: a Task set and a Map may
+// each hold nine assist panes, so `A` picks among them rather than launching
+// (ADR-0263). The mark is the surface's, not the kind's — the kind offers a
+// verb, and this surface is where opening a menu is what happens next.
 func menuOpenerLabel(verb work.Verb, label string) string {
-	if verb == setkind.VerbAssist {
+	if verb == setkind.VerbAssist || verb == wayfinder.VerbAssist {
 		return label + " ▸"
 	}
 	return label
@@ -2287,8 +2289,7 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		m.containerFlash().Set(dashboardSpawnPending)
 		return m, m.spawnWayfinderFanOut(row)
 	case wayfinder.VerbAssist:
-		m.containerFlash().Set(dashboardHandoffPending)
-		return m, m.launchWayfinderAssist(row)
+		return m.openAssistMenu(row)
 	case work.VerbCopyName:
 		m.containerFlash().Set(m.copyRowName(row))
 		return m, nil
@@ -3289,22 +3290,22 @@ func (m QueueDashboard) spawnWayfinderFanOut(row DashboardRow) tea.Cmd {
 	}
 }
 
-// launchWayfinderAssist opens the Map-scoped assist pane and hands off to it. It
-// has no staying twin: an assist session is one pane you asked for in order to go
-// talk to it (ADR-0184).
-func (m QueueDashboard) launchWayfinderAssist(row DashboardRow) tea.Cmd {
-	return func() tea.Msg {
-		result, err := LaunchWayfinderAssist(m.d, m.cfg, row)
-		return handoffAfterLaunch(m.d, result, err)
-	}
-}
-
 func dashboardWayfinderEmptyFrontierMessage() string {
 	return "no frontier tickets — open tickets are blocked or claimed"
 }
 
+// launchAssist hands off to the assist pane on row's slot, in whichever
+// container the row names — a Task set's shared pop-work window, or a Map's own
+// session. One Assist pane menu is open over both kinds, so which launcher
+// answers a digit is read off the row here rather than asked of the menu. An
+// assist launch has no staying twin either way: it is a pane you asked for in
+// order to go talk to it (ADR-0184).
 func (m QueueDashboard) launchAssist(row DashboardRow, slot tmuxmod.PaneSlot) tea.Cmd {
 	return func() tea.Msg {
+		if mapRow(row) {
+			result, err := LaunchWayfinderAssist(m.d, m.cfg, row, slot)
+			return handoffAfterLaunch(m.d, result, err)
+		}
 		result, err := drain.LaunchAssist(m.d, m.cfg, row, slot)
 		return handoffAfterLaunch(m.d, result, err)
 	}
@@ -3312,6 +3313,10 @@ func (m QueueDashboard) launchAssist(row DashboardRow, slot tmuxmod.PaneSlot) te
 
 func (m QueueDashboard) launchNewAssist(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
+		if mapRow(row) {
+			result, err := LaunchNewWayfinderAssist(m.d, m.cfg, row)
+			return handoffAfterLaunch(m.d, result, err)
+		}
 		result, err := drain.LaunchNewAssist(m.d, m.cfg, row)
 		return handoffAfterLaunch(m.d, result, err)
 	}

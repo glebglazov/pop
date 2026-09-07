@@ -1,6 +1,7 @@
 package wayfinder
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,10 +9,10 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// The whole of assist's mechanics: one pane per Map, tagged and titled as the
-// Map's own, running the skill in assist mode with no ticket named — and a second
-// call landing in that same pane rather than opening a session that could race it
-// on the Map's prose.
+// The whole of assist's mechanics: a pane tagged and titled as the Map's own,
+// running the skill in assist mode with no ticket named — and a second call that
+// names no slot landing in that same pane rather than opening a second session
+// beside it.
 func TestAssistOpensOneReusedPanePerMap(t *testing.T) {
 	t.Parallel()
 	d, _ := claimFixture(t)
@@ -47,9 +48,8 @@ func TestAssistOpensOneReusedPanePerMap(t *testing.T) {
 		t.Fatalf("assist moved the operator: switched=%v attached=%v", fake.Switched, fake.Attached)
 	}
 
-	// A second call is the same pane — which is what dissolves the
-	// two-sessions-one-map race — and the live agent in it is never sent work twice
-	// (ADR-0158).
+	// A second call with no slot named is the same pane — the lowest slot the Map
+	// holds one on — and the live agent in it is never sent work twice (ADR-0158).
 	fake.PaneInfos = map[string]tmux.PaneInfo{pane.PaneID: {Session: session, Command: "claude"}}
 	sentBefore := len(fake.SentCommands[pane.PaneID])
 	again, err := AssistMap(d, nil, "", claimMapID)
@@ -182,5 +182,66 @@ func TestAssistModeInvocationNamesNoTicket(t *testing.T) {
 	}
 	if work := WorkModeInvocation("pop-", "2026-08-03-demo", "03"); !strings.HasSuffix(work, " 03") {
 		t.Fatalf("work invocation = %q, want the ticket named — the contrast assist rests on", work)
+	}
+}
+
+// A Map holds up to nine assist panes on their own slots (ADR-0263). The three
+// entry points are here together because they only make sense against each
+// other: `n` takes the next free slot, a digit reaches one particular pane, and
+// `pop map assist` — which names no slot — keeps landing in the lowest live one
+// rather than opening a session beside it.
+func TestMapAssistPanesAreAddressedBySlot(t *testing.T) {
+	t.Parallel()
+	d, _ := claimFixture(t)
+	fake := atTime(d, at(9))
+	session := MapSessionName(claimMapID)
+	m, err := FindMap(d, "", claimMapID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := func(paneID string) {
+		if fake.PaneInfos == nil {
+			fake.PaneInfos = map[string]tmux.PaneInfo{}
+		}
+		fake.PaneInfos[paneID] = tmux.PaneInfo{Session: session, Command: "claude"}
+	}
+
+	first, err := SpawnAssist(d, nil, m)
+	if err != nil || first.Slot != tmux.FirstPaneSlot {
+		t.Fatalf("first assist = %+v, %v, want the first slot", first, err)
+	}
+	running(first.PaneID)
+
+	second, err := SpawnNewAssist(d, nil, m)
+	if err != nil || second.Slot != 2 || second.PaneID == first.PaneID {
+		t.Fatalf("second assist = %+v, %v, want another pane on slot 2", second, err)
+	}
+	running(second.PaneID)
+
+	// The command line names no slot, so it goes back to the lowest live
+	// conversation instead of starting a third.
+	back, err := AssistMap(d, nil, "", claimMapID)
+	if err != nil || back.PaneID != first.PaneID || !back.Reused {
+		t.Fatalf("pop map assist = %+v, %v, want the lowest live pane %q reused", back, err, first.PaneID)
+	}
+
+	// A digit is what reaches a pane that is not the lowest one.
+	jumped, err := SpawnAssistOnSlot(d, nil, m, 2)
+	if err != nil || jumped.PaneID != second.PaneID || !jumped.Reused {
+		t.Fatalf("assist on slot 2 = %+v, %v, want %q reused", jumped, err, second.PaneID)
+	}
+
+	for slot := tmux.PaneSlot(3); slot <= tmux.LastPaneSlot; slot++ {
+		pane, err := SpawnNewAssist(d, nil, m)
+		if err != nil || pane.Slot != slot {
+			t.Fatalf("assist %d = %+v, %v, want slot %d", slot, pane, err, slot)
+		}
+		running(pane.PaneID)
+	}
+	if _, err := SpawnNewAssist(d, nil, m); !errors.Is(err, tmux.ErrNoFreePaneSlot) {
+		t.Fatalf("tenth assist = %v, want ErrNoFreePaneSlot", err)
+	}
+	if panes := fake.Windows[session]["map"]; len(panes) != int(tmux.LastPaneSlot) {
+		t.Fatalf("panes = %v, want %d assist panes", panes, tmux.LastPaneSlot)
 	}
 }

@@ -59,16 +59,30 @@ func LaunchWayfinderFanOut(d *drain.Deps, cfg *config.Config, row DashboardRow) 
 	return drain.DashboardDrainResult{PaneID: first.PaneID, Session: first.Session.Name, RuntimePath: first.Session.Dir}, len(out.Spawned), nil
 }
 
-// LaunchWayfinderAssist opens the Map's own attended session — no ticket, no
-// claim — through the same composite `pop map assist` uses. It reads no frontier,
-// so it is the one map-row launch that works whatever the frontier looks like
-// (ADR-0184). A live assist pane is a jump target rather than a second session.
-func LaunchWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow) (drain.DashboardDrainResult, error) {
+// LaunchWayfinderAssist opens the Map-scoped assist pane on slot and hands off
+// to it. It reads no frontier, so it is the one map-row launch that works
+// whatever the frontier looks like (ADR-0184). A live pane on that slot is a
+// jump target rather than a second session.
+func LaunchWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow, slot tmuxmod.PaneSlot) (drain.DashboardDrainResult, error) {
 	wd, wfMap, _, err := wayfinderSpawnTarget(d, cfg, row)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
-	pane, err := wayfinder.SpawnAssist(wd, cfg, *wfMap)
+	pane, err := wayfinder.SpawnAssistOnSlot(wd, cfg, *wfMap, slot)
+	if err != nil {
+		return drain.DashboardDrainResult{}, err
+	}
+	return drain.DashboardDrainResult{PaneID: pane.PaneID, Session: pane.Session.Name, RuntimePath: pane.Session.Dir}, nil
+}
+
+// LaunchNewWayfinderAssist opens another assist pane on the Map, on the lowest
+// slot it holds none on, refusing past the ninth (ADR-0263).
+func LaunchNewWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow) (drain.DashboardDrainResult, error) {
+	wd, wfMap, _, err := wayfinderSpawnTarget(d, cfg, row)
+	if err != nil {
+		return drain.DashboardDrainResult{}, err
+	}
+	pane, err := wayfinder.SpawnNewAssist(wd, cfg, *wfMap)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}

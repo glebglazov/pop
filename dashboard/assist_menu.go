@@ -7,9 +7,10 @@ import (
 	"github.com/glebglazov/pop/ui"
 )
 
-// The Assist pane menu's content (ADR-0263). A Task set may hold up to nine
-// assist panes, so the assist verb picks among them instead of launching: one
-// line per slot the set already holds a pane on, plus `n` for another. The lines
+// The Assist pane menu's content (ADR-0263). A Task set and a Map may each hold
+// up to nine assist panes, so the assist verb picks among them instead of
+// launching: one line per slot the container already holds a pane on, plus `n`
+// for another. The lines
 // are derived from the live-pane poll rather than a tmux query of their own, so
 // the menu opens at the speed of a keypress and its colours are the ones the
 // row's own activity cluster is already showing.
@@ -19,10 +20,10 @@ import (
 // changes as panes come and go, and a key that moves is a key you cannot learn.
 const assistMenuNewKey = "n"
 
-// dashboardAssistMenu is the Assist pane menu opened by the assist verb over a
-// Task set. Unlike the Status and Copy menus its items are the surface's own —
-// a slot is a tmux fact, not kind knowledge — and what the kind's verb does now
-// is open this rather than spawn.
+// dashboardAssistMenu is the Assist pane menu opened by the assist verb, over a
+// Task set or a Map alike. Unlike the Status and Copy menus its items are the
+// surface's own — a slot is a tmux fact, not kind knowledge — and what the
+// kind's verb does now is open this rather than spawn.
 type dashboardAssistMenu struct {
 	row  DashboardRow
 	list *ui.List[assistMenuEntry]
@@ -79,8 +80,9 @@ func assistPaneLabel(state livePaneState) string {
 	return "exited · restart in place"
 }
 
-// full reports whether the set holds a pane on every addressable slot, which is
-// what `n` refuses on: a tenth pane would be a session no digit could reach.
+// full reports whether the container holds a pane on every addressable slot,
+// which is what `n` refuses on: a tenth pane would be a session no digit could
+// reach.
 func (a *dashboardAssistMenu) full() bool {
 	if a == nil {
 		return false
@@ -94,7 +96,8 @@ func (a *dashboardAssistMenu) full() bool {
 	return held >= int(tmuxmod.LastPaneSlot)
 }
 
-// assistMenuFullRefusal is what `n` answers with on a full set. It names the cap
+// assistMenuFullRefusal is what `n` answers with on a full container. It names
+// the cap
 // and the way past it, because the key did nothing and a silent key reads as a
 // broken one (ADR-0236 decision 7).
 func assistMenuFullRefusal() string {

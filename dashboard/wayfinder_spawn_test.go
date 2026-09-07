@@ -419,9 +419,10 @@ func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 	}
 }
 
-// `A` on a map row opens the Map-scoped assist session and quits to it — and it
-// does so with the frontier resolved away, which is the state the frontier keys
-// disappear in and assist is most wanted in (ADR-0184).
+// `A` on a map row opens the Assist pane menu, and `n` from it opens the
+// Map-scoped assist session and quits to it — with the frontier resolved away,
+// which is the state the frontier keys disappear in and assist is most wanted in
+// (ADR-0184, ADR-0263).
 func TestDashboardMapRowAAssistsWithNoFrontier(t *testing.T) {
 	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
 	withWayfinderMaps(t, d, storageDir, map[string]string{
@@ -434,9 +435,16 @@ func TestDashboardMapRowAAssistsWithNoFrontier(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 
 	opened, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	updated, cmd := opened.(QueueDashboard).update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	menu, cmd := opened.(QueueDashboard).update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	if cmd != nil {
+		t.Fatal("A on a map row spawned instead of opening the Assist pane menu")
+	}
+	if !strings.Contains(menu.(QueueDashboard).View().Content, "open another assist pane") {
+		t.Fatalf("A on a map row did not open the Assist pane menu:\n%s", menu.(QueueDashboard).View().Content)
+	}
+	updated, cmd := menu.(QueueDashboard).update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if cmd == nil {
-		t.Fatal("A on a map row with no frontier did not return a command")
+		t.Fatal("n in the Assist pane menu did not return a command")
 	}
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
@@ -457,16 +465,16 @@ func TestDashboardMapRowAAssistsWithNoFrontier(t *testing.T) {
 		t.Fatalf("assist pane runs %q, want the assist-mode invocation", got)
 	}
 
-	// A second press returns to the same pane rather than opening a second
-	// conversation on the Map's prose.
+	// The first slot's digit returns to that same pane rather than opening a
+	// second conversation beside it.
 	f.PaneInfos = map[string]tmuxmod.PaneInfo{panes[0]: {Session: wayfinderMapSession(), Command: "claude"}}
 	sentBefore := len(f.SentCommands[panes[0]])
-	again, ok := updated.(QueueDashboard).launchWayfinderAssist(row)().(dashboardHandoffMsg)
+	again, ok := updated.(QueueDashboard).launchAssist(row, tmuxmod.FirstPaneSlot)().(dashboardHandoffMsg)
 	if !ok || again.err != nil {
 		t.Fatalf("second assist = %+v", again)
 	}
 	if got := f.Windows[wayfinderMapSession()][mapPaneWindow]; len(got) != 1 {
-		t.Fatalf("second assist opened another pane: %v", got)
+		t.Fatalf("the first slot's digit opened another pane: %v", got)
 	}
 	if got := len(f.SentCommands[panes[0]]); got != sentBefore {
 		t.Fatalf("second assist re-sent work into a live pane (%d sends, was %d)", got, sentBefore)

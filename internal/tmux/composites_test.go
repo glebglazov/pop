@@ -453,6 +453,40 @@ func TestLowestFreePaneSlotSkipsOnlyLiveSiblings(t *testing.T) {
 	}
 }
 
+// LowestHeldPaneSlot is where a caller that named no slot lands. The rule worth
+// pinning is which pane wins when the container holds both: a live conversation
+// on a higher digit beats an idle pane on a lower one, because landing in the
+// idle one would restart a session nobody asked to restart.
+func TestLowestHeldPaneSlotPrefersALiveSiblingOverALowerIdleOne(t *testing.T) {
+	f := &tmuxtest.Fake{}
+	if got, err := tmux.LowestHeldPaneSlot(f, tmux.TagAssist, "work", tmux.DrainWindow, "set-1"); err != nil || got != tmux.FirstPaneSlot {
+		t.Fatalf("held slot with no panes = %d (%v), want the first", got, err)
+	}
+
+	idle, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, tmux.FirstPaneSlot, "work", tmux.DrainWindow, "/proj", "set-1", "talk")
+	if err != nil {
+		t.Fatalf("slot 1: %v", err)
+	}
+	live, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, 2, "work", tmux.DrainWindow, "/proj", "set-1", "talk")
+	if err != nil {
+		t.Fatalf("slot 2: %v", err)
+	}
+	f.PaneInfos = map[string]tmux.PaneInfo{
+		idle: {Session: "work", Command: "zsh"},
+		live: {Session: "work", Command: "claude"},
+	}
+	if got, err := tmux.LowestHeldPaneSlot(f, tmux.TagAssist, "work", tmux.DrainWindow, "set-1"); err != nil || got != 2 {
+		t.Fatalf("held slot = %d (%v), want the live pane's 2", got, err)
+	}
+
+	// With nothing running, the lowest pane it holds is where it lands — the
+	// respawn-in-place case.
+	f.PaneInfos[live] = tmux.PaneInfo{Session: "work", Command: "zsh"}
+	if got, err := tmux.LowestHeldPaneSlot(f, tmux.TagAssist, "work", tmux.DrainWindow, "set-1"); err != nil || got != tmux.FirstPaneSlot {
+		t.Fatalf("held slot with none live = %d (%v), want the first", got, err)
+	}
+}
+
 func TestEnsureSlottedPaneRefusesSlotOutsideRange(t *testing.T) {
 	f := &tmuxtest.Fake{}
 	if _, err := tmux.EnsureSlottedPane(f, tmux.TagAssist, tmux.LastPaneSlot+1, "work", tmux.DrainWindow, "/proj", "set-1", "talk"); err == nil {
