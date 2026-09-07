@@ -127,6 +127,36 @@ func listCapturedRunMetas(d *Deps, taskSetDir string) ([]capturedRunMeta, error)
 	return metas, nil
 }
 
+// latestCapturedRunOfPhase is a set's most recent Captured run of one phase. It
+// reads the index halves only: what a phase's read-side mark needs is what each
+// run recorded, never what it streamed, and decompressing every event payload to
+// answer a gate preamble would cost a set's whole drain history.
+//
+// A set whose run directory cannot be read has no run of that phase as far as
+// this can tell, which is what a set the phase never ran on also looks like —
+// the direction both the Refine mark and the Explore park want to fail in.
+func latestCapturedRunOfPhase(d *Deps, m *Manifest, phase string) (capturedRunMeta, bool) {
+	if d == nil {
+		d = defaultDeps
+	}
+	if d == nil || d.FS == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
+		return capturedRunMeta{}, false
+	}
+	metas, err := listCapturedRunMetas(d, m.Dir)
+	if err != nil {
+		return capturedRunMeta{}, false
+	}
+	var latest capturedRunMeta
+	found := false
+	// The list is chronological, so the last run of the phase in it is the newest.
+	for _, meta := range metas {
+		if meta.Phase == phase {
+			latest, found = meta, true
+		}
+	}
+	return latest, found
+}
+
 // collectSpendRuns loads every Captured run under streams/runs/ for a task
 // set as meta-only records (no event stream). The legacy
 // streams/<task-stem>/attempt-NNN.jsonl.gz layout is out of scope for spend

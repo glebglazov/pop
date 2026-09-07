@@ -41,8 +41,9 @@ type Artifact struct {
 // every verify report first, then every refine report — a verdict outranks a
 // polish note (ADR-0245) — each newest-first among themselves, then the spec,
 // the exploration report and the progress record: what was decided, what
-// exists, what happened (ADR-0262, ADR-0220). Recency orders only the family that grows, so a
-// drain rewriting progress.txt cannot move the row under a reader's cursor.
+// exists, what happened (ADR-0262, ADR-0220). Recency orders only the family
+// that grows, so a drain rewriting progress.txt cannot move the row under a
+// reader's cursor.
 func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 	if d == nil {
 		d = defaultDeps

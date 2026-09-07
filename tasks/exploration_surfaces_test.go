@@ -65,12 +65,12 @@ func TestUnexploredSetIsToldNothing(t *testing.T) {
 	d, m := hitlFixture(t)
 	taskPath := m.Dir + "/01-a.md"
 
-	empty := BuildAgentPrompt(d, taskPath, "/rt", "")
+	noReport := BuildAgentPrompt(d, taskPath, "/rt", "")
 	if err := d.FS.WriteFile(m.Dir+"/"+ExplorationFileName, []byte("\n"), 0o644); err != nil {
 		t.Fatalf("write empty report: %v", err)
 	}
 	for surface, text := range map[string]string{
-		"implementer prompt":                empty,
+		"implementer prompt (no report)":    noReport,
 		"implementer prompt (empty report)": BuildAgentPrompt(d, taskPath, "/rt", ""),
 		"assist prompt":                     BuildAssistPrompt(d, nil, "demo", m, StatusAwaitingApproval, "/rt", ""),
 	} {
@@ -78,8 +78,8 @@ func TestUnexploredSetIsToldNothing(t *testing.T) {
 			t.Fatalf("%s mentions a report the set does not have:\n%s", surface, text)
 		}
 	}
-	if !strings.Contains(empty, "The task file\nabove is the one file you also edit") {
-		t.Fatalf("implementer prompt lost its edit boundary:\n%s", empty)
+	if !strings.Contains(noReport, "The task file\nabove is the one file you also edit") {
+		t.Fatalf("implementer prompt lost its edit boundary:\n%s", noReport)
 	}
 }
 
