@@ -2,36 +2,23 @@ package tasks
 
 import "strings"
 
-// exploreParked is the single read-side resolution of the Explore park
-// (ADR-0262 decision 6): a set whose author declared its tasks interrelated, on
-// which an Explore pass has run, and which has no Exploration report to show
-// for it. Every surface that passes over a parked set — the status table, the
-// drain's own Explore step, automatic selection, the Work daemon's scan —
-// reaches this one answer, so none of them can disagree about whether a set is
-// parked.
+// exploreParked reads the Explore park off the set's Exploration mark (ADR-0262
+// decision 6): a set whose author declared its tasks interrelated, on which an
+// Explore pass has run, and which has no Exploration report to show for it.
+// Every surface that passes over a parked set — the drain's own Explore step,
+// automatic selection, the Work daemon's scan — reaches it through the one mark
+// resolution, so the park and the mark a human reads can never disagree.
 //
-// It stores nothing and derives everything from the set directory: the pass's
-// Captured runs of phase `explore` and the presence of the document itself.
-// There is no verdict to cache as the Verify verdict has one, because the pass
-// reaches no verdict — its product is the report, so the report's absence *is*
-// the negative answer.
-//
-// The report is read through explorationBlock, the same reader the builders'
-// prompts use, so "explored" means one thing across the feature.
-//
-// It is not gated on [work.explore]: the group decides whether a drain runs a
-// pass, while the park is a fact about the set — it declared the tasks
-// interrelated and has no map. The three doors ADR-0262 names are the way out,
-// and switching a global group off is not one of them.
+// The park is not a fact of its own: it is the unexplored mark with the one
+// reason that means nobody should wait for the pass again.
 func exploreParked(d *Deps, m *Manifest) bool {
-	if m == nil || !m.Valid || !m.ExploreRequested() {
-		return false
-	}
-	if explorationBlock(d, m.Dir).HasExploration {
-		return false
-	}
-	run, ok := latestCapturedRunOfPhase(d, m, spendPhaseExplore)
-	return ok && explorePassGaveUp(run.Outcome)
+	return exploreParkedBy(ResolveExploreMark(d, m))
+}
+
+// exploreParkedBy is that same reading of a mark already resolved, for the
+// refresh that resolves every row's mark once and must not resolve it twice.
+func exploreParkedBy(res ExploreResolution) bool {
+	return res.Mark == ExploreMarkUnexplored && res.Reason == UnexploredPassFailed
 }
 
 // explorePassGaveUp reads an Explore run's ending for the one distinction the
@@ -54,22 +41,22 @@ func explorePassGaveUp(outcome string) bool {
 	return false
 }
 
-// applyExploreParks overlays the Explore park onto a refresh's rows, replacing
-// READY with EXPLORE-FAILED on every parked set. It runs inside the refresh
-// itself rather than per surface, because the park is a pure read of the set
-// directory — no store, no git, no config — so there is nothing for a surface to
-// resolve differently, and every reader of a refresh (`pop tasks status`, the
-// Work dashboard, the queue scan, automatic selection) then sees one answer.
+// applyExploreMarks stamps every row with its Exploration mark and overlays the
+// park that mark implies, replacing READY with EXPLORE-FAILED. It runs inside
+// the refresh itself rather than per surface, because the mark is a pure read of
+// the set directory — no store, no git, no config — so there is nothing for a
+// surface to resolve differently, and every reader of a refresh (`pop tasks
+// status`, the Work dashboard, the queue scan, automatic selection) then sees
+// one answer.
 //
-// Only a READY row is considered: a set whose AFK work is finished, failed or
-// gated has nothing left for a map to shape, and the park exists to stop work
-// from starting.
-func applyExploreParks(d *Deps, rows []Row, manifests map[string]*Manifest) {
+// Only a READY row parks: a set whose AFK work is finished, failed or gated has
+// nothing left for a map to shape, and the park exists to stop work from
+// starting. The mark itself is stamped on every row, because a human reading a
+// finished set still asks whether the map it was built from was ever drawn.
+func applyExploreMarks(d *Deps, rows []Row, manifests map[string]*Manifest) {
 	for i := range rows {
-		if rows[i].Status != StatusReady {
-			continue
-		}
-		if exploreParked(d, manifests[rows[i].ID]) {
+		rows[i].Explore = ResolveExploreMark(d, manifests[rows[i].ID])
+		if rows[i].Status == StatusReady && exploreParkedBy(rows[i].Explore) {
 			rows[i].Status = StatusExploreFailed
 		}
 	}

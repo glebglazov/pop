@@ -49,7 +49,7 @@ func hitlGateOutputWithConfig(t *testing.T, d *Deps, m *Manifest, cfg *config.Co
 	in := strings.NewReader(input)
 	verify, hasVerify := latestVerifyPointer(d, m)
 	action, err := promptHITLGateAction(&out, in, d, cfg, "/rt", newPromptReader(in), "demo", m, &m.Tasks[1],
-		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, resolveGateRefineState(d, cfg, m), verify, hasVerify)
+		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, resolveGateRefineState(d, cfg, m), ResolveExploreMark(d, m), verify, hasVerify)
 	if err != nil {
 		t.Fatalf("promptHITLGateAction: %v", err)
 	}

@@ -167,3 +167,29 @@ func TestStatusHeadlineDerivesFromTheScanNotThePageRows(t *testing.T) {
 		t.Fatalf("headline changed with the page's rows:\n%q\nvs\n%q", got, other)
 	}
 }
+
+// TestExploreMarkRidesTheStatusCellOnBothRenders confirms the two surfaces that
+// share one composed STATUS cell — the dashboard table and `pop work status` —
+// both carry a set's Exploration mark (ADR-0262), and that a set which never asked
+// for exploration carries nothing on either.
+func TestExploreMarkRidesTheStatusCellOnBothRenders(t *testing.T) {
+	unexplored := DashboardRow{
+		Kind: ref.KindTaskSet, Project: "pop", ID: "2026-01-02-set",
+		RawStatus: tasks.StatusReady, ExploreMark: tasks.ExploreMarkUnexplored, DestKind: work.DestNeedsBind,
+	}
+	var out strings.Builder
+	RenderStatus(&out, drain.StatusSnapshot{Tasks: queuetest.DataDeps(t)}, statusTables(t, []DashboardRow{unexplored}, nil))
+	if !strings.Contains(out.String(), string(tasks.ExploreMarkUnexplored)) {
+		t.Fatalf("pop work status lost the Exploration mark:\n%s", out.String())
+	}
+	// The mark warns rather than alarms: the pass may simply not have run yet.
+	if cell := dashboardStatusCellStyled(testKinds(), unexplored); !strings.Contains(cell, "\x1b[33m"+string(tasks.ExploreMarkUnexplored)) {
+		t.Fatalf("dashboard STATUS cell = %q, want a yellow unexplored mark", cell)
+	}
+
+	quiet := unexplored
+	quiet.ExploreMark = tasks.ExploreMarkNone
+	if cell := dashboardStatusCellStyled(testKinds(), quiet); strings.Contains(cell, "explored") {
+		t.Fatalf("a set that never asked carried a mark: %q", cell)
+	}
+}

@@ -162,6 +162,22 @@ func gateRefineEntryDetails(refine gateRefineState) []string {
 	return details
 }
 
+// gateExplorePreamble names the map this set's builders were handed, on the same
+// terms as the refine pointer above it: the mark with its reason, then the
+// report as a pointer and never the document, which is a page long and would
+// bury the menu it was printed above (ADR-0252).
+//
+// It is here because the human deciding on a set is the one who can act on a set
+// that asked for a map and never got one — every attempt in it built blind — and
+// because the report is what says which seam the work was supposed to sit in.
+func gateExplorePreamble(res ExploreResolution) []string {
+	line := explorationLine(res)
+	if line == "" {
+		return nil
+	}
+	return []string{"🧭 " + line}
+}
+
 // gateVerifyPreamble tells the same human that a Verify report of the set
 // exists, and against which commit — the pointer only, on the same terms as the
 // refine one above it (ADR-0245). It answers why verification judged as it did,

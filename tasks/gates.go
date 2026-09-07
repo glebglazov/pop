@@ -142,8 +142,9 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		// Re-resolved each time round the menu: a Re-verify may land a Remediation
 		// task and a report written since the gate opened is still the one to point at.
 		refine := resolveGateRefineState(d, env.cfg, m)
+		explore := ResolveExploreMark(d, m)
 		verify, hasVerify := latestVerifyPointer(d, m)
-		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, refine, verify, hasVerify)
+		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, refine, explore, verify, hasVerify)
 		if err != nil {
 			return true, err
 		}
@@ -376,7 +377,7 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, explore ExploreResolution, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Complete task"},
@@ -411,6 +412,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 			gateTaskBodyPreamble(hitl.File, body),
 			gateRemediationPreamble(d, taskSetID, m),
 			gateRefinePreamble(refine),
+			gateExplorePreamble(explore),
 			gateVerifyPreamble(verify, hasVerify),
 		),
 		Items: items,

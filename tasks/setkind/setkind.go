@@ -409,11 +409,12 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			VerifiedAtSHA:         taskRow.VerifiedAtSHA,
 			VerifiedAtDrifted:     taskRow.VerifiedAtDrifted,
 			VerifyMark:            taskRow.VerifyMark,
+			ExploreMark:           taskRow.Explore.Mark,
 			Worktree:              wt.label,
 			CursorKey:             setCursorKey(g, taskRow.ID),
 			DestKind:              wt.DestKind,
 			Items:                 itemsFor(refresh, taskRow.ID),
-			DetailSections:        artifactSections(d.Tasks, manifestFor(refresh, taskRow.ID)),
+			DetailSections:        detailSections(d.Tasks, taskRow, manifestFor(refresh, taskRow.ID)),
 			Headline:              taskRow.Progress,
 		}
 		container.Broken, container.BrokenReason = brokenFor(refresh, taskRow.ID)
@@ -434,6 +435,17 @@ func liveMute(row tasks.Row, now time.Time) (time.Time, bool) {
 		return row.MutedUntil, row.MuteSecret
 	}
 	return time.Time{}, false
+}
+
+// detailSections are the prose blocks the Task set's detail view renders. Each
+// is composed from what the refresh already resolved for the row, so the detail
+// view displays the set's marks rather than deriving any of them again.
+func detailSections(td *tasks.Deps, row tasks.Row, m *tasks.Manifest) []work.Section {
+	var sections []work.Section
+	if section, ok := tasks.ExplorationSection(row.Explore); ok {
+		sections = append(sections, section)
+	}
+	return append(sections, artifactSections(td, m)...)
 }
 
 // artifactSections tells the dashboard why the Task set has an Artifact view

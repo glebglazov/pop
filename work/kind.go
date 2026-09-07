@@ -279,7 +279,13 @@ type Container struct {
 	// separate fact from RawStatus: a human-completed set stays DONE and carries
 	// its verification outcome here, so a verdict never contradicts the human.
 	VerifyMark VerifyMark
-	Worktree   string
+	// ExploreMark is the exploration outcome riding beside the status — explored
+	// or unexplored — for a set that asked to be explored, blank for one that
+	// never asked. It is a fact about the set rather than about its work: a set
+	// declares its tasks interrelated and either has the map they share or does
+	// not, whatever the status of the tasks themselves (ADR-0262).
+	ExploreMark ExploreMark
+	Worktree    string
 	// MapOpen and MapFrontier are the Map ticket tallies its STATUS cell reports.
 	// Zero on Task-set rows.
 	MapOpen, MapFrontier int
