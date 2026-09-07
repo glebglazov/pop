@@ -125,27 +125,11 @@ func AttachMapSession(d *Deps, mapID string) (*MapSession, error) {
 // beside the agent.
 func openGrillingPane(d *Deps, session MapSession, ticket Ticket, command, entryLabel string) (*GrillingPane, error) {
 	title := grillingPaneTitle(ticket, entryLabel)
-	paneID, reused, err := openMapPane(d, session, tmux.TagTicket, ticket.ID, title, command)
+	paneID, reused, err := openMapPane(d, session, tmux.TagTicket, unslottedMapPane, ticket.ID, title, command)
 	if err != nil {
 		return nil, err
 	}
 	return &GrillingPane{Session: session, Window: mapWindow, PaneID: paneID, Title: title, Reused: reused}, nil
-}
-
-// openMapPane lands command in the pane of a Map's `map` window tagged
-// tag=value, splitting and re-tiling one when none exists. Every pane in the
-// window comes through here — one per ticket being grilled, up to nine for the
-// Map's assist sessions — so they tile beside each other and share one reuse
-// rule: a
-// pane whose process is still alive is left alone and becomes a jump target
-// (ADR-0158), while an idle one (bare shell) is respawned. Focusing is the
-// caller's call — no spawn verb moves the operator unless asked.
-//
-// session must be one EnsureMapSession just returned: a freshly created
-// session's own first pane is adopted rather than left as a bare shell beside
-// the agent.
-func openMapPane(d *Deps, session MapSession, tag tmux.PaneTag, value, title, command string) (string, bool, error) {
-	return placeMapPane(d, session, tag, unslottedMapPane, value, title, command)
 }
 
 // unslottedMapPane is the single-pane address: the pane carrying the tag,
@@ -154,19 +138,23 @@ func openMapPane(d *Deps, session MapSession, tag tmux.PaneTag, value, title, co
 // there is nothing to pick between.
 const unslottedMapPane tmux.PaneSlot = 0
 
-// openSlottedMapPane is openMapPane addressed by slot, for the Map's assist
-// panes: a Map may hold up to nine of them and a digit reaches a particular one
-// (ADR-0263). Everything else about the pane is the same — same window, same
-// reuse rule, same tiling beside the tickets being grilled.
-func openSlottedMapPane(d *Deps, session MapSession, tag tmux.PaneTag, slot tmux.PaneSlot, value, title, command string) (string, bool, error) {
-	return placeMapPane(d, session, tag, slot, value, title, command)
-}
-
-// placeMapPane is the shared body of both: find the pane this spawn addresses,
-// hand back a live one as a jump target, else adopt-or-split one and title it.
-// slot is the only thing the two differ in, and it selects both which pane is
-// looked for and which primitive lands the command.
-func placeMapPane(d *Deps, session MapSession, tag tmux.PaneTag, slot tmux.PaneSlot, value, title, command string) (string, bool, error) {
+// openMapPane lands command in the pane of a Map's `map` window tagged tag=value
+// and sitting on slot, splitting and re-tiling one when none exists. Every pane
+// in the window comes through here — one per ticket being grilled, up to nine for
+// the Map's assist sessions (ADR-0263) — so they tile beside each other and share
+// one reuse rule: a pane whose process is still alive is left alone and becomes a
+// jump target (ADR-0158), while an idle one (bare shell) is respawned. Focusing
+// is the caller's call — no spawn verb moves the operator unless asked.
+//
+// slot is the only thing the two kinds of pane differ in, and it selects both
+// which pane is looked for and which primitive lands the command:
+// unslottedMapPane is the ticket's single-pane address, a digit the assist
+// panes'.
+//
+// session must be one EnsureMapSession just returned: a freshly created
+// session's own first pane is adopted rather than left as a bare shell beside
+// the agent.
+func openMapPane(d *Deps, session MapSession, tag tmux.PaneTag, slot tmux.PaneSlot, value, title, command string) (string, bool, error) {
 	if session.Dir == "" {
 		return "", false, ErrNoTrunk
 	}

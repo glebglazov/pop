@@ -112,7 +112,7 @@ func openAssistPane(d *Deps, cfg *config.Config, m Map, session MapSession, slot
 	if err != nil {
 		return nil, err
 	}
-	paneID, reused, err := openSlottedMapPane(d, session, tmux.TagAssist, slot, m.ID, assistPaneTitleFor(cfg), command)
+	paneID, reused, err := openMapPane(d, session, tmux.TagAssist, slot, m.ID, assistPaneTitleFor(cfg), command)
 	if err != nil {
 		return nil, err
 	}

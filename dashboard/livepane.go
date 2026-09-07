@@ -114,6 +114,10 @@ func (c livePaneCache) assistPanes(setID string) []assistPane {
 	return panes
 }
 
+// setWayfinder records one of a Map session's panes, under the same
+// strongest-wins rule set follows. A Map's liveness is its session's, not one
+// pane's: grilling panes come and go with the tickets, while the Map is running
+// as long as anything in `pop-map-<id>` still holds a process.
 func (c *livePaneCache) setWayfinder(mapID string, state livePaneState) {
 	if c == nil || mapID == "" || state == livePaneNone {
 		return
@@ -121,7 +125,9 @@ func (c *livePaneCache) setWayfinder(mapID string, state livePaneState) {
 	if c.wayfinder == nil {
 		c.wayfinder = map[string]livePaneState{}
 	}
-	c.wayfinder[mapID] = state
+	if state > c.wayfinder[mapID] {
+		c.wayfinder[mapID] = state
+	}
 }
 
 func stateFromCommand(cmd string) livePaneState {
@@ -157,18 +163,12 @@ func loadLivePaneCache(d *drain.Deps) livePaneCache {
 	}
 	windows, err := tmux.ListWindowPanes()
 	if err == nil {
-		// A Map's liveness is its session's, not one pane's: grilling panes come and
-		// go with the tickets, while the Map is running as long as anything in
-		// `pop-map-<id>` still holds a process.
 		for _, w := range windows {
 			mapID := wayfinder.MapIDFromSession(w.Session)
 			if mapID == "" {
 				continue
 			}
-			state := stateFromCommand(w.Command)
-			if state == livePaneRunning || cache.wayfinderState(mapID) == livePaneNone {
-				cache.setWayfinder(mapID, state)
-			}
+			cache.setWayfinder(mapID, stateFromCommand(w.Command))
 		}
 	}
 	return cache
