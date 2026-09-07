@@ -24,16 +24,8 @@ var runAttendedPicker = ui.RunAttendedAgentPicker
 // would offer a choice that cannot be taken.
 func AttendedPickChoices(cfg *config.Config) []ui.AttendedAgentEntry {
 	var choices []ui.AttendedAgentEntry
-	for _, catalog := range AgentGroupCatalogs(cfg) {
-		if catalog.Group != "attended" {
-			continue
-		}
-		for _, entry := range catalog.Entries {
-			if entry.Problem != "" {
-				continue
-			}
-			choices = append(choices, ui.AttendedAgentEntry{Cmd: entry.Cmd, Label: FormatAgentEntry(entry)})
-		}
+	for _, entry := range usableGroupEntries(cfg, "attended") {
+		choices = append(choices, ui.AttendedAgentEntry{Cmd: entry.Cmd, Label: FormatAgentEntry(entry)})
 	}
 	return choices
 }

@@ -38,16 +38,8 @@ func EffectiveAttendedEntry(cfg *config.Config) AgentGroupEntry {
 // EffectiveGroupEntry is the head entry of group as the merged config resolves
 // it, or a synthetic default for the attended group when nothing is configured.
 func EffectiveGroupEntry(cfg *config.Config, group string) AgentGroupEntry {
-	for _, catalog := range AgentGroupCatalogs(cfg) {
-		if catalog.Group != group {
-			continue
-		}
-		for _, entry := range catalog.Entries {
-			if entry.Problem != "" {
-				continue
-			}
-			return entry
-		}
+	if entries := usableGroupEntries(cfg, group); len(entries) > 0 {
+		return entries[0]
 	}
 	if group == "attended" {
 		return defaultAttendedEntry()
@@ -77,14 +69,9 @@ func LaunchedAttendedEntry(cfg *config.Config, attendedSpec string) AgentGroupEn
 	if spec == "" {
 		return EffectiveAttendedEntry(cfg)
 	}
-	for _, catalog := range AgentGroupCatalogs(cfg) {
-		if catalog.Group != "attended" {
-			continue
-		}
-		for _, entry := range catalog.Entries {
-			if entry.Problem == "" && entry.Cmd == spec {
-				return entry
-			}
+	for _, entry := range usableGroupEntries(cfg, "attended") {
+		if entry.Cmd == spec {
+			return entry
 		}
 	}
 	entry := AgentGroupEntry{Cmd: spec, Model: AgentSpecModel(spec)}

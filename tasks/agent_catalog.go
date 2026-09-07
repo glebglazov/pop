@@ -169,6 +169,27 @@ func (e AgentGroupEntry) ModelLabel() string {
 	return e.Model
 }
 
+// usableGroupEntries is one Work group's entries that can launch: the catalog's
+// rows for that group with the malformed ones dropped, in configured order. It
+// is the one question the attended surfaces ask of the catalog — which entry is
+// in force, which entry a spec names, which entries a human may pick between —
+// so none of them walks the catalog itself.
+func usableGroupEntries(cfg *config.Config, group string) []AgentGroupEntry {
+	for _, catalog := range AgentGroupCatalogs(cfg) {
+		if catalog.Group != group {
+			continue
+		}
+		usable := make([]AgentGroupEntry, 0, len(catalog.Entries))
+		for _, entry := range catalog.Entries {
+			if entry.Problem == "" {
+				usable = append(usable, entry)
+			}
+		}
+		return usable
+	}
+	return nil
+}
+
 // AgentGroupCatalogs resolves every Work group's configured agent list for
 // display, in configured order. Groups with no configured list render empty
 // rather than being dropped, so the catalog shows the whole shape of [work].
