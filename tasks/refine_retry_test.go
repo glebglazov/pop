@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,9 @@ type scriptedRefineRun struct {
 type scriptedRefineRunner struct {
 	runs  []scriptedRefineRun
 	calls int
+	// prompts holds the prompt each invocation was handed, which is the last
+	// argument on every preset's command line.
+	prompts []string
 }
 
 func (r *scriptedRefineRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
@@ -37,6 +41,7 @@ func (r *scriptedRefineRunner) Run(ctx context.Context, dir string, stdout, stde
 
 func (r *scriptedRefineRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	r.calls++
+	r.prompts = append(r.prompts, capturedPrompt(args))
 	run := scriptedRefineRun{}
 	if r.calls <= len(r.runs) {
 		run = r.runs[r.calls-1]
@@ -64,6 +69,26 @@ func (r *scriptedRefineRunner) Start(ctx context.Context, dir string, stdout, st
 
 func (r *scriptedRefineRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	return r.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
+// capturedPrompt reads what one invocation was really handed. Argv carries only
+// a pointer to the spill file (see agent_prompt_spill.go), and the file is what
+// the agent reads, so the capture follows the pointer while the run is live.
+func capturedPrompt(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	last := args[len(args)-1]
+	rest, ok := strings.CutPrefix(last, "Read the file ")
+	if !ok {
+		return last
+	}
+	path, _, _ := strings.Cut(rest, " ")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return last
+	}
+	return string(data)
 }
 
 // claudeRefineStream is a claude JSON stream carrying body as the run's result.
@@ -151,8 +176,8 @@ func TestRefinerRetryEligibilityMatchesTheVerifiers(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := refineAttemptRetryEligible(tc.outcome, tc.raw); got != tc.wantRefiner {
-				t.Fatalf("refineAttemptRetryEligible = %v, want %v", got, tc.wantRefiner)
+			if got := proseAttemptRetryEligible(tc.outcome, tc.raw); got != tc.wantRefiner {
+				t.Fatalf("proseAttemptRetryEligible = %v, want %v", got, tc.wantRefiner)
 			}
 			if got := verifyAttemptRetryEligible(tc.outcome, tc.raw); got != tc.wantVerifier {
 				t.Fatalf("verifyAttemptRetryEligible = %v, want %v", got, tc.wantVerifier)

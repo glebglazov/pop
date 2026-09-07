@@ -1374,6 +1374,31 @@ func TestRefinerSteeringFlagsRegistered(t *testing.T) {
 	}
 }
 
+// TestExplorerSteeringFlagsRegistered pins `pop tasks explore`'s surface: the
+// same checkout/agent/effort steering the Refiner takes, and none of the flags
+// that belong to a pass with a document family or a verdict.
+func TestExplorerSteeringFlagsRegistered(t *testing.T) {
+	if taskExploreCmd.Flags().Lookup("task-runtime-path") == nil {
+		t.Fatal("tasks explore --task-runtime-path flag not registered")
+	}
+	agent := taskExploreCmd.Flags().Lookup("agent")
+	if agent == nil {
+		t.Fatal("tasks explore --agent flag not registered")
+	}
+	if agent.Value.Type() != "stringArray" {
+		t.Fatalf("tasks explore --agent type = %q, want stringArray (repeatable)", agent.Value.Type())
+	}
+	if taskExploreCmd.Flags().Lookup("effort") == nil {
+		t.Fatal("tasks explore --effort flag not registered")
+	}
+	if taskExploreCmd.Flags().Lookup("show") != nil {
+		t.Fatal("one flat report is read through `pop tasks artifacts --show`, so explore has no --show of its own")
+	}
+	if taskExploreCmd.Flags().Lookup("accept") != nil || taskExploreCmd.Flags().Lookup("remediate") != nil {
+		t.Fatal("an explore pass reaches no verdict, so it has nothing to accept or remediate")
+	}
+}
+
 func TestVerifierSteeringFlagsRegistered(t *testing.T) {
 	// `pop tasks verify --task-runtime-path <checkout>` pins the Verifier to a
 	// specific checkout root instead of resolving from the repo root.

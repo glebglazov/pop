@@ -132,19 +132,22 @@ type capturedRun struct {
 // phaseOrder returns a sort rank for run phases. Lower values sort earlier.
 func phaseOrder(phase string) int {
 	switch phase {
-	case "implement":
+	case "explore":
 		return 0
-	case "verify":
+	case "implement":
 		return 1
-	case "refine":
+	case "verify":
 		return 2
-	default:
+	case "refine":
 		return 3
+	default:
+		return 4
 	}
 }
 
 // sortRunsChronologically sorts runs by start time, with the drain's phases in
-// the order the drain runs them (implement, verify, refine) at equal timestamps.
+// the order the drain runs them (explore, implement, verify, refine) at equal
+// timestamps.
 // The sort is stable.
 func sortRunsChronologically(runs []capturedRun) {
 	sort.SliceStable(runs, func(i, j int) bool {
@@ -438,6 +441,45 @@ func persistSkippedRefineRun(d *Deps, errOut io.Writer, taskSetDir, setID, workS
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "warning: persist refine run for %s: %v\n", setID, err)
+		}
+		return ""
+	}
+	return metaPath
+}
+
+// persistExploreRun writes one Captured run pair for an Explorer invocation
+// under the `explore` phase label, best-effort. A nil recorder records nothing.
+// Returns the written meta file's path, or "" when nothing was persisted.
+//
+// It files no verdict slot of its own: an Explore pass reaches no verdict and
+// reports no outcome, so what the run says about the pass is its own ending —
+// which is also what a later reader has to go on when the report is absent
+// (ADR-0262).
+func persistExploreRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int) string {
+	if rec == nil {
+		return ""
+	}
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, spendPhaseExplore, setID, "", "", rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, workSHA, "")
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "warning: persist explore run for %s: %v\n", setID, err)
+		}
+		return ""
+	}
+	return metaPath
+}
+
+// persistSkippedExploreRun is persistSkippedRefineRun's explore-phase twin: an
+// Explorer invocation whose model the provider refused, recorded with the model
+// it was walked past on (ADR-0168).
+func persistSkippedExploreRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, reason string, exitCode int) string {
+	if rec == nil {
+		return ""
+	}
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, spendPhaseExplore, setID, "", "", rec, agent, requestedAgent, model, attempt, streamOutcomeModelSkipped, reason, exitCode, workSHA, "")
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "warning: persist explore run for %s: %v\n", setID, err)
 		}
 		return ""
 	}

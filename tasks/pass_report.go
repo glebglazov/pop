@@ -7,6 +7,21 @@ import (
 	"time"
 )
 
+// reportHeader is how a rendered report names the pass that wrote it: the four
+// facts every pass stamps above its prose, in the words that differ by pass.
+// It is separate from passReport because a pass that runs once keeps one
+// document in the set directory rather than a directory of timestamped ones
+// (Explore, ADR-0262) — it shares the header and the render, and none of the
+// filing below them.
+type reportHeader struct {
+	// Title heads a rendered document, before the set id.
+	Title string
+	// WrittenLabel and AgentLabel name the header facts that differ by pass:
+	// when it ran, and who wrote it.
+	WrittenLabel string
+	AgentLabel   string
+}
+
 // passReport is one pass's report family: where its documents accumulate, how
 // their names are spelled, and how a rendered document names the pass that
 // wrote it. Refine and verification publish reports with the same mechanics and
@@ -17,6 +32,7 @@ import (
 // pop's Work store rather than in the repository, so no report can ever be
 // staged into a commit (ADR-0214).
 type passReport struct {
+	reportHeader
 	// ArtifactType is the report's type in the Artifact list, and its position
 	// in artifactTierOrder.
 	ArtifactType string
@@ -27,12 +43,6 @@ type passReport struct {
 	// "the latest" is resolved by timestamp and a directory listing must be
 	// able to answer that without opening every file.
 	FilePrefix string
-	// Title heads a rendered document, before the set id.
-	Title string
-	// WrittenLabel and AgentLabel name the header facts that differ by pass:
-	// when it ran, and who wrote it.
-	WrittenLabel string
-	AgentLabel   string
 	// Noun names the pass in the operator-facing errors of filing a document.
 	Noun string
 	// PointerLabel opens the one-line summary every surface prints the pointer
@@ -150,8 +160,8 @@ func (r passReport) fileName(at time.Time) string {
 // reader who wants the state the report was written against checks out the SHA.
 // It is stamped here rather than asked of the agent, because pop read it before
 // the pass began and the agent would only be copying it back.
-func (r passReport) renderDocument(at time.Time, setID, workSHA, commitRange, agent, body string) string {
-	return r.renderDocumentBy(at, setID, workSHA, commitRange, r.AgentLabel, agent, body)
+func (h reportHeader) renderDocument(at time.Time, setID, workSHA, commitRange, agent, body string) string {
+	return h.renderDocumentBy(at, setID, workSHA, commitRange, h.AgentLabel, agent, body)
 }
 
 // renderDocumentBy is renderDocument with the authorship fact named by the
@@ -160,10 +170,10 @@ func (r passReport) renderDocument(at time.Time, setID, workSHA, commitRange, ag
 // the same header of facts in the same order, and says in the last of them who
 // wrote it. That one label is how a reader scanning a directory of reports tells
 // the two apart.
-func (r passReport) renderDocumentBy(at time.Time, setID, workSHA, commitRange, authorLabel, author, body string) string {
+func (h reportHeader) renderDocumentBy(at time.Time, setID, workSHA, commitRange, authorLabel, author, body string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s — %s\n\n", r.Title, setID)
-	fmt.Fprintf(&b, "- %s: %s\n", r.WrittenLabel, at.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "# %s — %s\n\n", h.Title, setID)
+	fmt.Fprintf(&b, "- %s: %s\n", h.WrittenLabel, at.UTC().Format(time.RFC3339))
 	if commitRange != "" {
 		fmt.Fprintf(&b, "- Commit range: %s\n", commitRange)
 	}

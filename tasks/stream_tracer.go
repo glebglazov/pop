@@ -203,13 +203,15 @@ func taskByFile(m *Manifest, file string) *Task {
 
 // setLevelRunStream names the synthetic task stream a set-level run belongs to
 // — a run of a drain phase that judges the whole set rather than one task, so it
-// carries no task file. Verification and Refine are the two, and each reads
-// as its own row rather than being folded into a task's attempts.
+// carries no task file. Explore, verification and Refine are the three, and
+// each reads as its own row rather than being folded into a task's attempts.
 func setLevelRunStream(run capturedRun) (TaskStream, bool) {
 	if run.meta.TaskFile != "" {
 		return TaskStream{}, false
 	}
 	switch run.meta.Phase {
+	case "explore":
+		return TaskStream{TaskID: "explore", Title: "Explore"}, true
 	case "verify":
 		return TaskStream{TaskID: "verify", Title: "Verify"}, true
 	case "refine":
@@ -220,7 +222,8 @@ func setLevelRunStream(run capturedRun) (TaskStream, bool) {
 
 // groupRunsIntoTaskStreams groups chronologically sorted runs by task, preserving
 // the order in which each task first appears in the run timeline. Set-level runs
-// (verify, refine — no task file) are grouped into a synthetic task each.
+// (explore, verify, refine — no task file) are grouped into a synthetic task
+// each.
 func groupRunsIntoTaskStreams(m *Manifest, runs []capturedRun) []TaskStream {
 	var groups []TaskStream
 	seen := map[string]int{}

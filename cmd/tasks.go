@@ -41,6 +41,8 @@ var (
 	taskVerifyNoWait          bool
 	taskRefineWait            bool
 	taskRefineNoWait          bool
+	taskExploreWait           bool
+	taskExploreNoWait         bool
 	taskInWorktree            bool
 	taskForceRebind           bool
 	taskAllowDirty            tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
@@ -55,6 +57,9 @@ var (
 	taskRefineAgents          []string
 	taskRefineEffort          string
 	taskRefineShow            bool
+	taskExploreTimeout        string
+	taskExploreAgents         []string
+	taskExploreEffort         string
 	taskArtifactsShow         string
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
@@ -193,6 +198,36 @@ Any set with a done AFK task and a non-empty commit range may be refined, at
 any time — including mid-drain, where a standards correction is worth most.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskRefine,
+}
+
+var taskExploreCmd = &cobra.Command{
+	Use:   "explore TASK_SET",
+	Short: "Run a fresh Explorer agent over a task set's tasks and write the Exploration report of the code as found",
+	Long: `Record the code as it stands today in the area a task set's tasks touch.
+
+The Explorer's prompt is pop's own end to end: who it is, the set's manifest
+listing with every task body and the spec where one exists, what the report
+must contain, and what stays out of it. A fresh Explorer reads it and then
+reads the checkout itself; it is spawned read-only, since the report is its
+whole output.
+
+The pass writes one document: exploration.md, flat in the set's task storage
+beside spec.md and progress.txt, which is outside the repository tree — so a
+map can never be staged into a commit. Every builder in the set is handed it,
+which is the point: without it each attempt re-derives the same picture of the
+code, and a later task can build against a seam the earlier one contradicted.
+
+Each pass rewrites the document. Nothing compares the tree it records to the
+checkout — the SHA it names is prose for a human to weigh, and pop computes no
+freshness from it.
+
+Any set may be explored by hand, at any time, whatever its own "explore" key
+says: that key declines the drain's automatic step, and this is you re-opening
+the question. Read the report with:
+
+  pop tasks artifacts my-set --show exploration.md`,
+	Args: cobra.ExactArgs(1),
+	RunE: runTaskExplore,
 }
 
 var taskArtifactsCmd = &cobra.Command{
@@ -361,6 +396,7 @@ func init() {
 	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskVerifyCmd)
 	taskCmd.AddCommand(taskRefineCmd)
+	taskCmd.AddCommand(taskExploreCmd)
 	taskCmd.AddCommand(taskArtifactsCmd)
 	taskCmd.AddCommand(taskAssistCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
@@ -440,6 +476,14 @@ func init() {
 	taskRefineCmd.Flags().BoolVar(&taskRefineNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
 	taskRefineCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
 	taskRefineCmd.Flags().BoolVar(&taskRefineShow, "show", false, "Print the set's latest refine report to stdout and run no agent")
+
+	taskExploreCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
+	taskExploreCmd.Flags().StringVar(&taskExploreTimeout, "timeout", "45m", "Maximum duration for the Explorer attempt")
+	taskExploreCmd.Flags().StringArrayVar(&taskExploreAgents, "agent", nil, "Explorer agent preset; repeat to define an ordered quota/missing-binary fallback list")
+	taskExploreCmd.Flags().StringVar(&taskExploreEffort, "effort", "", "Explorer model-strength tier: light, standard, or heavy (default heavy)")
+	taskExploreCmd.Flags().BoolVar(&taskExploreWait, "wait", false, "Queue for the checkout and wait when it is held, even unattended (default: wait only at a terminal)")
+	taskExploreCmd.Flags().BoolVar(&taskExploreNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
+	taskExploreCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
 	taskArtifactsCmd.Flags().StringVar(&taskArtifactsShow, "show", "", "Print the named artifact verbatim")
 
 	taskAssistCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
@@ -1050,6 +1094,34 @@ func runTaskRefineWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) 
 		ConfirmIn:    os.Stdin,
 	}); err != nil {
 		return fmt.Errorf("tasks refine: %w", err)
+	}
+	return nil
+}
+
+func runTaskExplore(cmd *cobra.Command, args []string) error {
+	return runTaskExploreWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0])
+}
+
+func runTaskExploreWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
+	timeout, err := time.ParseDuration(taskExploreTimeout)
+	if err != nil {
+		return fmt.Errorf("tasks explore: invalid --timeout %q: %w", taskExploreTimeout, err)
+	}
+	resolveInput, err := bindingFirstVerifyResolveInput(d, taskSetID)
+	if err != nil {
+		return fmt.Errorf("tasks explore: %w", err)
+	}
+	if _, err := tasks.ExploreTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.ExploreOptions{
+		ResolveInput: resolveInput,
+		TaskSetID:    taskSetID,
+		Agents:       append([]string(nil), taskExploreAgents...),
+		Effort:       taskExploreEffort,
+		Timeout:      timeout,
+		Output:       w,
+		Wait:         admissionWaitChoice(taskExploreWait, taskExploreNoWait),
+		ConfirmIn:    os.Stdin,
+	}); err != nil {
+		return fmt.Errorf("tasks explore: %w", err)
 	}
 	return nil
 }
