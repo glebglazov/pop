@@ -51,3 +51,43 @@ func TestPromptRoutineGateMenuNamesTheAttendedEntry(t *testing.T) {
 		t.Fatalf("gate menu shown %d times, want 1", calls)
 	}
 }
+
+// A Routine gate carries the same affordance as a task gate: two usable entries
+// put the key on the row, and a pick re-opens the menu on a re-read of config
+// (ADR-0264).
+func TestPromptRoutineGateMenuOffersTheAttendedPick(t *testing.T) {
+	cfg := &config.Config{Work: &config.WorkConfig{
+		Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{
+			{DisplayName: "Cursor", Cmd: "cursor"},
+			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
+		}},
+	}}
+	lonely := &config.Config{Work: &config.WorkConfig{
+		Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{{DisplayName: "Cursor", Cmd: "cursor"}}},
+	}}
+	for _, tc := range []struct {
+		name     string
+		cfg      *config.Config
+		pickable bool
+	}{
+		{"two entries", cfg, true},
+		{"one entry", lonely, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &Deps{LoadConfig: func() (*config.Config, error) { return tc.cfg, nil }, Tasks: &tasks.Deps{}}
+			orig := runGateMenu
+			defer func() { runGateMenu = orig }()
+			runGateMenu = func(spec ui.GateMenuSpec, _ io.Reader, _ io.Writer, _ ui.GateMenuRunConfig) (ui.GateMenuResult, error) {
+				if spec.AttendedPickable != tc.pickable {
+					t.Fatalf("pickable = %v, want %v", spec.AttendedPickable, tc.pickable)
+				}
+				return ui.GateMenuResult{Key: "0"}, nil
+			}
+			var out bytes.Buffer
+			in := strings.NewReader("")
+			if _, err := promptRoutineGateMenu(&out, in, tty.NewReader(in), refineGateSpec("demo", &Routine{Manifest: Manifest{Schedule: "every 1h"}}, "no runs yet"), d); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

@@ -58,12 +58,27 @@ type GateMenuSpec struct {
 	// AttendedLabel is the shared one-line render of the attended entry the
 	// Assists item will launch (FormatAgentEntry). Empty skips the append.
 	AttendedLabel string
+	// AttendedPickable says the attended list holds a choice: two or more usable
+	// entries. The Assists row then names the key that opens the list and the
+	// menu answers that key with a pick request (ADR-0264 decisions 3 and 4).
+	// False renders exactly as a row with nothing to choose between.
+	AttendedPickable bool
+	// Notice is a line above the choices saying what the last keystroke did or
+	// refused to do — the override layer's refusal of an attended pick is the
+	// one that reaches here. It belongs in the frame rather than on stdout,
+	// which the menu is drawn over.
+	Notice string
 }
 
 // GateMenuResult is the outcome of RunGateMenu.
 type GateMenuResult struct {
 	// Key is the selected item's Key. Empty when ForceQuit is set.
 	Key string
+	// PickAttended is set when the human asked for the attended-agent list
+	// instead of choosing an item. The host opens it, writes what it returns and
+	// runs the menu again: the menu neither picks nor writes (ADR-0264
+	// decision 6).
+	PickAttended bool
 	// ForceQuit is set when a second interrupt arrived while the menu was up
 	// (interrupt gate) or the tea program was killed by that signal.
 	ForceQuit bool
@@ -97,7 +112,10 @@ type GateMenu struct {
 	height   int
 	showHelp bool
 	chosen   string
-	quit     bool
+	// pickAttended records that tab closed the menu asking for the chooser,
+	// which is a different exit from choosing an item.
+	pickAttended bool
+	quit         bool
 }
 
 // NewGateMenu builds a menu model with the cursor on the default item (or the
@@ -115,6 +133,11 @@ func NewGateMenu(spec GateMenuSpec) *GateMenu {
 
 // Chosen returns the selected key after the model has quit, or "".
 func (m *GateMenu) Chosen() string { return m.chosen }
+
+// PickedAttended reports whether the model quit asking for the attended-agent
+// list rather than choosing an item — the half of a run's outcome a host acts on
+// by opening the chooser.
+func (m *GateMenu) PickedAttended() bool { return m.pickAttended }
 
 // Init implements tea.Model.
 func (m *GateMenu) Init() tea.Cmd { return nil }
@@ -146,6 +169,10 @@ func (m *GateMenu) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key.Matches(msg, gateMenuKeys.Submit):
 		return m.selectIndex(m.cursor)
+	case m.spec.AttendedPickable && key.Matches(msg, gateMenuKeys.PickAttended):
+		m.pickAttended = true
+		m.quit = true
+		return tea.Quit
 	case key.Matches(msg, gateMenuKeys.Cancel):
 		// Esc / ctrl+c maps to the "0" exit item when present; otherwise quits
 		// with no choice (callers treat empty as exit).
@@ -246,13 +273,17 @@ func (m *GateMenu) viewHelp() string {
 }
 
 func (m *GateMenu) helpEntries() []HelpEntry {
-	return []HelpEntry{
+	entries := []HelpEntry{
 		{"1-9 / 0", "Select that option"},
 		{"Enter", "Select the highlighted (default) option"},
 		{"↑/↓ j/k", "Move highlight"},
 		{"Esc", "Exit (option 0)"},
 		{"C-h", "Toggle this help"},
 	}
+	if m.spec.AttendedPickable {
+		entries = append(entries, HelpEntry{AttendedPickKeyLabel, "Choose the attended agent"})
+	}
+	return entries
 }
 
 // ViewContent renders the whole menu — context above choices — without the help
@@ -289,11 +320,20 @@ func (m *GateMenu) ViewContext() string {
 // hint line. Its height is bounded by the number of options a gate offers.
 func (m *GateMenu) ViewChoices() string {
 	var b strings.Builder
+	if m.spec.Notice != "" {
+		b.WriteString(gateWarnStyle().Render("  " + m.spec.Notice))
+		b.WriteString("\n")
+	}
 	for i, it := range m.spec.Items {
 		prefix := "  "
 		itemLabel := it.Label
 		if it.Assists && m.spec.AttendedLabel != "" {
 			itemLabel = it.Label + " · " + m.spec.AttendedLabel
+			if m.spec.AttendedPickable {
+				// The affordance is the row's own, and only where a choice
+				// exists: a list of one has nothing to open (ADR-0264 decision 4).
+				itemLabel += " · " + AttendedPickKeyLabel + " to change"
+			}
 		}
 		label := fmt.Sprintf("%s. %s", it.Key, itemLabel)
 		if i == m.cursor {
@@ -358,10 +398,11 @@ func selectedGateItemStyle() lipgloss.Style {
 }
 
 type gateMenuKeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Submit key.Binding
-	Cancel key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	Submit       key.Binding
+	Cancel       key.Binding
+	PickAttended key.Binding
 }
 
 var gateMenuKeys = gateMenuKeyMap{
@@ -369,7 +410,14 @@ var gateMenuKeys = gateMenuKeyMap{
 	Down:   key.NewBinding(key.WithKeys("down", "j", "ctrl+n")),
 	Submit: key.NewBinding(key.WithKeys("enter")),
 	Cancel: key.NewBinding(key.WithKeys("esc", "ctrl+c")),
+	// tab, and only while the row offers it: a digit still launches, so the
+	// choice is never interposed on the way to one (ADR-0264 decision 3).
+	PickAttended: key.NewBinding(key.WithKeys(AttendedPickKeyLabel)),
 }
+
+// AttendedPickKeyLabel is the key that opens the attended-agent list from a gate
+// menu's assist row, and how that key reads on the row itself.
+const AttendedPickKeyLabel = "tab"
 
 // RunGateMenu draws an inline (no altscreen) gate menu and returns the chosen
 // item key. On a real terminal it prints the context once and runs a bubbletea
@@ -452,10 +500,13 @@ func runGateMenuInteractive(m *GateMenu, in io.Reader, out io.Writer, interrupt 
 	if !ok || fm == nil {
 		return GateMenuResult{}, fmt.Errorf("gate menu: unexpected model type %T", final)
 	}
-	return GateMenuResult{Key: fm.chosen}, nil
+	return GateMenuResult{Key: fm.chosen, PickAttended: fm.pickAttended}, nil
 }
 
 func runGateMenuLine(m *GateMenu, in io.Reader, out io.Writer, cfg GateMenuRunConfig) (GateMenuResult, error) {
+	// A line reader has no chooser to open, so the row it prints must not
+	// advertise one (ADR-0264 decision 7).
+	m.spec.AttendedPickable = false
 	fmt.Fprintln(out)
 	fmt.Fprint(out, m.ViewContent())
 

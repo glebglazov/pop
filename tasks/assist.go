@@ -98,7 +98,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		definitionPath: target.definitionPath,
 		statePath:      target.statePath,
 		taskSetID:      setID,
-		cfg:            cfg,
+		cfg:            newGateConfig(d, cfg),
 		fold:           opts.Fold,
 		treeStable:     assistTreeStable(d, target.runtimePath, setID),
 	}
@@ -342,7 +342,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 		reader = newPromptReader(in)
 	}
 
-	prompt := BuildAssistPrompt(d, env.cfg, taskSetID, m, status, runtimePath, findings)
+	prompt := BuildAssistPrompt(d, env.cfg.Value(), taskSetID, m, status, runtimePath, findings)
 	// The agent is resolved when assistance is chosen, never on the way in: a
 	// session must open — and show the set — even when every attended agent is
 	// cooling or missing, and the walk's refusal belongs in the menu.
@@ -356,7 +356,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 		}
 		switch action {
 		case genericAssistAgent:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), env.agentOverride, env.agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start Assist assistance: %v\n", err)
 				continue
@@ -377,7 +377,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 					m = refreshed
 				}
 			}
-			prompt = BuildAssistPrompt(d, env.cfg, taskSetID, m, status, runtimePath, findings)
+			prompt = BuildAssistPrompt(d, env.cfg.Value(), taskSetID, m, status, runtimePath, findings)
 		case genericAssistShell:
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
@@ -401,7 +401,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 }
 
-func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *config.Config, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
+func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *gateConfig, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Open a shell in the checkout"},

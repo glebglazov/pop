@@ -24,7 +24,7 @@ func TestPromptGateMenuPrintsAttendedEntry(t *testing.T) {
 			{Key: "0", Label: "Exit"},
 		},
 	}
-	key, _, err := promptGateMenu(&out, in, newPromptReader(in), spec, nil, cfg)
+	key, _, err := promptGateMenu(&out, in, newPromptReader(in), spec, nil, newGateConfig(nil, cfg))
 	if err != nil {
 		t.Fatal(err)
 	}

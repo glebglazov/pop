@@ -112,7 +112,7 @@ agents = [{ display_name = "Cursor", cmd = "cursor" }]
 		return ui.GateMenuResult{Key: "0"}, nil
 	}
 	in := strings.NewReader("")
-	if _, _, err := promptGateMenu(&strings.Builder{}, in, newPromptReader(in), spec, nil, cfg); err != nil {
+	if _, _, err := promptGateMenu(&strings.Builder{}, in, newPromptReader(in), spec, nil, newGateConfig(nil, cfg)); err != nil {
 		t.Fatal(err)
 	}
 	if got != "Cursor" {

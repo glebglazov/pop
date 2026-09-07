@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/clipboard"
 	"github.com/glebglazov/pop/ui"
 )
@@ -34,9 +33,10 @@ type gateEnv struct {
 	// beside it walks (ADR-0195).
 	agentOverride string
 	agentCmd      string
-	// cfg is the loaded config the attended gates resolve their attended entry
-	// from. Nil is legal: the built-in default agent applies.
-	cfg            *config.Config
+	// cfg is the merged config the attended gates resolve their attended entry
+	// from, held so a pick at the menu reaches the launch below it (gateConfig).
+	// Nil is legal: the built-in default agent applies.
+	cfg            *gateConfig
 	cwd            string
 	runtimePath    string
 	definitionPath string
@@ -141,7 +141,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		showReverify := gateReverifyEnabled(rv, m)
 		// Re-resolved each time round the menu: a Re-verify may land a Remediation
 		// task and a report written since the gate opened is still the one to point at.
-		refine := resolveGateRefineState(d, env.cfg, m)
+		refine := resolveGateRefineState(d, env.cfg.Value(), m)
 		explore := ResolveExploreMark(d, m)
 		verify, hasVerify := latestVerifyPointer(d, m)
 		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, refine, explore, verify, hasVerify)
@@ -189,7 +189,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			RenderTaskComplete(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case hitlGateAssist:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start HITL assistance: %v\n", err)
 				continue
@@ -377,7 +377,7 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, explore ExploreResolution, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, explore ExploreResolution, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Complete task"},
@@ -501,7 +501,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			RenderTaskReset(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case failedGateAssist:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start Failed assistance: %v\n", err)
 				continue
@@ -548,7 +548,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	}
 }
 
-func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
+func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID),
 		Tone:     ui.GateMenuToneError,
@@ -680,7 +680,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 			release()
 			return true, nil
 		case verifyFailedGateAssist:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start Verify-failed assistance: %v\n", err)
 				continue
@@ -707,7 +707,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 }
 
-func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
+func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Verify-failed: %s did not clear the Verifier and needs a human decision.", taskSetID),
 		Tone:     ui.GateMenuToneError,

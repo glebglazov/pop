@@ -404,7 +404,7 @@ func (r *implementRun) newGateEnv() gateEnv {
 		definitionPath: r.resolved.DefinitionPath,
 		statePath:      r.statePath,
 		taskSetID:      r.taskSetID,
-		cfg:            r.plan.cfg,
+		cfg:            newGateConfig(r.d, r.plan.cfg),
 	}
 }
 

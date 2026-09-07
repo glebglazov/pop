@@ -14,6 +14,59 @@ import (
 // ui.RunGateMenu; tests may swap it.
 var runGateMenu = ui.RunGateMenu
 
+// gateConfig is the merged config a gate reads, held rather than copied into
+// it: an attended pick on the assist row rewrites the override layer while the
+// gate is open, and the row that names the agent and the launch below it must
+// both read what the pick wrote. Every gate host threads one of these so the
+// two can never disagree.
+//
+// A nil holder, and a nil config inside one, are legal everywhere: the built-in
+// default agent applies and there is nothing to re-read.
+type gateConfig struct {
+	d   *Deps
+	cfg *config.Config
+}
+
+// newGateConfig holds the config a gate was handed, with the deps that re-read
+// it after a pick.
+func newGateConfig(d *Deps, cfg *config.Config) *gateConfig {
+	return &gateConfig{d: d, cfg: cfg}
+}
+
+// Value is the config as last read.
+func (g *gateConfig) Value() *config.Config {
+	if g == nil {
+		return nil
+	}
+	return g.cfg
+}
+
+// deps is the bag the re-read and the write go through, nil for a gate built
+// without one.
+func (g *gateConfig) deps() *Deps {
+	if g == nil {
+		return nil
+	}
+	return g.d
+}
+
+// reload re-reads the merged config from the path every gate host loaded it
+// from, so what the menu renders next is what a load resolves rather than what
+// was chosen (ADR-0264 decision 6). A read that fails leaves the config the
+// gate already had: a stale row is better than a gate that cannot re-open.
+func (g *gateConfig) reload() {
+	if g == nil {
+		return
+	}
+	cd := configDeps(g.d)
+	if cd == nil {
+		return
+	}
+	if cfg, err := config.LoadWith(cd, config.DefaultConfigPathWith(cd)); err == nil {
+		g.cfg = cfg
+	}
+}
+
 // promptGateMenu runs the shared inline gate menu and returns the chosen key.
 // forceQuit is set when the interrupt gate's second SIGINT wins. reader is the
 // shared per-run prompt reader used on the non-TTY line path so queued input
@@ -23,23 +76,37 @@ var runGateMenu = ui.RunGateMenu
 // which agent the default choice will launch (ADR-0196 decision 9). cfg is the
 // merged config, override layer included: whatever the Config dashboard wrote is
 // what the menu reports (ADR-0202 decision 5).
-func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.GateMenuSpec, interrupt <-chan os.Signal, cfg *config.Config) (key string, forceQuit bool, err error) {
+//
+// It is also where that entry is changed. While the attended list holds a
+// choice the assist row names the key that opens it; the menu hands a pick back
+// here, this writes the Agent override, re-reads the merged config and runs the
+// menu again on the result (ADR-0264). The loop is what keeps the promise: the
+// row a human returns to names the entry a load resolves, so a value the layer
+// refused leaves the row naming the entry that was already in force.
+func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.GateMenuSpec, interrupt <-chan os.Signal, cfg *gateConfig) (key string, forceQuit bool, err error) {
 	if in == nil {
 		in = os.Stdin
 	}
-	spec.AttendedLabel = FormatAgentEntry(EffectiveAttendedEntry(cfg))
-	res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
-		Interrupt:  interrupt,
-		LineReader: reader,
-		Warn:       promptWarner(out),
-	})
-	if err != nil {
-		return "", false, exitErr(ExitOperational, "read gate selection: %v", err)
+	for {
+		spec.AttendedLabel = FormatAgentEntry(EffectiveAttendedEntry(cfg.Value()))
+		spec.AttendedPickable = AttendedPickOffered(cfg.Value())
+		res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
+			Interrupt:  interrupt,
+			LineReader: reader,
+			Warn:       promptWarner(out),
+		})
+		if err != nil {
+			return "", false, exitErr(ExitOperational, "read gate selection: %v", err)
+		}
+		if res.ForceQuit {
+			return "", true, nil
+		}
+		if !res.PickAttended {
+			return res.Key, false, nil
+		}
+		spec.Notice = PickAttendedAgent(cfg.deps(), cfg.Value(), in, out, promptWarner(out))
+		cfg.reload()
 	}
-	if res.ForceQuit {
-		return "", true, nil
-	}
-	return res.Key, false, nil
 }
 
 func gateInvocationDetails(invocation *AgentAssistanceInvocation) []string {

@@ -142,6 +142,66 @@ func TestGateMenuAssistsAppendsAttendedLabel(t *testing.T) {
 	}
 }
 
+// The affordance is on the row that names the agent, and only where a choice
+// exists (ADR-0264 decisions 3 and 4): with one usable entry the row is what it
+// has always been, and a digit launches without the chooser ever appearing.
+func TestGateMenuAttendedPickHintAndKey(t *testing.T) {
+	spec := func(pickable bool) GateMenuSpec {
+		return GateMenuSpec{
+			Headline:         "Assist",
+			AttendedLabel:    "Claude Usual · opus",
+			AttendedPickable: pickable,
+			Items: []GateMenuItem{
+				{Key: "1", Label: "Agent assistance (default)", Default: true, Assists: true},
+				{Key: "0", Label: "Exit"},
+			},
+		}
+	}
+
+	lonely := NewGateMenu(spec(false))
+	if got := StripANSI(lonely.ViewChoices()); !strings.Contains(got, "1. Agent assistance (default) · Claude Usual · opus\n") {
+		t.Fatalf("a list of one must render as it always did:\n%s", got)
+	}
+	if _, cmd := lonely.Update(tea.KeyPressMsg{Code: tea.KeyTab}); cmd != nil {
+		t.Fatal("tab must do nothing with nothing to choose between")
+	}
+	if lonely.PickedAttended() {
+		t.Fatal("tab asked for a chooser that is not on offer")
+	}
+
+	m := NewGateMenu(spec(true))
+	if got := StripANSI(m.ViewChoices()); !strings.Contains(got, "· Claude Usual · opus · tab to change") {
+		t.Fatalf("the row does not name the key that changes it:\n%s", got)
+	}
+
+	// A digit is still a launch, never a detour through the chooser.
+	digit := NewGateMenu(spec(true))
+	digit.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	if digit.Chosen() != "1" || digit.PickedAttended() {
+		t.Fatalf("1 chose %q, pick=%v; want 1 and no chooser", digit.Chosen(), digit.PickedAttended())
+	}
+
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab}); cmd == nil {
+		t.Fatal("tab should close the menu asking for the chooser")
+	}
+	if !m.PickedAttended() || m.Chosen() != "" {
+		t.Fatalf("pick=%v chosen=%q, want a pick request and no choice", m.PickedAttended(), m.Chosen())
+	}
+}
+
+// A refusal from the override layer belongs in the frame the menu is drawn in,
+// beside the row it is about, rather than on the stdout the frame repaints over.
+func TestGateMenuNoticeRendersAboveTheChoices(t *testing.T) {
+	m := NewGateMenu(GateMenuSpec{
+		Notice: "Agent unchanged — the override file is read-only",
+		Items:  []GateMenuItem{{Key: "1", Label: "Agent assistance (default)", Default: true, Assists: true}},
+	})
+	got := StripANSI(m.ViewChoices())
+	if !strings.HasPrefix(strings.TrimSpace(got), "Agent unchanged — the override file is read-only") {
+		t.Fatalf("the refusal is not above the choices:\n%s", got)
+	}
+}
+
 func TestGateMenuDigitSelectsAndQuits(t *testing.T) {
 	m := NewGateMenu(sampleHITLSpec())
 	_, cmd := m.Update(tea.KeyPressMsg{Code: '4', Text: "4"})

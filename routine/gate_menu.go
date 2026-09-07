@@ -22,6 +22,12 @@ var runGateMenu = ui.RunGateMenu
 // The Assists item names the attended entry the merged config resolves to — the
 // override layer included, so a change made in the Config dashboard shows here
 // (ADR-0196 decision 9, ADR-0202 decision 5).
+//
+// A Routine gate carries the same key on that row as a task gate: the attended
+// list is one list, so the place a human sees the agent named is the place they
+// change it (ADR-0264). Each turn of the loop re-reads config, which is how the
+// row that follows a pick names what a load resolves rather than what was
+// chosen — and how it keeps naming the entry in force when the layer refused.
 func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec ui.GateMenuSpec, d *Deps) (string, error) {
 	if in == nil {
 		in = os.Stdin
@@ -29,16 +35,22 @@ func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec
 	warn := func(format string, args ...any) {
 		fmt.Fprintf(out, format+"\n", args...)
 	}
-	cfg, _ := d.LoadConfig()
-	spec.AttendedLabel = tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
-	res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
-		LineReader: reader,
-		Warn:       warn,
-	})
-	if err != nil {
-		return "", fmt.Errorf("read gate selection: %w", err)
+	for {
+		cfg, _ := d.LoadConfig()
+		spec.AttendedLabel = tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
+		spec.AttendedPickable = tasks.AttendedPickOffered(cfg)
+		res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
+			LineReader: reader,
+			Warn:       warn,
+		})
+		if err != nil {
+			return "", fmt.Errorf("read gate selection: %w", err)
+		}
+		if !res.PickAttended {
+			return res.Key, nil
+		}
+		spec.Notice = tasks.PickAttendedAgent(d.taskDeps(), cfg, in, out, warn)
 	}
-	return res.Key, nil
 }
 
 func refineGateSpec(id string, r *Routine, lastRun string) ui.GateMenuSpec {

@@ -407,7 +407,7 @@ func runTargetedHITLGate(d *Deps, opts targetedHITLGateOptions) (*RunTaskResult,
 		definitionPath: opts.definitionPath,
 		statePath:      opts.statePath,
 		taskSetID:      taskSetID,
-		cfg:            opts.cfg,
+		cfg:            newGateConfig(d, opts.cfg),
 	}
 	handled, err := handleInteractiveHITLGate(env, m, hitl, rv)
 	if willPrompt {

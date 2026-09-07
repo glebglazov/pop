@@ -51,6 +51,57 @@ func (entries AgentEntries) Commands() []string {
 	return out
 }
 
+// PromoteToHead returns the list with the first entry naming cmd moved to the
+// front and the rest holding their relative order — the reordering an Agent
+// override states (ADR-0264 decision 2). A cmd no entry names leaves the list
+// as it is: the list itself is the unit, so there is nothing to add.
+func (entries AgentEntries) PromoteToHead(cmd string) AgentEntries {
+	cmd = strings.TrimSpace(cmd)
+	head := -1
+	for i, entry := range entries {
+		if entry.Valid() && strings.TrimSpace(entry.Cmd) == cmd {
+			head = i
+			break
+		}
+	}
+	if head < 0 {
+		return entries
+	}
+	out := make(AgentEntries, 0, len(entries))
+	out = append(out, entries[head])
+	for i, entry := range entries {
+		if i != head {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// OverrideValue renders the list as the generic TOML value the override layer
+// stores — the inverse of UnmarshalTOML's sugar, so an entry that is only a
+// command is written back as the bare string a human would have typed and one
+// that names itself as a table.
+//
+// A malformed entry is left out. Only why it failed survives the decode, so
+// there is no text to write back, and a list carrying one is a value the
+// layer's gate refuses anyway. The hand-authored list still holds it, and
+// removing the override brings it back.
+func (entries AgentEntries) OverrideValue() []any {
+	out := make([]any, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.Valid() {
+			continue
+		}
+		cmd := strings.TrimSpace(entry.Cmd)
+		if strings.TrimSpace(entry.DisplayName) == "" {
+			out = append(out, cmd)
+			continue
+		}
+		out = append(out, map[string]any{"display_name": entry.DisplayName, "cmd": cmd})
+	}
+	return out
+}
+
 // AgentEntriesFromCommands builds an agent list from bare commands, the same
 // shape a string-only TOML list decodes to.
 func AgentEntriesFromCommands(cmds ...string) AgentEntries {

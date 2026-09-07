@@ -83,26 +83,30 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 		return fmt.Errorf("fold refused: list conflicted paths: %w", err)
 	}
 
+	// The gate menu may rewrite the attended list under the loop, so the config
+	// the row renders from and the launch below it resolves is held, not copied.
+	gate := newGateConfig(d, cfg)
+
 	prompt := BuildFoldConflictPrompt(d, ctx, conflicted)
-	invocation, err := ResolveAgentAssistanceInvocation(d, cfg, agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(d, gate.Value(), agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
 	if err != nil {
 		return fmt.Errorf("fold refused: %w", err)
 	}
 
 	reader := newPromptReader(in)
 	for {
-		badge := foldConflictVerifiedBadge(d, cfg, ctx.SetID, ctx.RuntimePath)
+		badge := foldConflictVerifiedBadge(d, gate.Value(), ctx.SetID, ctx.RuntimePath)
 		subject := ctx.SetID
 		if strings.TrimSpace(subject) == "" {
 			subject = ctx.RuntimePath
 		}
-		action, err := promptFoldConflictAction(out, in, reader, d, cfg, subject, strings.TrimSpace(ctx.SetID) != "", badge, invocation)
+		action, err := promptFoldConflictAction(out, in, reader, d, gate, subject, strings.TrimSpace(ctx.SetID) != "", badge, invocation)
 		if err != nil {
 			return err
 		}
 		switch action {
 		case foldConflictAgent:
-			invocation, err = ResolveAgentAssistanceInvocation(d, cfg, agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, gate.Value(), agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
 			if err != nil {
 				return fmt.Errorf("fold refused: %w", err)
 			}
@@ -120,7 +124,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 				return fmt.Errorf("fold refused: list conflicted paths: %w", err)
 			}
 			prompt = BuildFoldConflictPrompt(d, ctx, conflicted)
-			invocation, err = ResolveAgentAssistanceInvocation(d, cfg, agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, gate.Value(), agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
 			if err != nil {
 				return fmt.Errorf("fold refused: %w", err)
 			}
@@ -128,7 +132,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 				// Still unresolved — re-prompt rather than refuse once.
 				continue
 			}
-			return offerFoldPostResolveVerify(d, cfg, ctx, opts, out, reader)
+			return offerFoldPostResolveVerify(d, gate.Value(), ctx, opts, out, reader)
 		case foldConflictResume:
 			if err := foldResumeRebase(d, ctx.RuntimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Resume fold: %v\n", err)
@@ -136,7 +140,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 			if err := foldRebaseCompleted(d, ctx.RuntimePath, ctx.TrunkBranch); err != nil {
 				continue
 			}
-			return offerFoldPostResolveVerify(d, cfg, ctx, opts, out, reader)
+			return offerFoldPostResolveVerify(d, gate.Value(), ctx, opts, out, reader)
 		case foldConflictRetry:
 			if _, err := d.Git.CommandInDir(ctx.RuntimePath, "rebase", "--abort"); err != nil {
 				return fmt.Errorf("fold refused: abort rebase for retry: %w", err)
@@ -150,7 +154,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 			fmt.Fprintln(outputFor(out), "Aborted the in-flight rebase and abandoned the fold; nothing landed.")
 			return ErrFoldAbandon
 		case foldConflictVerify:
-			if err := runFoldSetVerify(d, cfg, ctx, opts, out); err != nil {
+			if err := runFoldSetVerify(d, gate.Value(), ctx, opts, out); err != nil {
 				return err
 			}
 			continue
@@ -171,7 +175,7 @@ const (
 	foldConflictExit
 )
 
-func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *config.Config, subject string, hasSet bool, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
+func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *gateConfig, subject string, hasSet bool, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
 	var preamble []string
 	if hasSet {
 		if text := VerifiedAtBadgeText(badge); text != "" {
