@@ -106,7 +106,7 @@ func TestImplementPromptIsUnchangedWithoutTheToggle(t *testing.T) {
 	if len(prompts) != 1 {
 		t.Fatalf("agent saw %d prompts, want one", len(prompts))
 	}
-	if got, want := prompts[0], BuildAgentPrompt(parseFakeAgentTaskPath(prompts[0]), runtimeCheckoutOf(t, prompts[0]), ""); got != want {
+	if got, want := prompts[0], BuildAgentPrompt(nil, parseFakeAgentTaskPath(prompts[0]), runtimeCheckoutOf(t, prompts[0]), ""); got != want {
 		t.Fatalf("prompt differs from the untoggled prompt:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 	if resolved {

@@ -109,6 +109,7 @@ func goldenFixtureDeps(t *testing.T) *Deps {
 		filepath.Join(goldenSetDir, "03-hitl.md"):        "## Review\n\nRead the goldens and confirm nothing moved.\n\n## Acceptance criteria\n\n- [ ] approved\n",
 		filepath.Join(goldenSetDir, "04-afk.md"):         "## What to build\n\nMigrate the builders onto templates.\n\n## Acceptance criteria\n\n- [ ] every builder renders through the seam\n",
 		filepath.Join(goldenSetDir, "spec.md"):           "# Prompt templates\n\nThe ten agent prompts become embedded markdown templates.\n",
+		filepath.Join(goldenSetDir, "exploration.md"):    "# Exploration report — 2026-05-01-demo\n\n- Explored: 2026-05-01T08:00:00Z\n- Work SHA: base000\n- Explorer: claude\n\n## Where the prompts live\n\n`tasks/prompt.go` owns every builder; the text sits in `tasks/prompts/*.tmpl.md`.\n",
 		filepath.Join(goldenSetDir, "progress.txt"): "2026-05-01T09:00:00Z [01-afk.md] DONE\ncaptured a golden for each builder\nasserted the whitespace invariant\n" +
 			"---\n" +
 			"2026-05-01T10:00:00Z [02-remediation.md] DONE\nwidened the range to the recorded base\n" +
@@ -198,12 +199,19 @@ func bareDeps() *Deps {
 
 func TestAgentPromptGoldens(t *testing.T) {
 	// Absent side: the default, where [work.implement].include_implementation_convention
-	// is off and the builder's prompt reads as it did before the toggle existed.
+	// is off and the builder's prompt reads as it did before the toggle existed,
+	// on a set that was never explored.
 	prompttest.Assert(t, goldenPath("agent.md"),
-		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, ""))
+		BuildAgentPrompt(bareDeps(), filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, ""))
 
 	prompttest.Assert(t, goldenPath("agent.implementation-convention.md"),
-		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, goldenImplementationConvention))
+		BuildAgentPrompt(bareDeps(), filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, goldenImplementationConvention))
+
+	// The explored side: the report is named as a path, and the edit boundary
+	// above it names it as the one file besides the task file this attempt may
+	// touch outside the checkout.
+	prompttest.Assert(t, goldenPath("agent.exploration.md"),
+		BuildAgentPrompt(goldenFixtureDeps(t), filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, ""))
 }
 
 // goldenImplementationConvention stands in for what the `implementation`

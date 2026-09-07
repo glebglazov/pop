@@ -272,7 +272,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		opts.PreSeedTopic(sel.Task.Title)
 	}
 
-	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath,
+	basePrompt := BuildAgentPrompt(d, sel.TaskPath, runtimePath,
 		implementImplementationConvention(cfg, opts.ImplementationConvention, runtimePath))
 	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, resolveRepoTurnCap(d, cfg, runtimePath))
 
