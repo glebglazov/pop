@@ -19,7 +19,7 @@ func TestAssistPaneTitleNamesTheMergedAttendedEntry(t *testing.T) {
 			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
 		}},
 	}}
-	title := AssistPaneTitle("demo", tmuxmod.FirstPaneSlot, attendedEntryLabel(cfg))
+	title := AssistPaneTitle("demo", tmuxmod.FirstPaneSlot, attendedEntryLabel(cfg, ""))
 	if !strings.HasSuffix(title, " · Cursor Usual") {
 		t.Fatalf("title = %q, want the merged head named alone", title)
 	}

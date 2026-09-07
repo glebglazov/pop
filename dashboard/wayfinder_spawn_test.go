@@ -95,7 +95,7 @@ func seedWayfinderPane(f *tmuxtest.Fake, ticketID, paneID, command string) {
 
 func TestLaunchWayfinderSessionTargetsNextFrontier(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	result, err := LaunchWayfinderSession(d, cfg, row, "")
+	result, err := LaunchWayfinderSession(d, cfg, row, "", "")
 	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
 		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/02-blocked.md"):  "Type: research\nStatus: open\n\n## Question\nB\n",
 	}
 	withWayfinderMaps(t, d, storageDir, files)
-	result, err := LaunchWayfinderSession(d, cfg, row, "02")
+	result, err := LaunchWayfinderSession(d, cfg, row, "02", "")
 	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
 // never in the repo session's drain window.
 func TestLaunchWayfinderSessionSpawnsIntoTheMapSession(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	result, err := LaunchWayfinderSession(d, cfg, row, "")
+	result, err := LaunchWayfinderSession(d, cfg, row, "", "")
 	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestLaunchWayfinderSessionSpawnsIntoTheMapSession(t *testing.T) {
 
 func TestLaunchWayfinderSessionCreatesDetachedSession(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	if _, err := LaunchWayfinderSession(d, cfg, row, ""); err != nil {
+	if _, err := LaunchWayfinderSession(d, cfg, row, "", ""); err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
 	if got := f.Live[wayfinderMapSession()]; got != row.ProjectPath {
@@ -182,7 +182,7 @@ func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
 		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: open\nBlocked by: 99\n\n## Question\nA\n",
 	}
 	withWayfinderMaps(t, d, storageDir, files)
-	_, err := LaunchWayfinderSession(d, cfg, row, "")
+	_, err := LaunchWayfinderSession(d, cfg, row, "", "")
 	if !errors.Is(err, wayfinder.ErrEmptyFrontier) {
 		t.Fatalf("err = %v, want ErrEmptyFrontier", err)
 	}
@@ -195,7 +195,7 @@ func TestLaunchWayfinderSessionReusesRunningWithoutResend(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	seedWayfinderPane(f, "01", "%9", "claude")
 
-	result, err := LaunchWayfinderSession(d, cfg, row, "")
+	result, err := LaunchWayfinderSession(d, cfg, row, "", "")
 	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}

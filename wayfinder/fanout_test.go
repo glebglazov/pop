@@ -17,7 +17,7 @@ func TestFanOutSpawnsOnePanePerFrontierTicketInOneWindow(t *testing.T) {
 	fake := atTime(d, at(9))
 	session := MapSessionName(claimMapID)
 
-	out, err := FanOutFrontier(d, nil, "", claimMapID)
+	out, err := FanOutFrontier(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("FanOutFrontier: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestFanOutSpawnsOnePanePerFrontierTicketInOneWindow(t *testing.T) {
 	// Re-running tops up: everything is claimed, so there is nothing to spawn and
 	// no live pane is sent work twice.
 	sentBefore := len(fake.SentCommands[out.Spawned[0].Pane.PaneID])
-	again, err := FanOutFrontier(d, nil, "", claimMapID)
+	again, err := FanOutFrontier(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("second FanOutFrontier: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestFanOutLosesATicketMidLoopAndKeepsGoing(t *testing.T) {
 		t.Fatalf("rival claim: %v", err)
 	}
 
-	out, err := SpawnFrontier(d, nil, m, 0)
+	out, err := SpawnFrontier(d, nil, m, 0, "")
 	if err != nil {
 		t.Fatalf("SpawnFrontier: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestFanOutOnAnEmptyFrontierSpawnsNothingAndSucceeds(t *testing.T) {
 		}
 	}
 
-	out, err := FanOutFrontier(d, nil, "", claimMapID)
+	out, err := FanOutFrontier(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("FanOutFrontier over an empty frontier = %v, want success", err)
 	}

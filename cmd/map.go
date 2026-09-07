@@ -418,7 +418,7 @@ func runMapNext(cmd *cobra.Command, args []string) {
 // nothing here resolves the Trunk first: a Trunk that cannot be named refuses
 // inside the spawn, before any claim exists to strand.
 func runMapNextWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) error {
-	out, err := wayfinder.NextFrontierTicket(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID)
+	out, err := wayfinder.NextFrontierTicket(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID, "")
 	if err != nil {
 		return err
 	}
@@ -440,7 +440,7 @@ func runMapFanOut(cmd *cobra.Command, args []string) {
 // empty frontier is a message and exit 0, not a refusal, so fan-out is safe to
 // type speculatively at the top of a sitting.
 func runMapFanOutWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) error {
-	out, err := wayfinder.FanOutFrontier(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID)
+	out, err := wayfinder.FanOutFrontier(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID, "")
 	if err != nil {
 		return err
 	}
@@ -511,7 +511,7 @@ func runMapAssist(cmd *cobra.Command, args []string) {
 // hold is the one it never sees enforced: resolving belongs to the ticket's own
 // claimed session.
 func runMapAssistWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) error {
-	pane, err := wayfinder.AssistMap(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID)
+	pane, err := wayfinder.AssistMap(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID, "")
 	if err != nil {
 		return err
 	}

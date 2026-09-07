@@ -19,7 +19,7 @@ func TestAssistOpensOneReusedPanePerMap(t *testing.T) {
 	fake := atTime(d, at(9))
 	session := MapSessionName(claimMapID)
 
-	pane, err := AssistMap(d, nil, "", claimMapID)
+	pane, err := AssistMap(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("AssistMap: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestAssistOpensOneReusedPanePerMap(t *testing.T) {
 	// holds one on — and the live agent in it is never sent work twice (ADR-0158).
 	fake.PaneInfos = map[string]tmux.PaneInfo{pane.PaneID: {Session: session, Command: "claude"}}
 	sentBefore := len(fake.SentCommands[pane.PaneID])
-	again, err := AssistMap(d, nil, "", claimMapID)
+	again, err := AssistMap(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("second AssistMap: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestAssistOpensOneReusedPanePerMap(t *testing.T) {
 	// An assist pane whose agent has exited is respawned in place rather than
 	// joined by a second one.
 	fake.PaneInfos[pane.PaneID] = tmux.PaneInfo{Session: session, Command: "zsh"}
-	idle, err := AssistMap(d, nil, "", claimMapID)
+	idle, err := AssistMap(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("third AssistMap: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestAssistClaimsNothing(t *testing.T) {
 	d, _ := claimFixture(t)
 	atTime(d, at(9))
 
-	if _, err := AssistMap(d, nil, "", claimMapID); err != nil {
+	if _, err := AssistMap(d, nil, "", claimMapID, ""); err != nil {
 		t.Fatalf("AssistMap: %v", err)
 	}
 	m, err := FindMap(d, "", claimMapID)
@@ -128,11 +128,11 @@ func TestAssistReachableWithAFullyClaimedFrontier(t *testing.T) {
 	}
 	// The verb the frontier does gate refuses here, which is what makes the
 	// comparison worth pinning.
-	if _, err := NextFrontierTicket(d, nil, "", claimMapID); err == nil {
+	if _, err := NextFrontierTicket(d, nil, "", claimMapID, ""); err == nil {
 		t.Fatal("next over a fully-claimed frontier should refuse")
 	}
 
-	pane, err := AssistMap(d, nil, "", claimMapID)
+	pane, err := AssistMap(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("AssistMap over a fully-claimed frontier = %v, want success", err)
 	}
@@ -149,11 +149,11 @@ func TestAssistAndGrillingPanesCoexist(t *testing.T) {
 	fake := atTime(d, at(9))
 	session := MapSessionName(claimMapID)
 
-	assist, err := AssistMap(d, nil, "", claimMapID)
+	assist, err := AssistMap(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("AssistMap: %v", err)
 	}
-	out, err := NextFrontierTicket(d, nil, "", claimMapID)
+	out, err := NextFrontierTicket(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("NextFrontierTicket: %v", err)
 	}
@@ -206,13 +206,13 @@ func TestMapAssistPanesAreAddressedBySlot(t *testing.T) {
 		fake.PaneInfos[paneID] = tmux.PaneInfo{Session: session, Command: "claude"}
 	}
 
-	first, err := SpawnAssist(d, nil, m)
+	first, err := SpawnAssist(d, nil, m, "")
 	if err != nil || first.Slot != tmux.FirstPaneSlot {
 		t.Fatalf("first assist = %+v, %v, want the first slot", first, err)
 	}
 	running(first.PaneID)
 
-	second, err := SpawnNewAssist(d, nil, m)
+	second, err := SpawnNewAssist(d, nil, m, "")
 	if err != nil || second.Slot != 2 || second.PaneID == first.PaneID {
 		t.Fatalf("second assist = %+v, %v, want another pane on slot 2", second, err)
 	}
@@ -220,25 +220,25 @@ func TestMapAssistPanesAreAddressedBySlot(t *testing.T) {
 
 	// The command line names no slot, so it goes back to the lowest live
 	// conversation instead of starting a third.
-	back, err := AssistMap(d, nil, "", claimMapID)
+	back, err := AssistMap(d, nil, "", claimMapID, "")
 	if err != nil || back.PaneID != first.PaneID || !back.Reused {
 		t.Fatalf("pop map assist = %+v, %v, want the lowest live pane %q reused", back, err, first.PaneID)
 	}
 
 	// A digit is what reaches a pane that is not the lowest one.
-	jumped, err := SpawnAssistOnSlot(d, nil, m, 2)
+	jumped, err := SpawnAssistOnSlot(d, nil, m, 2, "")
 	if err != nil || jumped.PaneID != second.PaneID || !jumped.Reused {
 		t.Fatalf("assist on slot 2 = %+v, %v, want %q reused", jumped, err, second.PaneID)
 	}
 
 	for slot := tmux.PaneSlot(3); slot <= tmux.LastPaneSlot; slot++ {
-		pane, err := SpawnNewAssist(d, nil, m)
+		pane, err := SpawnNewAssist(d, nil, m, "")
 		if err != nil || pane.Slot != slot {
 			t.Fatalf("assist %d = %+v, %v, want slot %d", slot, pane, err, slot)
 		}
 		running(pane.PaneID)
 	}
-	if _, err := SpawnNewAssist(d, nil, m); !errors.Is(err, tmux.ErrNoFreePaneSlot) {
+	if _, err := SpawnNewAssist(d, nil, m, ""); !errors.Is(err, tmux.ErrNoFreePaneSlot) {
 		t.Fatalf("tenth assist = %v, want ErrNoFreePaneSlot", err)
 	}
 	if panes := fake.Windows[session]["map"]; len(panes) != int(tmux.LastPaneSlot) {

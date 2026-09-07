@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/queuetest"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
@@ -305,5 +307,31 @@ func TestDashboardAssistVerbOpensNoChooser(t *testing.T) {
 	}
 	if got.menu == nil || got.menu.assist == nil {
 		t.Fatal("the assist verb opened no assist-pane menu")
+	}
+}
+
+// A task-set assist launch pins the spawned session to the entry the row named,
+// as `pop tasks assist --agent` (ADR-0264 decision 8): the pane resolves config
+// for itself, so without the argument the row's promise would be advisory.
+func TestDashboardAssistLaunchNamesTheRowsAttendedEntry(t *testing.T) {
+	repo, setID, _ := queuetest.SetupSpawnRepo(t, "assist-agent-arg", []queuetest.SpawnTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	row.RuntimePath, row.ProjectPath = repo, repo
+	cfg.Work = &config.WorkConfig{Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{
+		{DisplayName: "Picked", Cmd: "claude --model opus"},
+		{Cmd: "codex"},
+	}}}
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
+
+	m.launchAssist(row, tmuxmod.FirstPaneSlot)()
+
+	command, ok := extractAssistSpawnCommand(rt)
+	if !ok {
+		t.Fatalf("no assist command was sent; commands=%v", rt.Commands)
+	}
+	if !strings.Contains(command, "--agent 'claude --model opus'") {
+		t.Fatalf("assist command = %q, want it pinned to the entry the row names", command)
 	}
 }

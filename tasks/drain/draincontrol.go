@@ -319,8 +319,11 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 // is respawned in place; a free slot gets a fresh pane running `pop tasks assist`
 // pinned to the row's binding-first runtime checkout. Focus and quit belong to
 // the dashboard handoff path (ADR-0158).
-func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow, slot tmuxmod.PaneSlot) (DashboardDrainResult, error) {
-	launch, err := prepareAssist(d, cfg, row)
+//
+// attendedSpec is the attended entry the launch site chose, empty when it chose
+// none; it reaches the spawned session as its `--agent` (ADR-0264 decision 8).
+func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow, slot tmuxmod.PaneSlot, attendedSpec string) (DashboardDrainResult, error) {
+	launch, err := prepareAssist(d, cfg, row, attendedSpec)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -330,8 +333,8 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow, slot tmuxmod.Pa
 // LaunchNewAssist opens another Assist session on the set, on the lowest slot it
 // holds no pane on. Past the ninth it refuses with tmux's own ErrNoFreePaneSlot
 // rather than opening a session no digit could address (ADR-0263).
-func LaunchNewAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
-	launch, err := prepareAssist(d, cfg, row)
+func LaunchNewAssist(d *Deps, cfg *config.Config, row DashboardRow, attendedSpec string) (DashboardDrainResult, error) {
+	launch, err := prepareAssist(d, cfg, row, attendedSpec)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -352,12 +355,15 @@ type assistLaunch struct {
 	checkout    string
 	runtimePath string
 	command     string
+	// attendedSpec is the entry the command was pinned to, kept so the pane title
+	// names what launched rather than the head of the list.
+	attendedSpec string
 }
 
 // prepareAssist validates the row's binding and its assist launch, then resolves
 // the session and checkout the pane opens in. It refuses everything a launch can
 // be refused for before any slot is chosen, so a menu digit and `n` fail alike.
-func prepareAssist(d *Deps, cfg *config.Config, row DashboardRow) (assistLaunch, error) {
+func prepareAssist(d *Deps, cfg *config.Config, row DashboardRow, attendedSpec string) (assistLaunch, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -413,7 +419,11 @@ func prepareAssist(d *Deps, cfg *config.Config, row DashboardRow) (assistLaunch,
 	if strings.TrimSpace(runtimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(runtimePath)
 	}
-	return assistLaunch{d: d, session: session, checkout: checkout, runtimePath: runtimePath, command: command}, nil
+	attendedSpec = strings.TrimSpace(attendedSpec)
+	if attendedSpec != "" {
+		command += " --agent " + shellQuote(attendedSpec)
+	}
+	return assistLaunch{d: d, session: session, checkout: checkout, runtimePath: runtimePath, command: command, attendedSpec: attendedSpec}, nil
 }
 
 // open is the jump-or-spawn on one slot: a running pane there is handed back
@@ -430,7 +440,7 @@ func (l assistLaunch) open(cfg *config.Config, row DashboardRow, slot tmuxmod.Pa
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if err := l.d.Tmux.SetPaneTitle(paneID, AssistPaneTitle(row.ID, slot, attendedEntryLabel(cfg))); err != nil {
+	if err := l.d.Tmux.SetPaneTitle(paneID, AssistPaneTitle(row.ID, slot, attendedEntryLabel(cfg, l.attendedSpec))); err != nil {
 		return DashboardDrainResult{}, err
 	}
 	return l.result(paneID), nil
@@ -468,11 +478,11 @@ func AssistPaneTitle(setID string, slot tmuxmod.PaneSlot, entryLabel string) str
 }
 
 // attendedEntryLabel is the shared one-line render of the attended entry the
-// merged config resolves to (ADR-0196 decision 9). The spawned session resolves
-// the same merged config for itself, so the title and the launch agree without
-// this process passing anything across the boundary.
-func attendedEntryLabel(cfg *config.Config) string {
-	return tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
+// pane's command will run (ADR-0196 decision 9): the entry attendedSpec names,
+// else the head the spawned session resolves for itself off the same merged
+// config.
+func attendedEntryLabel(cfg *config.Config, attendedSpec string) string {
+	return tasks.FormatAgentEntry(tasks.LaunchedAttendedEntry(cfg, attendedSpec))
 }
 
 // LaunchFold spawns `pop tasks fold <set>` under TagFold in the project's

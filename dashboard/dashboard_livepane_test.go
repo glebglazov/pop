@@ -75,7 +75,7 @@ func TestLivePaneGreenKeyJumpsWithoutResend(t *testing.T) {
 		"%5": {Session: "proj", Command: "node"},
 	}
 
-	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot)
+	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestLivePaneGreyKeyRespawns(t *testing.T) {
 	}
 	rt.Fake.PaneCwd = map[string]string{"%5": repo}
 
-	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot)
+	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestLivePaneDarkSpawnsFresh(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 
-	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot); err != nil {
+	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, ""); err != nil {
 		t.Fatal(err)
 	}
 	if rt.CountCommand("send-keys") != 1 {

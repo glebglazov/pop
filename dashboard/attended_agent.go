@@ -45,6 +45,15 @@ func (m QueueDashboard) attendedAgentStatusLine() string {
 	return tasks.FormatAttendedAgentStatus(tasks.EffectiveAttendedEntry(m.cfg))
 }
 
+// attendedLaunchSpec is the Agent entry an attended launch from this page must
+// run: the one the row it launches from names. Passing it makes the render
+// binding (ADR-0264 decision 8) — the pane resolves the merged config for
+// itself, so without it a pick made elsewhere between the draw and the
+// keystroke would launch something the row never said.
+func (m QueueDashboard) attendedLaunchSpec() string {
+	return tasks.EffectiveAttendedEntry(m.cfg).Cmd
+}
+
 // attendedActionVerb reports whether verb's action-menu row must name the
 // attended entry that will run (ADR-0196 decision 9).
 func attendedActionVerb(verb work.Verb) bool {

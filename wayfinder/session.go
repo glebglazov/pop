@@ -212,8 +212,8 @@ func FocusMapSession(d *Deps, session MapSession) error {
 // dashboard's map row — builds it here, so a session started from any of them
 // looks the same. It names exactly one ticket, which is what keeps the
 // one-non-research-ticket-per-session rule intact across a fanned-out frontier.
-func GrillingInvocation(d *Deps, cfg *config.Config, mapID, ticketID, dir string) (string, error) {
-	return agentPaneCommand(d, cfg, WorkModeInvocation(skillsPrefixOf(cfg), mapID, ticketID), dir)
+func GrillingInvocation(d *Deps, cfg *config.Config, mapID, ticketID, dir, attendedSpec string) (string, error) {
+	return agentPaneCommand(d, cfg, WorkModeInvocation(skillsPrefixOf(cfg), mapID, ticketID), dir, attendedSpec)
 }
 
 // skillsPrefixOf resolves the configured skills prefix, falling back to the
@@ -225,16 +225,22 @@ func skillsPrefixOf(cfg *config.Config) string {
 	return cfg.ResolveSkillsPrefix()
 }
 
-// agentPaneCommand renders the shell command a Map's pane runs: the configured
-// interactive agent, opened on prompt at dir. Both wayfinding entry points —
-// grilling one ticket, assisting a whole Map — build their command here, so a
-// pane looks the same whichever mode seeded it.
-func agentPaneCommand(d *Deps, cfg *config.Config, prompt, dir string) (string, error) {
+// agentPaneCommand renders the shell command a Map's pane runs: the attended
+// agent the launch site chose, opened on prompt at dir. Both wayfinding entry
+// points — grilling one ticket, assisting a whole Map — build their command
+// here, so a pane looks the same whichever mode seeded it.
+//
+// attendedSpec is the entry the launch site picked, empty when it picked none —
+// and empty is what every Map launch passed until a keystroke could fill it
+// (ADR-0264 decision 8). It reaches the one attended chokepoint as the override
+// a `--agent` flag fills there, so a pick and a flag select an entry by the same
+// rule.
+func agentPaneCommand(d *Deps, cfg *config.Config, prompt, dir, attendedSpec string) (string, error) {
 	var taskDeps *tasks.Deps
 	if d != nil {
 		taskDeps = d.taskDeps()
 	}
-	inv, err := tasks.ResolveAgentAssistanceInvocation(taskDeps, cfg, "", "", prompt, dir)
+	inv, err := tasks.ResolveAgentAssistanceInvocation(taskDeps, cfg, attendedSpec, "", prompt, dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve interactive agent: %w", err)
 	}
@@ -311,10 +317,12 @@ func grillingPaneTitle(ticket Ticket, entryLabel string) string {
 	return base + " · " + entryLabel
 }
 
-// attendedEntryLabel is the shared one-line render of the attended entry the
-// merged config resolves to, for the pane title a grilling session opens under.
-func attendedEntryLabel(cfg *config.Config) string {
-	return tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
+// attendedEntryLabel is the shared one-line render of the attended entry a
+// launch carrying attendedSpec runs, for the pane title it opens under. It
+// names what launched, so a pane opened on a picked entry is not titled by the
+// head of the list (ADR-0264 decision 8).
+func attendedEntryLabel(cfg *config.Config, attendedSpec string) string {
+	return tasks.FormatAgentEntry(tasks.LaunchedAttendedEntry(cfg, attendedSpec))
 }
 
 func shellQuote(s string) string {

@@ -89,7 +89,7 @@ func TestDashboardLaunchAssistSpawnsTaggedPane(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 
-	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot); err != nil {
+	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, ""); err != nil {
 		t.Fatalf("drain.LaunchAssist: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func TestDashboardLaunchAssistBoundCheckoutUsesCheckoutSession(t *testing.T) {
 	row.RuntimePath = bound
 	row.ProjectPath = repo
 
-	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot); err != nil {
+	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, ""); err != nil {
 		t.Fatalf("drain.LaunchAssist: %v", err)
 	}
 	assertSetPaneCheckoutSessionAndCwd(t, rt, repo, bound)
@@ -152,7 +152,7 @@ func TestDashboardLaunchAssistReusesPane(t *testing.T) {
 	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 
-	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot)
+	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, "")
 	if err != nil {
 		t.Fatalf("drain.LaunchAssist reuse: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestLaunchAssistOpensOverALiveDrain(t *testing.T) {
 		t.Fatalf("StartDrain: %v", err)
 	}
 
-	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot)
+	result, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, "")
 	if err != nil {
 		t.Fatalf("drain.LaunchAssist over a live drain: %v", err)
 	}

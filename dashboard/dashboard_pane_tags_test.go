@@ -54,7 +54,7 @@ func TestActivityPaneTagsDistinct(t *testing.T) {
 		t.Fatalf("drain.LaunchVerify: %v", err)
 	}
 	row.RawStatus = tasks.StatusDone
-	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot); err != nil {
+	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, ""); err != nil {
 		t.Fatalf("drain.LaunchAssist: %v", err)
 	}
 
@@ -190,7 +190,7 @@ func TestHandoffPaneTitles(t *testing.T) {
 		t.Fatalf("drain.LaunchVerify: %v", err)
 	}
 	row.RawStatus = tasks.StatusDone
-	assistResult, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot)
+	assistResult, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot, "")
 	if err != nil {
 		t.Fatalf("drain.LaunchAssist: %v", err)
 	}

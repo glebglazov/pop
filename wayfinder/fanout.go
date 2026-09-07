@@ -37,7 +37,7 @@ type FrontierSpawn struct {
 // another pane" for the claim's whole TTL. The cost of the inversion is that a
 // ticket lost to a parallel session leaves an idle pane behind rather than a
 // stranded claim.
-func SpawnTicket(d *Deps, cfg *config.Config, m Map, ticket Ticket) (*SpawnedTicket, error) {
+func SpawnTicket(d *Deps, cfg *config.Config, m Map, ticket Ticket, attendedSpec string) (*SpawnedTicket, error) {
 	session, err := EnsureMapSession(d, m.ID)
 	if err != nil {
 		return nil, err
@@ -45,11 +45,11 @@ func SpawnTicket(d *Deps, cfg *config.Config, m Map, ticket Ticket) (*SpawnedTic
 	if session.Dir == "" {
 		return nil, ErrNoTrunk
 	}
-	command, err := GrillingInvocation(d, cfg, m.ID, ticket.ID, session.Dir)
+	command, err := GrillingInvocation(d, cfg, m.ID, ticket.ID, session.Dir, attendedSpec)
 	if err != nil {
 		return nil, err
 	}
-	pane, err := openGrillingPane(d, *session, ticket, command, attendedEntryLabel(cfg))
+	pane, err := openGrillingPane(d, *session, ticket, command, attendedEntryLabel(cfg, attendedSpec))
 	if err != nil {
 		return nil, err
 	}
@@ -67,14 +67,18 @@ func SpawnTicket(d *Deps, cfg *config.Config, m Map, ticket Ticket) (*SpawnedTic
 //
 // Re-running it tops up: a claimed ticket is off the frontier, and a ticket whose
 // pane is still alive is reused as a jump target rather than sent work twice.
-func SpawnFrontier(d *Deps, cfg *config.Config, m Map, limit int) (*FrontierSpawn, error) {
+//
+// attendedSpec is the whole pass's attended entry: a fan-out takes one pick and
+// every pane it opens runs it, because a prompt per pane is not a choice
+// (ADR-0264 decision 8).
+func SpawnFrontier(d *Deps, cfg *config.Config, m Map, limit int, attendedSpec string) (*FrontierSpawn, error) {
 	frontier := Frontier(m.Tickets)
 	out := &FrontierSpawn{MapID: m.ID, Frontier: len(frontier)}
 	for _, ticket := range frontier {
 		if limit > 0 && len(out.Spawned) >= limit {
 			break
 		}
-		spawned, err := SpawnTicket(d, cfg, m, ticket)
+		spawned, err := SpawnTicket(d, cfg, m, ticket, attendedSpec)
 		if err != nil {
 			return nil, err
 		}
@@ -91,12 +95,12 @@ func SpawnFrontier(d *Deps, cfg *config.Config, m Map, limit int) (*FrontierSpaw
 // NextFrontierTicket is `pop map next`: the spawn path bounded to one ticket. An
 // empty frontier refuses here, because the verb's whole output is the ticket it
 // handed out — fan-out, whose purpose is bulk, reports nothing to do instead.
-func NextFrontierTicket(d *Deps, cfg *config.Config, cwd, mapID string) (*FrontierSpawn, error) {
+func NextFrontierTicket(d *Deps, cfg *config.Config, cwd, mapID, attendedSpec string) (*FrontierSpawn, error) {
 	m, err := findClaimableMap(d, cwd, mapID)
 	if err != nil {
 		return nil, err
 	}
-	out, err := SpawnFrontier(d, cfg, m, 1)
+	out, err := SpawnFrontier(d, cfg, m, 1, attendedSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -110,10 +114,10 @@ func NextFrontierTicket(d *Deps, cfg *config.Config, cwd, mapID string) (*Fronti
 // frontier, HITL ones included, in one act. There is no cap and no spill — every
 // frontier ticket gets a pane, and tmux's own pane zoom answers a cramped window
 // rather than a second place to look.
-func FanOutFrontier(d *Deps, cfg *config.Config, cwd, mapID string) (*FrontierSpawn, error) {
+func FanOutFrontier(d *Deps, cfg *config.Config, cwd, mapID, attendedSpec string) (*FrontierSpawn, error) {
 	m, err := findClaimableMap(d, cwd, mapID)
 	if err != nil {
 		return nil, err
 	}
-	return SpawnFrontier(d, cfg, m, 0)
+	return SpawnFrontier(d, cfg, m, 0, attendedSpec)
 }

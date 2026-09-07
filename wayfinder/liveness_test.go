@@ -295,7 +295,7 @@ func TestFanOutTopsUpADeadSessionsTicket(t *testing.T) {
 	d, _ := claimFixture(t)
 	fake := atTime(d, at(9))
 
-	out, err := FanOutFrontier(d, nil, "", claimMapID)
+	out, err := FanOutFrontier(d, nil, "", claimMapID, "")
 	if err != nil || len(out.Spawned) != 2 {
 		t.Fatalf("fan-out = %+v (%v), want the frontier's two tickets", out, err)
 	}
@@ -305,7 +305,7 @@ func TestFanOutTopsUpADeadSessionsTicket(t *testing.T) {
 	}
 
 	dropToShell(fake, spawned["01"])
-	again, err := FanOutFrontier(d, nil, "", claimMapID)
+	again, err := FanOutFrontier(d, nil, "", claimMapID, "")
 	if err != nil {
 		t.Fatalf("fan-out after a session died: %v", err)
 	}

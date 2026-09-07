@@ -3273,7 +3273,7 @@ func (m QueueDashboard) launchVerify(row DashboardRow) tea.Cmd {
 
 func (m QueueDashboard) launchWayfinderSession(row DashboardRow, ticketID string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID)
+		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID, m.attendedLaunchSpec())
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
@@ -3283,7 +3283,7 @@ func (m QueueDashboard) launchWayfinderSession(row DashboardRow, ticketID string
 // (ADR-0182's lowercase half).
 func (m QueueDashboard) spawnWayfinderSession(row DashboardRow, ticketID string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID)
+		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID, m.attendedLaunchSpec())
 		if err != nil {
 			return dashboardHandoffMsg{err: err}
 		}
@@ -3293,14 +3293,14 @@ func (m QueueDashboard) spawnWayfinderSession(row DashboardRow, ticketID string)
 
 func (m QueueDashboard) launchWayfinderFanOut(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		result, _, err := LaunchWayfinderFanOut(m.d, m.cfg, row)
+		result, _, err := LaunchWayfinderFanOut(m.d, m.cfg, row, m.attendedLaunchSpec())
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
 
 func (m QueueDashboard) spawnWayfinderFanOut(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		result, count, err := LaunchWayfinderFanOut(m.d, m.cfg, row)
+		result, count, err := LaunchWayfinderFanOut(m.d, m.cfg, row, m.attendedLaunchSpec())
 		if err != nil {
 			return dashboardHandoffMsg{err: err}
 		}
@@ -3321,10 +3321,10 @@ func dashboardWayfinderEmptyFrontierMessage() string {
 func (m QueueDashboard) launchAssist(row DashboardRow, slot tmuxmod.PaneSlot) tea.Cmd {
 	return func() tea.Msg {
 		if mapRow(row) {
-			result, err := LaunchWayfinderAssist(m.d, m.cfg, row, slot)
+			result, err := LaunchWayfinderAssist(m.d, m.cfg, row, slot, m.attendedLaunchSpec())
 			return handoffAfterLaunch(m.d, result, err)
 		}
-		result, err := drain.LaunchAssist(m.d, m.cfg, row, slot)
+		result, err := drain.LaunchAssist(m.d, m.cfg, row, slot, m.attendedLaunchSpec())
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
@@ -3332,10 +3332,10 @@ func (m QueueDashboard) launchAssist(row DashboardRow, slot tmuxmod.PaneSlot) te
 func (m QueueDashboard) launchNewAssist(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		if mapRow(row) {
-			result, err := LaunchNewWayfinderAssist(m.d, m.cfg, row)
+			result, err := LaunchNewWayfinderAssist(m.d, m.cfg, row, m.attendedLaunchSpec())
 			return handoffAfterLaunch(m.d, result, err)
 		}
-		result, err := drain.LaunchNewAssist(m.d, m.cfg, row)
+		result, err := drain.LaunchNewAssist(m.d, m.cfg, row, m.attendedLaunchSpec())
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }

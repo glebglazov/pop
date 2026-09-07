@@ -21,7 +21,7 @@ import (
 // `pop map claim` renews it rather than being refused (ADR-0182). A running
 // grilling pane is a jump target: focus it rather than re-sending work
 // (ADR-0158); an idle one (bare shell) respawns the command.
-func LaunchWayfinderSession(d *drain.Deps, cfg *config.Config, row DashboardRow, ticketID string) (drain.DashboardDrainResult, error) {
+func LaunchWayfinderSession(d *drain.Deps, cfg *config.Config, row DashboardRow, ticketID, attendedSpec string) (drain.DashboardDrainResult, error) {
 	wd, wfMap, _, err := wayfinderSpawnTarget(d, cfg, row)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
@@ -30,7 +30,7 @@ func LaunchWayfinderSession(d *drain.Deps, cfg *config.Config, row DashboardRow,
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
-	spawned, err := wayfinder.SpawnTicket(wd, cfg, *wfMap, ticket)
+	spawned, err := wayfinder.SpawnTicket(wd, cfg, *wfMap, ticket, attendedSpec)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
@@ -43,12 +43,15 @@ func LaunchWayfinderSession(d *drain.Deps, cfg *config.Config, row DashboardRow,
 // per-ticket spawn, looped. It reports the first pane so the focusing key has
 // somewhere to land, plus how many tickets went out. An empty frontier reads as
 // ErrEmptyFrontier, which the dashboard already surfaces as a status line.
-func LaunchWayfinderFanOut(d *drain.Deps, cfg *config.Config, row DashboardRow) (drain.DashboardDrainResult, int, error) {
+//
+// One attendedSpec covers the whole spawn: every pane runs the entry the row
+// named, because a wall of prompts is not a choice (ADR-0264 decision 8).
+func LaunchWayfinderFanOut(d *drain.Deps, cfg *config.Config, row DashboardRow, attendedSpec string) (drain.DashboardDrainResult, int, error) {
 	wd, wfMap, _, err := wayfinderSpawnTarget(d, cfg, row)
 	if err != nil {
 		return drain.DashboardDrainResult{}, 0, err
 	}
-	out, err := wayfinder.SpawnFrontier(wd, cfg, *wfMap, 0)
+	out, err := wayfinder.SpawnFrontier(wd, cfg, *wfMap, 0, attendedSpec)
 	if err != nil {
 		return drain.DashboardDrainResult{}, 0, err
 	}
@@ -63,12 +66,12 @@ func LaunchWayfinderFanOut(d *drain.Deps, cfg *config.Config, row DashboardRow) 
 // to it. It reads no frontier, so it is the one map-row launch that works
 // whatever the frontier looks like (ADR-0184). A live pane on that slot is a
 // jump target rather than a second session.
-func LaunchWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow, slot tmuxmod.PaneSlot) (drain.DashboardDrainResult, error) {
+func LaunchWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow, slot tmuxmod.PaneSlot, attendedSpec string) (drain.DashboardDrainResult, error) {
 	wd, wfMap, _, err := wayfinderSpawnTarget(d, cfg, row)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
-	pane, err := wayfinder.SpawnAssistOnSlot(wd, cfg, *wfMap, slot)
+	pane, err := wayfinder.SpawnAssistOnSlot(wd, cfg, *wfMap, slot, attendedSpec)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
@@ -77,12 +80,12 @@ func LaunchWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow, 
 
 // LaunchNewWayfinderAssist opens another assist pane on the Map, on the lowest
 // slot it holds none on, refusing past the ninth (ADR-0263).
-func LaunchNewWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow) (drain.DashboardDrainResult, error) {
+func LaunchNewWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow, attendedSpec string) (drain.DashboardDrainResult, error) {
 	wd, wfMap, _, err := wayfinderSpawnTarget(d, cfg, row)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
-	pane, err := wayfinder.SpawnNewAssist(wd, cfg, *wfMap)
+	pane, err := wayfinder.SpawnNewAssist(wd, cfg, *wfMap, attendedSpec)
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}

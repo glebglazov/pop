@@ -453,7 +453,9 @@ func (k *MapKind) workTicket(c work.Container, ticketID string, focus bool) (wor
 	if err != nil {
 		return work.Outcome{}, err
 	}
-	spawned, err := SpawnTicket(wd, k.d.Config, *target, ticket)
+	// A Work verb carries no payload, so no per-launch attended pick can reach a
+	// kind's Perform: every spawn here runs the configured head, as it always has.
+	spawned, err := SpawnTicket(wd, k.d.Config, *target, ticket, "")
 	if err != nil {
 		return work.Outcome{}, err
 	}
@@ -519,7 +521,7 @@ func (k *MapKind) fanOutFrontier(c work.Container, focus bool) (work.Outcome, er
 	if err != nil {
 		return work.Outcome{}, err
 	}
-	out, err := SpawnFrontier(wd, k.d.Config, *target, 0)
+	out, err := SpawnFrontier(wd, k.d.Config, *target, 0, "")
 	if err != nil {
 		return work.Outcome{}, err
 	}
@@ -550,7 +552,7 @@ func (k *MapKind) assistMap(c work.Container) (work.Outcome, error) {
 	if err != nil {
 		return work.Outcome{}, err
 	}
-	pane, err := SpawnAssist(wd, k.d.Config, *target)
+	pane, err := SpawnAssist(wd, k.d.Config, *target, "")
 	if err != nil {
 		return work.Outcome{}, err
 	}

@@ -3,7 +3,6 @@ package wayfinder
 import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/tmux"
-	"github.com/glebglazov/pop/tasks"
 )
 
 // assistPaneTitle titles the Map-scoped pane. A wall of tiled panes reads as the
@@ -11,8 +10,8 @@ import (
 // at all.
 const assistPaneTitle = "assist"
 
-func assistPaneTitleFor(cfg *config.Config) string {
-	return assistPaneTitle + " · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
+func assistPaneTitleFor(cfg *config.Config, attendedSpec string) string {
+	return assistPaneTitle + " · " + attendedEntryLabel(cfg, attendedSpec)
 }
 
 // AssistPane is one of the Map's own attended sessions: a pane in its `map`
@@ -39,12 +38,12 @@ type AssistPane struct {
 // about the Map's own shape has nowhere else to land, so nothing here consults the
 // frontier at all — the Map only has to be registered and not BROKEN, the same
 // gate the claiming verbs apply.
-func AssistMap(d *Deps, cfg *config.Config, cwd, mapID string) (*AssistPane, error) {
+func AssistMap(d *Deps, cfg *config.Config, cwd, mapID, attendedSpec string) (*AssistPane, error) {
 	m, err := findClaimableMap(d, cwd, mapID)
 	if err != nil {
 		return nil, err
 	}
-	return SpawnAssist(d, cfg, m)
+	return SpawnAssist(d, cfg, m, attendedSpec)
 }
 
 // SpawnAssist returns to the Map's assist session, which is what asking for
@@ -61,7 +60,7 @@ func AssistMap(d *Deps, cfg *config.Config, cwd, mapID string) (*AssistPane, err
 // to nine assist panes now (ADR-0263), so between two live sessions those prose
 // edits are last-writer-wins. A claim row would not fix it either, and would
 // need a TTL and a release path for a session holding no ticket.
-func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
+func SpawnAssist(d *Deps, cfg *config.Config, m Map, attendedSpec string) (*AssistPane, error) {
 	session, err := EnsureMapSession(d, m.ID)
 	if err != nil {
 		return nil, err
@@ -70,25 +69,25 @@ func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 	if err != nil {
 		return nil, err
 	}
-	return openAssistPane(d, cfg, m, *session, slot)
+	return openAssistPane(d, cfg, m, *session, slot, attendedSpec)
 }
 
 // SpawnAssistOnSlot opens (or returns to) the assist pane on one named slot —
 // the Assist pane menu's digit, which is how an operator reaches a particular
 // one of a Map's conversations. A pane still running there is a jump target; one
 // that has fallen back to its shell is respawned in place (ADR-0158).
-func SpawnAssistOnSlot(d *Deps, cfg *config.Config, m Map, slot tmux.PaneSlot) (*AssistPane, error) {
+func SpawnAssistOnSlot(d *Deps, cfg *config.Config, m Map, slot tmux.PaneSlot, attendedSpec string) (*AssistPane, error) {
 	session, err := EnsureMapSession(d, m.ID)
 	if err != nil {
 		return nil, err
 	}
-	return openAssistPane(d, cfg, m, *session, slot)
+	return openAssistPane(d, cfg, m, *session, slot, attendedSpec)
 }
 
 // SpawnNewAssist opens another assist session on the Map, on the lowest slot it
 // holds no pane on. Past the ninth it refuses with tmux's own ErrNoFreePaneSlot
 // rather than opening a session no digit could address (ADR-0263).
-func SpawnNewAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
+func SpawnNewAssist(d *Deps, cfg *config.Config, m Map, attendedSpec string) (*AssistPane, error) {
 	session, err := EnsureMapSession(d, m.ID)
 	if err != nil {
 		return nil, err
@@ -97,22 +96,23 @@ func SpawnNewAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 	if err != nil {
 		return nil, err
 	}
-	return openAssistPane(d, cfg, m, *session, slot)
+	return openAssistPane(d, cfg, m, *session, slot, attendedSpec)
 }
 
 // openAssistPane is the one spawn body all three entry points share: resolve the
 // command and land it in the pane on slot. `pop map assist` and the Work
 // dashboard's map row both come through here, so a session started from either
 // looks the same.
-func openAssistPane(d *Deps, cfg *config.Config, m Map, session MapSession, slot tmux.PaneSlot) (*AssistPane, error) {
+func openAssistPane(d *Deps, cfg *config.Config, m Map, session MapSession, slot tmux.PaneSlot, attendedSpec string) (*AssistPane, error) {
 	if session.Dir == "" {
 		return nil, ErrNoTrunk
 	}
-	command, err := AssistInvocation(d, cfg, m.ID, session.Dir)
+	command, err := AssistInvocation(d, cfg, m.ID, session.Dir, attendedSpec)
 	if err != nil {
 		return nil, err
 	}
-	paneID, reused, err := openMapPane(d, session, tmux.TagAssist, slot, m.ID, assistPaneTitleFor(cfg), command)
+	title := assistPaneTitleFor(cfg, attendedSpec)
+	paneID, reused, err := openMapPane(d, session, tmux.TagAssist, slot, m.ID, title, command)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func openAssistPane(d *Deps, cfg *config.Config, m Map, session MapSession, slot
 		Session: session,
 		Window:  mapWindow,
 		PaneID:  paneID,
-		Title:   assistPaneTitleFor(cfg),
+		Title:   title,
 		Slot:    slot,
 		Reused:  reused,
 	}, nil
@@ -131,7 +131,8 @@ func openAssistPane(d *Deps, cfg *config.Config, m Map, session MapSession, slot
 // configured interactive agent, opened on the wayfinding skill in assist mode for
 // one Map and no ticket. Naming no ticket is what keeps the
 // one-non-research-ticket-per-session rule intact — a session with no ticket in
-// hand has none to resolve.
-func AssistInvocation(d *Deps, cfg *config.Config, mapID, dir string) (string, error) {
-	return agentPaneCommand(d, cfg, AssistModeInvocation(skillsPrefixOf(cfg), mapID), dir)
+// hand has none to resolve. attendedSpec is the entry the launch site picked,
+// empty when it picked none.
+func AssistInvocation(d *Deps, cfg *config.Config, mapID, dir, attendedSpec string) (string, error) {
+	return agentPaneCommand(d, cfg, AssistModeInvocation(skillsPrefixOf(cfg), mapID), dir, attendedSpec)
 }

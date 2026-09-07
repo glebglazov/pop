@@ -62,3 +62,34 @@ func defaultAttendedEntry() AgentGroupEntry {
 		Preset:   DefaultAgentPreset,
 	}
 }
+
+// LaunchedAttendedEntry is the attended entry one launch will run: the entry an
+// attended spec names where the merged list holds it, else the head one. It is
+// what an attended pane title renders, so a launch that carried a pick is
+// titled by the entry that launched it rather than by the head the surface
+// would have taken (ADR-0264 decision 8).
+//
+// A spec naming nothing the list holds — a `--agent` value pop was handed — is
+// still what launches, so it renders as itself: the command as its own label,
+// and whatever model it pins.
+func LaunchedAttendedEntry(cfg *config.Config, attendedSpec string) AgentGroupEntry {
+	spec := strings.TrimSpace(attendedSpec)
+	if spec == "" {
+		return EffectiveAttendedEntry(cfg)
+	}
+	for _, catalog := range AgentGroupCatalogs(cfg) {
+		if catalog.Group != "attended" {
+			continue
+		}
+		for _, entry := range catalog.Entries {
+			if entry.Problem == "" && entry.Cmd == spec {
+				return entry
+			}
+		}
+	}
+	entry := AgentGroupEntry{Cmd: spec, Model: AgentSpecModel(spec)}
+	if preset, err := AgentPresetName(spec); err == nil {
+		entry.Preset = preset
+	}
+	return entry
+}

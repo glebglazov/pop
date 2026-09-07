@@ -73,7 +73,7 @@ func atTime(d *Deps, now time.Time) *tmuxtest.Fake {
 // nextSpawn is `pop map next`: the whole spawn path, pane before claim.
 func nextSpawn(t *testing.T, d *Deps) (*SpawnedTicket, error) {
 	t.Helper()
-	out, err := NextFrontierTicket(d, nil, "", claimMapID)
+	out, err := NextFrontierTicket(d, nil, "", claimMapID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +286,7 @@ func TestClaimRefusesResolvedAndUnregisteredMaps(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err = NextFrontierTicket(d, nil, "", "2026-08-03-charting")
+	_, err = NextFrontierTicket(d, nil, "", "2026-08-03-charting", "")
 	if err == nil || !strings.Contains(err.Error(), "pop map register 2026-08-03-charting") {
 		t.Fatalf("next on an unregistered map = %v", err)
 	}
@@ -300,7 +300,7 @@ func TestNextWithoutAMapIDTakesTheOneBeingWayfound(t *testing.T) {
 	asWindow(d, "pane:%1", at(9))
 
 	atTime(d, at(9))
-	sole, err := NextFrontierTicket(d, nil, "", "")
+	sole, err := NextFrontierTicket(d, nil, "", "", "")
 	if err != nil || len(sole.Spawned) != 1 || sole.Spawned[0].Ticket.ID != "01" {
 		t.Fatalf("bare next = %+v (%v), want ticket 01 of the sole active map", sole, err)
 	}
@@ -317,7 +317,7 @@ func TestNextWithoutAMapIDTakesTheOneBeingWayfound(t *testing.T) {
 	if _, err := RegisterMap(d, "", "2026-08-03-other"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = NextFrontierTicket(d, nil, "", "")
+	_, err = NextFrontierTicket(d, nil, "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "several active maps") {
 		t.Fatalf("bare next with two active maps = %v", err)
 	}
