@@ -723,10 +723,11 @@ func renderTaskList(out *output, taskSetID string, m *Manifest) {
 // this drills into a single set and shows every task's status, type, identifier,
 // title, and blockers in manifest (dependency) order, so a set's aggregate
 // state can be read down to the task that holds it.
-// It closes with the set's Refine mark, Verify pointer and Artifact summary
-// when it has them — d is what resolves them, and a nil d falls back to the
-// default dependencies. cfg is the merged config the Refine mark resolves
-// under; a nil one reads as Refine undeclared, which carries no mark.
+// It closes with the set's Refine mark, Exploration mark, Verify pointer and
+// Artifact summary when it has them — d is what resolves them, and a nil d
+// falls back to the default dependencies. cfg is the merged config the Refine
+// mark resolves under; a nil one reads as Refine undeclared, which carries no
+// mark. row is what the Exploration mark is read from when the caller has one.
 func RenderTaskSetDetail(d *Deps, cfg *config.Config, w io.Writer, taskSetID string, row *Row, m *Manifest) {
 	renderTaskSetDetail(d, cfg, outputFor(w), taskSetID, row, m)
 }

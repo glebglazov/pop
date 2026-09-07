@@ -122,10 +122,10 @@ func TestDrainReusesTheReportADeclaredSetAlreadyHas(t *testing.T) {
 	}
 }
 
-// TestDrainNeverExploresASetThatDidNotAskFor: the directive is the whole
+// TestDrainNeverExploresASetThatDidNotAskForIt: the directive is the whole
 // participation trigger, so a set carrying none is untouched by a step whose
 // group is on.
-func TestDrainNeverExploresASetThatDidNotAskFor(t *testing.T) {
+func TestDrainNeverExploresASetThatDidNotAskForIt(t *testing.T) {
 	env := setupDrainExploreFixture(t, nil)
 	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{{summary: "built"}})
 

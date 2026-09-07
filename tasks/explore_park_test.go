@@ -105,12 +105,9 @@ func TestASetWhoseExplorePassGaveUpParksAndIsLeftAlone(t *testing.T) {
 
 	refresh := exploreParkRows(t, env)
 	row := findRow(refresh, "demo")
+	// The park is its own word, not the one that means a human owes a decision.
 	if row.Status != StatusExploreFailed {
 		t.Fatalf("status after the pass gave up = %s, want %s", row.Status, StatusExploreFailed)
-	}
-	// The park is its own word, not the one that means a human owes a decision.
-	if row.Status == StatusBlocked {
-		t.Fatal("the park reused BLOCKED")
 	}
 	if _, _, err := selectAutomaticTaskSet(refresh); err == nil {
 		t.Fatal("automatic selection picked a parked set")
