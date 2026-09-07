@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"github.com/glebglazov/pop/tasks/drain"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -23,11 +24,24 @@ const (
 )
 
 // livePaneCache holds per-poll activity liveness keyed by pane tag then set id,
-// plus Map liveness keyed by map id (its session). It is rebuilt from tmux list
-// queries per dashboard poll — never from the DrainPane store.
+// the assist panes each set holds keyed by slot, plus Map liveness keyed by map
+// id (its session). It is rebuilt from tmux list queries per dashboard poll —
+// never from the DrainPane store.
 type livePaneCache struct {
-	byTag     map[tmuxmod.PaneTag]map[string]livePaneState
+	byTag map[tmuxmod.PaneTag]map[string]livePaneState
+	// assist keeps every assist pane a set holds rather than one state for the
+	// set, because the Assist pane menu puts each of them on its own digit
+	// (ADR-0263). byTag still carries the set's single answer, which is what the
+	// row's fixed-width activity cluster shows.
+	assist    map[string]map[tmuxmod.PaneSlot]livePaneState
 	wayfinder map[string]livePaneState
+}
+
+// assistPane is one of a set's assist panes as the last poll saw it: the slot
+// that addresses it, and whether the session in it is still running.
+type assistPane struct {
+	slot  tmuxmod.PaneSlot
+	state livePaneState
 }
 
 func (c livePaneCache) state(tag tmuxmod.PaneTag, setID string) livePaneState {
@@ -48,6 +62,10 @@ func (c livePaneCache) wayfinderState(mapID string) livePaneState {
 	return c.wayfinder[mapID]
 }
 
+// set records one pane's state under (tag, set id). A container may hold several
+// panes for one activity, so the strongest state wins: the key is green while any
+// of the set's assist panes is still running and only goes grey once every one of
+// them has fallen back to its shell (ADR-0263).
 func (c *livePaneCache) set(tag tmuxmod.PaneTag, setID string, state livePaneState) {
 	if c == nil || setID == "" || state == livePaneNone {
 		return
@@ -58,7 +76,40 @@ func (c *livePaneCache) set(tag tmuxmod.PaneTag, setID string, state livePaneSta
 	if c.byTag[tag] == nil {
 		c.byTag[tag] = map[string]livePaneState{}
 	}
-	c.byTag[tag][setID] = state
+	if state > c.byTag[tag][setID] {
+		c.byTag[tag][setID] = state
+	}
+}
+
+// setAssistPane records the assist pane on one slot of a set, under the same
+// strongest-wins rule set follows: two panes reading as the same slot — a
+// pre-slot pane beside a stamped first — leave one live digit, not a coin flip.
+func (c *livePaneCache) setAssistPane(setID string, slot tmuxmod.PaneSlot, state livePaneState) {
+	if c == nil || setID == "" || state == livePaneNone || !slot.Valid() {
+		return
+	}
+	if c.assist == nil {
+		c.assist = map[string]map[tmuxmod.PaneSlot]livePaneState{}
+	}
+	if c.assist[setID] == nil {
+		c.assist[setID] = map[tmuxmod.PaneSlot]livePaneState{}
+	}
+	if state > c.assist[setID][slot] {
+		c.assist[setID][slot] = state
+	}
+}
+
+// assistPanes lists the assist panes a set is holding, in slot order — the
+// roster the Assist pane menu puts on digits. A slot no pane sits on is absent
+// rather than dark: a digit that reaches nothing is not offered.
+func (c livePaneCache) assistPanes(setID string) []assistPane {
+	slots := c.assist[setID]
+	panes := make([]assistPane, 0, len(slots))
+	for slot, state := range slots {
+		panes = append(panes, assistPane{slot: slot, state: state})
+	}
+	sort.Slice(panes, func(i, j int) bool { return panes[i].slot < panes[j].slot })
+	return panes
 }
 
 func (c *livePaneCache) setWayfinder(mapID string, state livePaneState) {
@@ -99,6 +150,7 @@ func loadLivePaneCache(d *drain.Deps) livePaneCache {
 			cache.set(tmuxmod.TagVerify, p.Verify, state)
 			cache.set(tmuxmod.TagFold, p.Fold, state)
 			cache.set(tmuxmod.TagAssist, p.Assist, state)
+			cache.setAssistPane(p.Assist, p.Slot, state)
 		}
 	}
 	windows, err := tmux.ListWindowPanes()

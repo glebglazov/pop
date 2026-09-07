@@ -70,6 +70,13 @@ func handoffVerb(t *testing.T, m QueueDashboard, key string) dashboardHandoffMsg
 	m = updated.(QueueDashboard)
 	updated, cmd := m.update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 	m = updated.(QueueDashboard)
+	// A Task set's assist verb opens the Assist pane menu rather than launching
+	// (ADR-0263), so its handoff is one keypress further in: `n` opens a pane on
+	// the lowest free slot.
+	if m.menu != nil && m.menu.assist != nil {
+		updated, cmd = m.update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+		m = updated.(QueueDashboard)
+	}
 	for cmd != nil {
 		msg := cmd()
 		if handoff, ok := msg.(dashboardHandoffMsg); ok {

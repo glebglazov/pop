@@ -54,7 +54,7 @@ func TestActivityPaneTagsDistinct(t *testing.T) {
 		t.Fatalf("drain.LaunchVerify: %v", err)
 	}
 	row.RawStatus = tasks.StatusDone
-	if _, err := drain.LaunchAssist(d, cfg, row); err != nil {
+	if _, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot); err != nil {
 		t.Fatalf("drain.LaunchAssist: %v", err)
 	}
 
@@ -190,7 +190,7 @@ func TestHandoffPaneTitles(t *testing.T) {
 		t.Fatalf("drain.LaunchVerify: %v", err)
 	}
 	row.RawStatus = tasks.StatusDone
-	assistResult, err := drain.LaunchAssist(d, cfg, row)
+	assistResult, err := drain.LaunchAssist(d, cfg, row, tmuxmod.FirstPaneSlot)
 	if err != nil {
 		t.Fatalf("drain.LaunchAssist: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestHandoffPaneTitles(t *testing.T) {
 	want := map[string]string{
 		drainResult.PaneID:  drain.DrainPaneTitle(setID),
 		verifyResult.PaneID: drain.VerifyPaneTitle(setID),
-		assistResult.PaneID: drain.AssistPaneTitle(setID, tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))),
+		assistResult.PaneID: drain.AssistPaneTitle(setID, tmuxmod.FirstPaneSlot, tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))),
 		foldResult.PaneID:   drain.FoldPaneTitle(setID),
 	}
 	for paneID, wantTitle := range want {

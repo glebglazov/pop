@@ -401,7 +401,7 @@ func TestHandoffVerbsTargetBoundCheckoutSession(t *testing.T) {
 	verbs := map[string]func(*Deps, *config.Config, DashboardRow) (DashboardDrainResult, error){
 		"drain":  LaunchDrain,
 		"verify": LaunchVerify,
-		"assist": LaunchAssist,
+		"assist": LaunchNewAssist,
 		"fold":   LaunchFold,
 		"shell":  LaunchShell,
 	}
@@ -440,7 +440,7 @@ func TestHandoffVerbsRefuseMissingBoundWorktree(t *testing.T) {
 	verbs := map[string]func(*Deps, *config.Config, DashboardRow) (DashboardDrainResult, error){
 		"drain":  LaunchDrain,
 		"verify": LaunchVerify,
-		"assist": LaunchAssist,
+		"assist": LaunchNewAssist,
 		"fold":   LaunchFold,
 		"shell":  LaunchShell,
 	}

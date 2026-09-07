@@ -27,11 +27,14 @@ func TestDashboardHandoffAssistSpawnsFocusesAndQuits(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	updated, _ = got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	got = updated.(QueueDashboard)
+	// `A` opens the Assist pane menu; `n` is the pane it opens (ADR-0263).
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if cmd == nil {
-		t.Fatal("A did not return a command")
+		t.Fatal("n did not return a command")
 	}
-	msg := cmd()
+	msg := verbCmd(t, cmd)()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
 		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
@@ -73,13 +76,18 @@ func TestDashboardHandoffAssistReusesWithoutResend(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
+	// The pane carries no slot — it was spawned before slots existed — so it reads
+	// as the set's first, and the menu puts it on `1`.
+	m.live.setAssistPane(setID, tmuxmod.FirstPaneSlot, livePaneRunning)
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	updated, _ = got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	got = updated.(QueueDashboard)
+	_, cmd := got.update(tea.KeyPressMsg{Code: '1', Text: "1"})
 	if cmd == nil {
-		t.Fatal("A did not return a command")
+		t.Fatal("1 did not return a command")
 	}
-	msg := cmd()
+	msg := verbCmd(t, cmd)()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
 		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
@@ -110,11 +118,13 @@ func TestDashboardHandoffAssistOutsideTmuxStays(t *testing.T) {
 	m.width, m.height = 120, 40
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	updated, _ = got.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	got = updated.(QueueDashboard)
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if cmd == nil {
-		t.Fatal("A did not return a command")
+		t.Fatal("n did not return a command")
 	}
-	msg := cmd()
+	msg := verbCmd(t, cmd)()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
 		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)

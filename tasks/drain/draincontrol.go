@@ -313,13 +313,51 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 	return scans, nil
 }
 
-// LaunchAssist opens or reuses an Assist session pane for the dashboard row's
-// set in the project's pop-work window. A pane already tagged for the set whose
-// command is still running is returned without spawning a twin or re-sending;
-// an idle tagged pane (bare shell) is respawned. Otherwise a fresh pane runs
-// `pop tasks assist` pinned to the row's binding-first runtime checkout. Focus
-// and quit belong to the dashboard handoff path (ADR-0158).
-func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
+// LaunchAssist opens or reuses the Task set's Assist session pane on slot in the
+// project's pop-work window. A pane already on that slot whose command is still
+// running is returned without re-sending; one that has fallen back to its shell
+// is respawned in place; a free slot gets a fresh pane running `pop tasks assist`
+// pinned to the row's binding-first runtime checkout. Focus and quit belong to
+// the dashboard handoff path (ADR-0158).
+func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow, slot tmuxmod.PaneSlot) (DashboardDrainResult, error) {
+	launch, err := prepareAssist(d, cfg, row)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	return launch.open(cfg, row, slot)
+}
+
+// LaunchNewAssist opens another Assist session on the set, on the lowest slot it
+// holds no pane on. Past the ninth it refuses with tmux's own ErrNoFreePaneSlot
+// rather than opening a session no digit could address (ADR-0263).
+func LaunchNewAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
+	launch, err := prepareAssist(d, cfg, row)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	slot, err := tmuxmod.LowestFreePaneSlot(launch.d.Tmux, tmuxmod.TagAssist, launch.session, tmuxmod.DrainWindow, row.ID)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	return launch.open(cfg, row, slot)
+}
+
+// assistLaunch is one set's Assist session resolved down to everything a pane
+// needs — where it opens, what it runs, and what the handoff reports — with only
+// the slot left to choose. Both entry points resolve it the same way and differ
+// in nothing else.
+type assistLaunch struct {
+	d           *Deps
+	session     string
+	checkout    string
+	runtimePath string
+	command     string
+}
+
+// prepareAssist validates the row's binding and its assist launch, then resolves
+// the session and checkout the pane opens in. It refuses everything a launch can
+// be refused for before any slot is chosen, so a menu digit and `n` fail alike.
+func prepareAssist(d *Deps, cfg *config.Config, row DashboardRow) (assistLaunch, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -334,10 +372,10 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 	}
 	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
-		return DashboardDrainResult{}, err
+		return assistLaunch{}, err
 	}
 	if err := refuseUnusableBoundCheckout(d, scans, repoKey, row); err != nil {
-		return DashboardDrainResult{}, err
+		return assistLaunch{}, err
 	}
 	projectPath := scans[0].ProjectPath
 	if strings.TrimSpace(row.ProjectPath) != "" {
@@ -348,7 +386,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 		var resolveErr error
 		runtimeOverride, resolveErr = binding.ResolveCommandRuntime(d.Tasks, projectPath, row.ID, "")
 		if resolveErr != nil {
-			return DashboardDrainResult{}, resolveErr
+			return assistLaunch{}, resolveErr
 		}
 	}
 	loadConfig := config.Load
@@ -363,32 +401,43 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 		TaskSetID: row.ID,
 	})
 	if err != nil {
-		return DashboardDrainResult{}, err
+		return assistLaunch{}, err
 	}
 
 	session, checkout, err := dashboardSetPaneCoords(d, scans, row, runtimePath)
 	if err != nil {
-		return DashboardDrainResult{}, err
-	}
-
-	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagAssist, row.ID); err != nil {
-		return DashboardDrainResult{}, err
-	} else if paneID != "" {
-		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
+		return assistLaunch{}, err
 	}
 
 	command := fmt.Sprintf("pop tasks assist %s", shellQuote(row.ID))
 	if strings.TrimSpace(runtimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(runtimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, tmuxmod.DrainWindow, checkout, row.ID, command)
+	return assistLaunch{d: d, session: session, checkout: checkout, runtimePath: runtimePath, command: command}, nil
+}
+
+// open is the jump-or-spawn on one slot: a running pane there is handed back
+// untouched, and anything else — an idle pane or no pane at all — is spawned or
+// respawned by the tagged-pane composite and titled.
+func (l assistLaunch) open(cfg *config.Config, row DashboardRow, slot tmuxmod.PaneSlot) (DashboardDrainResult, error) {
+	if paneID, err := runningSlottedPane(l.d.Tmux, l.session, tmuxmod.TagAssist, row.ID, slot); err != nil {
+		return DashboardDrainResult{}, err
+	} else if paneID != "" {
+		return l.result(paneID), nil
+	}
+
+	paneID, err := tmuxmod.EnsureSlottedPane(l.d.Tmux, tmuxmod.TagAssist, slot, l.session, tmuxmod.DrainWindow, l.checkout, row.ID, l.command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if err := d.Tmux.SetPaneTitle(paneID, AssistPaneTitle(row.ID, attendedEntryLabel(cfg))); err != nil {
+	if err := l.d.Tmux.SetPaneTitle(paneID, AssistPaneTitle(row.ID, slot, attendedEntryLabel(cfg))); err != nil {
 		return DashboardDrainResult{}, err
 	}
-	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
+	return l.result(paneID), nil
+}
+
+func (l assistLaunch) result(paneID string) DashboardDrainResult {
+	return DashboardDrainResult{PaneID: paneID, Session: l.session, RuntimePath: l.runtimePath}
 }
 
 func activityPaneTitle(setID, activity string) string {
@@ -407,8 +456,10 @@ func FoldPaneTitle(setID string) string {
 	return activityPaneTitle(setID, "fold")
 }
 
-func AssistPaneTitle(setID string, entryLabel string) string {
-	base := activityPaneTitle(setID, "assist")
+// AssistPaneTitle names an assist pane by the slot that addresses it, so the
+// nine a set may hold are told apart wherever tmux shows a title (ADR-0263).
+func AssistPaneTitle(setID string, slot tmuxmod.PaneSlot, entryLabel string) string {
+	base := activityPaneTitle(setID, "assist"+slot.String())
 	entryLabel = strings.TrimSpace(entryLabel)
 	if entryLabel == "" {
 		return base

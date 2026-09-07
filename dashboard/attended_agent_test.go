@@ -77,7 +77,9 @@ func TestDashboardAttendedMenuRowNamesEntry(t *testing.T) {
 	if !found {
 		t.Fatal("assist verb missing")
 	}
-	want := "assist · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
+	// The row names the entry its sessions run and trails the mark that says the
+	// key opens the Assist pane menu rather than launching (ADR-0263).
+	want := "assist · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg)) + " ▸"
 	if assist.label != want {
 		t.Fatalf("assist label = %q, want %q", assist.label, want)
 	}

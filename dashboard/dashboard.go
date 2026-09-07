@@ -398,6 +398,23 @@ func (m QueueDashboard) openMuteMenuOver(row DashboardRow) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
+// openAssistMenu answers the assist verb over a Task set. A set may hold up to
+// nine assist panes, so the verb picks among them instead of launching: the
+// menu names the panes it is already holding on their own slot digits and offers
+// `n` for another (ADR-0263).
+//
+// It opens over a set holding nothing, showing only `n` — the keystrokes must
+// not change shape with tmux state the row cannot show, and the pane the operator
+// wanted is one keypress away either way.
+func (m QueueDashboard) openAssistMenu(row DashboardRow) (tea.Model, tea.Cmd) {
+	m.err = nil
+	m.menu = &dashboardMenu{
+		row:    row,
+		assist: newDashboardAssistMenu(row, m.liveCache().assistPanes(row.ID)),
+	}
+	return m, nil
+}
+
 // dashboardMenu is the layered menu overlay a container-level key opens: `r` for
 // the Run menu (its own verb list), or straight into the Status, Copy or Mute
 // menu when one of those keys opens it instead. A detail view opens the same
@@ -408,13 +425,16 @@ func (m QueueDashboard) openMuteMenuOver(row DashboardRow) (tea.Model, tea.Cmd) 
 // closes as soon as a verb fires.
 // A menu opened straight as the Status, Copy or Mute menu carries no run list of
 // its own: that menu is the only thing it is showing, so there is nothing
-// underneath it to go back to and esc leaves the overlay.
+// underneath it to go back to and esc leaves the overlay. The Assist pane menu
+// is the one a row verb opens, and it follows the same rule — esc goes back to
+// the rows, not to the Run menu the verb was pressed on.
 type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
 	status *dashboardStatusMenu
 	copy   *dashboardCopyMenu
 	mute   *dashboardMuteMenu
+	assist *dashboardAssistMenu
 	// plural marks a menu opened over a Selection: its items are the verbs every
 	// targeted row offers and declares plural, and targets is the row set they
 	// will run over — captured when the menu opened, so the poll rebuilding the
@@ -476,9 +496,23 @@ func dashboardMenuItemsWith(kinds workKinds, row DashboardRow, enrich func(work.
 		if enrich != nil {
 			label = enrich(a.Verb, label)
 		}
+		label = menuOpenerLabel(a.Verb, label)
 		items = append(items, dashboardMenuItem{key: a.Key, label: label, verb: a.Verb})
 	}
 	return items
+}
+
+// menuOpenerLabel marks a verb that opens a menu instead of acting, in the
+// grammar the top-level openers are named in (`run ▸`). Assist is the one row
+// verb that opens one: a Task set may hold nine assist panes, so `A` picks among
+// them rather than launching (ADR-0263). The mark is the surface's, not the
+// kind's — the kind offers a verb, and this surface is where opening a menu is
+// what happens next.
+func menuOpenerLabel(verb work.Verb, label string) string {
+	if verb == setkind.VerbAssist {
+		return label + " ▸"
+	}
+	return label
 }
 
 func (m QueueDashboard) menuItemsFor(row DashboardRow) []dashboardMenuItem {
@@ -1849,6 +1883,9 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu.mute != nil {
 		return m.updateMuteMenu(msg)
 	}
+	if m.menu.assist != nil {
+		return m.updateAssistMenu(msg)
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.menu = nil
@@ -2020,6 +2057,66 @@ func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
 	return m, m.muteRow(row, entry.window)
 }
 
+// updateAssistMenu drives the Assist pane menu: esc closes it back to where the
+// verb was pressed, j/k move the highlight, Enter opens the highlighted entry, a
+// digit goes straight to that slot's pane and `n` opens another. Navigation
+// resolves before the entry keys for the same reason the Status menu resolves it
+// before verb letters.
+func (m QueueDashboard) updateAssistMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.assist == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.menu = nil
+		return m, nil
+	case "j", "down":
+		m.menu.assist.list.MoveDown()
+		return m, nil
+	case "k", "up":
+		m.menu.assist.list.MoveUp()
+		return m, nil
+	case "enter":
+		return m.invokeAssistMenuItem(m.menu.assist.list.Cursor())
+	}
+	for i, entry := range m.menu.assist.list.Items() {
+		if msg.String() == entry.key {
+			return m.invokeAssistMenuItem(i)
+		}
+	}
+	return m, nil
+}
+
+// invokeAssistMenuItem hands off to the pane on the chosen slot — respawning the
+// session first where the slot has gone idle, which is the launcher's own
+// jump-or-spawn rule and not a decision this surface repeats — or opens one on
+// the lowest free slot for `n`.
+//
+// A full set refuses with the menu still open, so the flash lands under the nine
+// digits it is talking about.
+func (m QueueDashboard) invokeAssistMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.assist == nil {
+		return m, nil
+	}
+	entries := m.menu.assist.list.Items()
+	if idx < 0 || idx >= len(entries) {
+		return m, nil
+	}
+	entry := entries[idx]
+	if entry.newPane && m.menu.assist.full() {
+		m.containerFlash().Set(assistMenuFullRefusal())
+		return m, nil
+	}
+	row := m.menu.row
+	m.menu = nil
+	m.err = nil
+	m.containerFlash().Set(dashboardHandoffPending)
+	if entry.newPane {
+		return m, m.launchNewAssist(row)
+	}
+	return m, m.launchAssist(row, entry.slot)
+}
+
 // invokeMenuItem closes the menu and dispatches the verb at idx against the row
 // the menu was opened on. Nothing in the menu opens another menu any more: both
 // openers it used to carry are top-level keys (ADR-0236 decision 1).
@@ -2160,8 +2257,7 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		}
 		return m, m.ToggleSetAutoDrain(row)
 	case setkind.VerbAssist:
-		m.containerFlash().Set(dashboardHandoffPending)
-		return m, m.launchAssist(row)
+		return m.openAssistMenu(row)
 	case setkind.VerbFold:
 		if !dashboardFoldEligible(row) {
 			return m, nil
@@ -3207,9 +3303,16 @@ func dashboardWayfinderEmptyFrontierMessage() string {
 	return "no frontier tickets — open tickets are blocked or claimed"
 }
 
-func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) launchAssist(row DashboardRow, slot tmuxmod.PaneSlot) tea.Cmd {
 	return func() tea.Msg {
-		result, err := drain.LaunchAssist(m.d, m.cfg, row)
+		result, err := drain.LaunchAssist(m.d, m.cfg, row, slot)
+		return handoffAfterLaunch(m.d, result, err)
+	}
+}
+
+func (m QueueDashboard) launchNewAssist(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		result, err := drain.LaunchNewAssist(m.d, m.cfg, row)
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
@@ -3554,6 +3657,16 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 		entries = append(entries, ui.HelpEntry{Key: "", Desc: muteMenuFooter()})
 		return append(entries, m.menuHelpTail("run entry")...)
+	case m.menu != nil && m.menu.assist != nil:
+		// The Assist pane menu's entries are the panes the set is holding right now,
+		// so the help lists the digits actually on offer rather than a flat 1-9 —
+		// most of which would reach nothing.
+		items := m.menu.assist.list.Items()
+		entries := make([]ui.HelpEntry, 0, len(items)+4)
+		for _, entry := range items {
+			entries = append(entries, ui.HelpEntry{Key: entry.key, Desc: entry.label})
+		}
+		return append(entries, m.menuHelpTail("open assist pane")...)
 	case m.menu != nil && m.menu.status != nil:
 		// The Status menu's verbs are the focused row's own kind's, so the help
 		// lists the menu that is actually open rather than one kind's vocabulary
@@ -4662,6 +4775,9 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 	if menu.mute != nil {
 		return dashboardMuteMenuLines(menu.mute, menu.target(), width)
 	}
+	if menu.assist != nil {
+		return dashboardAssistMenuLines(menu.assist, menu.target(), width)
+	}
 	entries := make([]menuEntry, 0, menu.list.Len())
 	for _, item := range menu.list.Items() {
 		entries = append(entries, menuEntry{
@@ -4724,6 +4840,25 @@ func dashboardMuteMenuLines(mute *dashboardMuteMenu, target string, width int) [
 	}
 	lines := menuBlockLines("mute", target, width, mute.list.Cursor(), entries)
 	return append(lines, ui.TruncateString("      "+ui.HintStyle().Render(muteMenuFooter()), width))
+}
+
+// dashboardAssistMenuLines renders the Assist pane menu: one digit per pane the
+// set is holding, then `n`. Each digit is coloured by the same live-pane
+// affordance the row's own assist key is (ADR-0158), so the colour that said
+// "something is running here" on the row is the colour that says which of the
+// nine it was.
+func dashboardAssistMenuLines(assist *dashboardAssistMenu, target string, width int) []string {
+	if assist == nil {
+		return nil
+	}
+	entries := make([]menuEntry, 0, assist.list.Len())
+	for _, entry := range assist.list.Items() {
+		entries = append(entries, menuEntry{
+			key:   styleHandoffKey(entry.key, entry.state),
+			label: entry.label,
+		})
+	}
+	return menuBlockLines("assist", target, width, assist.list.Cursor(), entries)
 }
 
 // dashboardFooterLine is the bottom line of the views that compose their own

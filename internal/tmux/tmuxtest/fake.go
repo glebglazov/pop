@@ -775,6 +775,7 @@ func (f *Fake) ListActivityPanes() ([]tmux.ActivityPane, error) {
 			p.Verify = tags[tmux.TagVerify]
 			p.Fold = tags[tmux.TagFold]
 			p.Assist = tags[tmux.TagAssist]
+			p.Slot = tmux.ParsePaneSlot(tags[tmux.TagSlot])
 		}
 		if p.Set == "" && p.Verify == "" && p.Fold == "" && p.Assist == "" {
 			continue

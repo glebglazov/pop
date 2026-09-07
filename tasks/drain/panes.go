@@ -36,6 +36,28 @@ func runningTaggedPane(t tmuxmod.Tmux, session string, tag tmuxmod.PaneTag, setI
 	return paneID, nil
 }
 
+// runningSlottedPane is runningTaggedPane addressed by slot: the pane id when
+// the set's pane on slot is still running its command — the green / jump case —
+// and "" when the slot is free or holds a pane that has fallen back to its shell,
+// which is the grey / respawn case the caller falls through to EnsureSlottedPane
+// for. A pane whose command tmux does not report reads as running, so a session
+// pop cannot see is never typed into.
+func runningSlottedPane(t tmuxmod.Tmux, session string, tag tmuxmod.PaneTag, setID string, slot tmuxmod.PaneSlot) (string, error) {
+	if t == nil || session == "" || setID == "" {
+		return "", nil
+	}
+	panes, err := t.ListTaggedPanes(session, tmuxmod.DrainWindow, tag, setID)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range panes {
+		if p.Slot == slot && p.Live() {
+			return p.PaneID, nil
+		}
+	}
+	return "", nil
+}
+
 type BindEntry struct {
 	Label   string
 	Path    string

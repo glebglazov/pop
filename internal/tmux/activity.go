@@ -14,6 +14,10 @@ type ActivityPane struct {
 	// Set, Verify, Fold, Assist are the tag values written on the pane (a set
 	// id). Empty means that tag is unset.
 	Set, Verify, Fold, Assist string
+	// Slot is the slot the pane sits on among the panes its container holds for
+	// one activity. A pane carrying no @pop_slot reads as the first slot, so a
+	// pane spawned before slots existed still has an address (ADR-0263).
+	Slot PaneSlot
 }
 
 // ListActivityPanes returns every pane across all sessions that carries at least
@@ -28,6 +32,7 @@ func (t *realTmux) ListActivityPanes() ([]ActivityPane, error) {
 		"#{@pop_verify}",
 		"#{@pop_fold}",
 		"#{@pop_assist}",
+		"#{@pop_slot}",
 		"#{pane_current_command}",
 	}, "\t")
 	out, err := t.run.output("list-panes", "-a", "-F", format)
@@ -43,8 +48,8 @@ func (t *realTmux) ListActivityPanes() ([]ActivityPane, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 7)
-		if len(parts) != 7 {
+		parts := strings.SplitN(line, "\t", 8)
+		if len(parts) != 8 {
 			continue
 		}
 		p := ActivityPane{
@@ -54,7 +59,8 @@ func (t *realTmux) ListActivityPanes() ([]ActivityPane, error) {
 			Verify:  parts[3],
 			Fold:    parts[4],
 			Assist:  parts[5],
-			Command: parts[6],
+			Slot:    ParsePaneSlot(parts[6]),
+			Command: parts[7],
 		}
 		if p.Set == "" && p.Verify == "" && p.Fold == "" && p.Assist == "" {
 			continue

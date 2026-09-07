@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
 
 // The Assist pane title names the attended entry the merged config resolves to,
@@ -18,7 +19,7 @@ func TestAssistPaneTitleNamesTheMergedAttendedEntry(t *testing.T) {
 			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
 		}},
 	}}
-	title := AssistPaneTitle("demo", attendedEntryLabel(cfg))
+	title := AssistPaneTitle("demo", tmuxmod.FirstPaneSlot, attendedEntryLabel(cfg))
 	if !strings.HasSuffix(title, " · Cursor Usual") {
 		t.Fatalf("title = %q, want the merged head named alone", title)
 	}
