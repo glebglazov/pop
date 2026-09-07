@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -577,5 +578,64 @@ func TestAtomicReplacement(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".task-tmp-") {
 			t.Fatalf("left temp file %s", e.Name())
 		}
+	}
+}
+
+// TestManifestReadsTheExploreDirective drives one set folder through the load
+// register performs: the Explore directive is opt-**in** where verify and
+// refine are opt-out, its `explorer` object resolves through the same directive
+// shape as the verifier's and refiner's, and the Exploration report sitting
+// beside the slices needs no manifest entry while a stray markdown still does
+// (ADR-0262).
+func TestManifestReadsTheExploreDirective(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+	if err := os.WriteFile(filepath.Join(taskDir, ExplorationFileName), []byte("the code as found\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(taskDir, ManifestFileName)
+	manifestWith := func(keys string) string {
+		return `{"tasks":[{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}]` + keys + `}`
+	}
+	load := func(t *testing.T, keys string) *Manifest {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(manifestWith(keys)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		m := LoadManifest(DefaultDeps(), "demo", path)
+		if !m.Valid {
+			t.Fatalf("set holding %s did not register: %v", ExplorationFileName, m.Errors)
+		}
+		return m
+	}
+
+	declared := load(t, `,"`+exploreKey+`":true,"`+explorerKey+`":{"agents":["pi"],"effort":"heavy"}`)
+	if !declared.ExploreRequested() {
+		t.Fatal("a declared explore directive does not read back")
+	}
+	explorer := declared.ExplorerOverride()
+	if explorer == nil || !reflect.DeepEqual(explorer.Agents, []string{"pi"}) || explorer.Effort != "heavy" {
+		t.Fatalf("explorer override = %+v", explorer)
+	}
+	// The two opt-out phases keep their own default under the same manifest.
+	if declared.VerifyOptedOut() || declared.RefineOptedOut() {
+		t.Fatal("an absent verify/refine key opted the set out")
+	}
+
+	for _, keys := range []string{"", `,"` + exploreKey + `":false`, `,"` + exploreKey + `":"yes"`} {
+		if m := load(t, keys); m.ExploreRequested() || m.ExplorerOverride() != nil {
+			t.Fatalf("keys %q explored: explore=%v explorer=%+v", keys, m.ExploreRequested(), m.ExplorerOverride())
+		}
+	}
+
+	// The exemption is for pop's own document, not for markdown in general.
+	writeTaskMD(t, taskDir, "02-unlisted.md", "## Acceptance criteria\n\n- [ ] two\n")
+	if err := os.WriteFile(path, []byte(manifestWith("")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stray := LoadManifest(DefaultDeps(), "demo", path)
+	if stray.Valid || !strings.Contains(strings.Join(stray.Errors, "; "), "02-unlisted.md: no manifest entry") {
+		t.Fatalf("an unlisted slice was not reported: valid=%v errors=%v", stray.Valid, stray.Errors)
 	}
 }

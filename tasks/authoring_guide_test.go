@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -145,6 +146,8 @@ func TestTaskGuideCarriesTheJudgmentRules(t *testing.T) {
 		"orientation is stale-able": "labelled stale-able",
 		"authoritative":             "installed document disagrees with it",
 		"drafted but inert":         "only **drafts** the set",
+		"explore is opt-in":         "the one phase key that is opt-**in**",
+		"when to explore":           "two or more AFK tasks touch the same seam",
 	} {
 		if !strings.Contains(guide, want) {
 			t.Fatalf("guide is missing the %s rule (%q)", name, want)
@@ -171,5 +174,39 @@ func fencedBlock(t *testing.T, guide, lang string, n int) string {
 			return strings.TrimRight(rest[:end], "\n")
 		}
 		rest = rest[end+3:]
+	}
+}
+
+// TestTaskGuidePhaseKeysAreTheOnesTheManifestReads is the anti-drift guarantee
+// for the set-level phase keys: the guide prints each key's own constant, and a
+// manifest written with those constants reaches the accessors the phases read.
+// A key renamed in one place and not the other fails here.
+func TestTaskGuidePhaseKeysAreTheOnesTheManifestReads(t *testing.T) {
+	t.Parallel()
+	guide := AuthoringGuide()
+	for _, key := range []string{verifyKey, refineKey, exploreKey, verifierKey, refinerKey, explorerKey} {
+		if !strings.Contains(guide, "`"+key+"`") {
+			t.Fatalf("guide never names the %q key", key)
+		}
+	}
+	if !strings.Contains(guide, "`"+ExplorationFileName+"`") {
+		t.Fatalf("guide never names %s, the document the explore pass writes", ExplorationFileName)
+	}
+
+	keys := map[string]json.RawMessage{
+		verifyKey:   json.RawMessage("false"),
+		refineKey:   json.RawMessage("false"),
+		exploreKey:  json.RawMessage("true"),
+		explorerKey: json.RawMessage(`{"agents":["pi"],"effort":"heavy"}`),
+	}
+	m := &Manifest{Unknown: keys}
+	if !m.VerifyOptedOut() || !m.RefineOptedOut() {
+		t.Fatal("the printed verify/refine keys do not decline the phases")
+	}
+	if !m.ExploreRequested() {
+		t.Fatalf("the printed %q key does not request exploration", exploreKey)
+	}
+	if got := m.ExplorerOverride(); got == nil || got.Effort != "heavy" {
+		t.Fatalf("the printed %q key does not steer the pass: %+v", explorerKey, got)
 	}
 }

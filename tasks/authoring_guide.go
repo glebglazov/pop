@@ -42,10 +42,11 @@ A set is one folder in this repository's Work store; run `+"`pop work show-path`
 (or `+"`pop tasks show-path`"+` for the tasks/ directory itself) to resolve it.
 
     $(pop work show-path)/tasks/<task-set-name>/
-    ├── %s        (optional — the spec this set came from)
+    ├── %s         (optional — the spec this set came from)
     ├── %s
     ├── 01-<task-name>.md
     ├── 02-<task-name>.md
+    ├── %s  (pop's; written by the explore pass)
     └── progress.txt    (pop's; never hand-written)
 
 - `+"`<task-set-name>`"+` is `+"`<timestamp>-<slug>`"+`. The slug is short and
@@ -58,8 +59,8 @@ A set is one folder in this repository's Work store; run `+"`pop work show-path`
 - A spec and its breakdown share **one** folder: when breaking down a co-located
   %s, write the task files beside it rather than minting a new folder.
 - %s and the task markdown stay in 1:1 sync — every markdown file has
-  exactly one manifest entry, and every entry names a file that exists.
-  %s is the only markdown in the folder with no entry.
+  exactly one manifest entry, and every entry names a file that exists. The
+  markdown with no entry is pop's own: %s.
 
 Write the files in dependency order (blockers first), so `+"`blocked_by`"+` names
 ids you have already chosen.
@@ -202,17 +203,28 @@ Set-level keys:
   a task mid-drain renders a new `+"`commit_subject`"+` from, and pop projects
   it rather than trust a retyped copy. Do not supply it — a value written here
   is overwritten when the set registers.
-- `+"`verify`"+` / `+"`refine`"+` — optional booleans, and opt-**out** only:
+- `+"`%s`"+` / `+"`%s`"+` — optional booleans, and opt-**out** only:
   write `+"`false`"+` to decline the drain's Agent verification or its
   Refine for this set alone (generated or vendored code, say). Omit them and the
   set participates in whichever of the two the user has enabled globally; neither
   key can switch a globally disabled phase on, and a hand-run
   `+"`pop tasks verify`"+` / `+"`pop tasks refine`"+` runs regardless.
-- `+"`verifier`"+` / `+"`refiner`"+` — optional
+- `+"`%s`"+` — optional boolean, and the one phase key that is opt-**in**:
+  write `+"`true`"+` to declare that this set needs an exploration pass before
+  its first slice is built. Absent or `+"`false`"+` means the set never
+  explores, where `+"`%s`"+` and `+"`%s`"+` carry the opposite default.
+  **Set it when two or more AFK tasks touch the same seam and a later one
+  depends on how an earlier one shapes it** — that is the whole rule. Never
+  because the set is large, and never because the area is unfamiliar; you have
+  just read the code, so this is your judgment, not a count pop can make. The
+  pass writes `+"`%s`"+`, which every later slice reads instead of re-deriving
+  the same map.
+- `+"`%s`"+` / `+"`%s`"+` / `+"`%s`"+` — optional
   `+"`{\"agents\": [...], \"effort\": \"...\"}`"+` objects steering *how* this
-  set is verified or refined: they override the configured agent fallback list
-  and effort for that phase, and CLI flags still win over them. They steer only —
-  participation stays the `+"`verify`"+` / `+"`refine`"+` keys' business.
+  set is verified, refined or explored: they override the configured agent
+  fallback list and effort for that phase, and CLI flags still win over them.
+  They steer only — participation stays the `+"`%s`"+`, `+"`%s`"+` and
+  `+"`%s`"+` keys' business.
 - No `+"`worktree`"+` and no `+"`auto_drain`"+` (ADR-0115): binding and
   auto-drain are `+"`register`"+` flags and dashboard toggles, never manifest
   keys. A legacy set carrying them is not malformed; they are ignored.
@@ -233,18 +245,18 @@ item, and is re-runnable until the set reads `+"`READY`"+` (or
 - every `+"`type`"+`, `+"`effort`"+` and `+"`status`"+` is one of the words
   above, and no status is `+"`in_progress`"+`;
 - every `+"`blocked_by`"+` id names a task in the manifest;
-- every markdown file in the folder has an entry — %s aside, a file
-  nothing lists is reported rather than silently ignored, because an unlisted
-  slice is one that never runs.
+- every markdown file in the folder has an entry — %s
+  aside, a file nothing lists is reported rather than silently ignored, because
+  an unlisted slice is one that never runs.
 
 A task is **done** when every box under its `+"`## %s`"+` section is
 checked; that is the condition `+"`pop tasks implement`"+` reads back, and it is
 why the section is mandatory.
 `,
 		ManifestFileName,
-		SpecFileName, ManifestFileName,
+		SpecFileName, ManifestFileName, ExplorationFileName,
 		SpecFileName,
-		ManifestFileName, SpecFileName,
+		ManifestFileName, unlistedSetMarkdownNames(),
 		SpecFileName, SpecFileName,
 		taskMarkdownTemplate(),
 		ManifestFileName,
@@ -254,7 +266,11 @@ why the section is mandatory.
 		enumList(taskTypeOrder),
 		enumList(ValidEfforts()), DefaultTaskEffort,
 		enumList(taskStatusWords()), TaskOpen,
-		AcceptanceCriteriaHeading, SpecFileName,
+		verifyKey, refineKey,
+		exploreKey, verifyKey, refineKey, ExplorationFileName,
+		verifierKey, refinerKey, explorerKey,
+		verifyKey, refineKey, exploreKey,
+		AcceptanceCriteriaHeading, unlistedSetMarkdownNames(),
 		AcceptanceCriteriaHeading,
 	)
 

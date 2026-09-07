@@ -9,13 +9,20 @@ import (
 )
 
 const (
-	ArtifactTypeRefine   = "refine"
-	ArtifactTypeVerify   = "verify"
-	ArtifactTypeSpec     = "spec"
-	ArtifactTypeProgress = "progress"
-	ProgressFileName     = "progress.txt"
-	RefineDirName        = "refine"
-	VerifyDirName        = "verify"
+	ArtifactTypeRefine      = "refine"
+	ArtifactTypeVerify      = "verify"
+	ArtifactTypeSpec        = "spec"
+	ArtifactTypeExploration = "exploration"
+	ArtifactTypeProgress    = "progress"
+	ProgressFileName        = "progress.txt"
+	// ExplorationFileName is the Exploration report: the code as found, written
+	// once by the Explore phase and read by every builder in the set (ADR-0262).
+	// It is flat in the set directory rather than a family of timestamped
+	// documents under a directory, as refine and verify reports are, because the
+	// pass runs once and there is nothing to supersede.
+	ExplorationFileName = "exploration.md"
+	RefineDirName       = "refine"
+	VerifyDirName       = "verify"
 )
 
 // ArtifactSectionTitle is shared by the CLI and dashboard detail surfaces so
@@ -33,7 +40,8 @@ type Artifact struct {
 // Artifacts returns the closed list of Task-set artifacts in type-tier order:
 // every verify report first, then every refine report — a verdict outranks a
 // polish note (ADR-0245) — each newest-first among themselves, then the spec,
-// then the progress record (ADR-0220). Recency orders only the family that grows, so a
+// the exploration report and the progress record: what was decided, what
+// exists, what happened (ADR-0262, ADR-0220). Recency orders only the family that grows, so a
 // drain rewriting progress.txt cannot move the row under a reader's cursor.
 func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 	if d == nil {
@@ -53,6 +61,8 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 		switch entry.Name() {
 		case SpecFileName:
 			artifactType = ArtifactTypeSpec
+		case ExplorationFileName:
+			artifactType = ArtifactTypeExploration
 		case ProgressFileName:
 			artifactType = ArtifactTypeProgress
 		default:
@@ -108,6 +118,7 @@ var artifactTierOrder = []string{
 	ArtifactTypeVerify,
 	ArtifactTypeRefine,
 	ArtifactTypeSpec,
+	ArtifactTypeExploration,
 	ArtifactTypeProgress,
 }
 
