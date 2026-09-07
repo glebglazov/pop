@@ -45,7 +45,11 @@ type WholeSetOptions struct {
 	// for the drain's verify phase (ADR-0227); forwarded verbatim to the task-set
 	// executor, which hands it to the Verifier as its mandate.
 	VerificationConvention tasks.VerificationConvention
-	Yes                    bool
+	// SkipExplore drains a set carrying the Explore directive once without
+	// exploring it (`--skip-explore`, ADR-0262); forwarded verbatim to the
+	// task-set executor.
+	SkipExplore bool
+	Yes         bool
 	// Wait is the `--wait` / `--no-wait` choice, forwarded verbatim to the
 	// task-set executor: what the drain does when the checkout or the set it
 	// wants is held (ADR-0239).
@@ -103,6 +107,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		ImplementationConvention:       opts.ImplementationConvention,
 		DocumentOverlay:                opts.DocumentOverlay,
 		VerificationConvention: opts.VerificationConvention,
+		SkipExplore:            opts.SkipExplore,
 		Yes:                    opts.Yes,
 		Wait:                   opts.Wait,
 		ConfirmIn:              opts.ConfirmIn,

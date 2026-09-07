@@ -121,9 +121,9 @@ var dashboardVerifiedAtUnverifiedStyle = lipgloss.NewStyle().Foreground(lipgloss
 //   - yellow NEEDS-VERIFY / AWAITING-APPROVAL / BLOCKED — "needs-you": each
 //     waits on a human decision. BLOCKED is a needs-you gate, not a failure,
 //     so it sits with the amber attention bucket rather than red.
-//   - red    FAILED / VERIFY-FAILED / MALFORMED / MISSING — the problem bucket;
-//     MALFORMED (bad task file) and MISSING (no manifest) fold in here as
-//     structural problems alongside outright failures.
+//   - red    FAILED / VERIFY-FAILED / EXPLORE-FAILED / MALFORMED / MISSING — the
+//     problem bucket; MALFORMED (bad task file) and MISSING (no manifest) fold
+//     in here as structural problems alongside outright failures.
 //   - faint  DEFERRED — intentionally shelved, dimmed to recede.
 //
 // The mapping is trivially reversible, so no ADR backs it.
@@ -137,6 +137,7 @@ var dashboardStatusBucketStyle = map[string]lipgloss.Style{
 	string(tasks.StatusBlocked):          lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 	string(tasks.StatusFailed):           lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 	string(tasks.StatusVerifyFailed):     lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+	string(tasks.StatusExploreFailed):    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 	string(tasks.StatusMalformed):        lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 	string(tasks.StatusMissing):          lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 	string(tasks.StatusDeferred):         lipgloss.NewStyle().Faint(true),

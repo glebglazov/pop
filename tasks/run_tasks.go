@@ -86,6 +86,12 @@ type RunTaskSetOptions struct {
 	// refineRunner overrides the refine phase's agent spawn, mirroring
 	// refineCoreOptions.runRefiner. Unexported and test-only.
 	refineRunner func(prompt string) (string, string, error)
+	// SkipExplore drains a set carrying the Explore directive once without
+	// exploring it (`--skip-explore`, ADR-0262 decision 6): the phase runs no
+	// pass and the Explore park does not stop this drain. It is one of the three
+	// doors out of the park, and the only one that leaves the set as it found it
+	// — no report is written, so a later drain asks the question again.
+	SkipExplore bool
 	// exploreRunner overrides the explore phase's agent spawn, mirroring
 	// exploreCoreOptions.runExplorer. Unexported and test-only.
 	exploreRunner func(prompt string) (string, string, error)

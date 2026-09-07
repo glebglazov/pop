@@ -63,6 +63,7 @@ var (
 	taskArtifactsShow         string
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
+	taskImplementSkipExplore  bool
 	taskStatusArchived        bool
 	taskAutoDrainOff          bool
 	taskRegisterManaged       bool
@@ -457,6 +458,7 @@ func init() {
 	taskImplementCmd.Flags().BoolVar(&taskForceRebind, "force-rebind", false, "Re-point a bound set to the current checkout (or retarget --in-worktree)")
 	taskImplementCmd.Flags().StringArrayVar(&taskImplementVerifyAgents, "verify-agent", nil, "Verifier agent preset for the in-drain verify phase; repeat to define an ordered fallback list (steers verification independently of --agent)")
 	taskImplementCmd.Flags().StringVar(&taskImplementVerifyEffort, "verify-effort", "", "Verifier model-strength tier for the in-drain verify phase: light, standard, or heavy (default heavy)")
+	taskImplementCmd.Flags().BoolVar(&taskImplementSkipExplore, "skip-explore", false, "Drain a set that declares its tasks interrelated once without exploring it, and without parking it at the explore gate")
 
 	taskVerifyCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyTimeout, "timeout", "45m", "Maximum duration for the Verifier attempt")
@@ -1493,6 +1495,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ImplementationConvention:       implementationConvention(d),
 		DocumentOverlay:                refineOverlay(d),
 		VerificationConvention: verificationConvention(d),
+		SkipExplore:            taskImplementSkipExplore,
 		Yes:                    taskRunYes,
 		Wait:                   taskImplementWaitChoice(),
 		ConfirmIn:              stdin,

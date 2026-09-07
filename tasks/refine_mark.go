@@ -1,10 +1,6 @@
 package tasks
 
-import (
-	"strings"
-
-	"github.com/glebglazov/pop/config"
-)
+import "github.com/glebglazov/pop/config"
 
 // RefineMark is whether a terminal Task set's changeset was held to the
 // implementation standard, carried beside its status and its Verification mark
@@ -97,7 +93,7 @@ func ResolveRefineMark(d *Deps, cfg *config.Config, m *Manifest) RefineResolutio
 		// Nothing is finished, so there is no changeset to have been refined.
 		return RefineResolution{}
 	}
-	run, ok := latestRefineRun(d, m)
+	run, ok := latestCapturedRunOfPhase(d, m, spendPhaseRefine)
 	if !ok {
 		return RefineResolution{Mark: RefineMarkNotRefined, Reason: UnrefinedNeverRan}
 	}
@@ -116,36 +112,6 @@ func ResolveRefineMark(d *Deps, cfg *config.Config, m *Manifest) RefineResolutio
 		return RefineResolution{Mark: RefineMarkNotRefined, Reason: UnrefinedAbandoned}
 	}
 	return RefineResolution{Mark: RefineMarkNotRefined, Reason: UnrefinedInterrupted}
-}
-
-// latestRefineRun is the set's most recent Captured run of phase `refine`. It
-// reads the index halves only: what the mark needs is what each run recorded,
-// never what it streamed, and decompressing every event payload to answer a
-// gate preamble would cost a set's whole drain history.
-//
-// A set whose run directory cannot be read has no refine run as far as this can
-// tell, which is what a set that was never refined also looks like — the same
-// direction the episode rule fails in.
-func latestRefineRun(d *Deps, m *Manifest) (capturedRunMeta, bool) {
-	if d == nil {
-		d = defaultDeps
-	}
-	if d == nil || d.FS == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
-		return capturedRunMeta{}, false
-	}
-	metas, err := listCapturedRunMetas(d, m.Dir)
-	if err != nil {
-		return capturedRunMeta{}, false
-	}
-	var latest capturedRunMeta
-	found := false
-	// The list is chronological, so the last refine run in it is the newest.
-	for _, meta := range metas {
-		if meta.Phase == "refine" {
-			latest, found = meta, true
-		}
-	}
-	return latest, found
 }
 
 // refineMarkPhrase is the mark as a human reads it, in the one wording every

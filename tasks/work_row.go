@@ -50,7 +50,7 @@ func statusOrder(s TaskSetStatus) int {
 		return 0
 	case StatusNeedsVerify:
 		return 1
-	case StatusVerifyFailed:
+	case StatusVerifyFailed, StatusExploreFailed:
 		return 2
 	case StatusFailed:
 		return 3

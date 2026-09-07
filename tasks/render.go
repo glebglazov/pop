@@ -199,6 +199,9 @@ func buildRefreshResult(d *Deps, canon string, disc *Discovery, state *GlobalSta
 		ShowArchived: archived == archivedOnly,
 	}
 	result.Rows = buildRows(state, canon, disc, manifests, archived)
+	// The Explore park is layered on before the next pick is marked, so a set
+	// nothing may drain is not offered as the next one (ADR-0262).
+	applyExploreParks(d, result.Rows, manifests)
 	MarkNextPick(result.Rows)
 	return result
 }
@@ -556,6 +559,8 @@ func rowStatusDetail(out *output, row Row) string {
 			parts = append(parts, suffix)
 		}
 		return strings.Join(parts, " — ")
+	case StatusExploreFailed:
+		return strings.Join([]string{row.Progress, "explore: pop tasks explore " + row.ID}, " — ")
 	case StatusDone:
 		parts := append([]string{row.Progress}, verifyMarkDetailParts(row)...)
 		if suffix := verifiedAtBadgeSuffix(out, row); suffix != "" {
