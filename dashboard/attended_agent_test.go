@@ -16,9 +16,9 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// The retired chord opens nothing on any dashboard page (ADR-0202 decision 5):
-// no overlay, no menu, and no page state moved.
-func TestDashboardRetiredOverrideChordOpensNothing(t *testing.T) {
+// The chord opens nothing where there is no choice to make: no chooser, no
+// overlay, no menu, and no page state moved (ADR-0264 decision 4).
+func TestDashboardAttendedChordOpensNothingWithoutAChoice(t *testing.T) {
 	m := NewDashboard(nil, &config.Config{}, DashboardSnapshot{
 		Containers: []DashboardRow{{ID: "demo", CursorKey: "demo"}},
 	})
@@ -30,6 +30,9 @@ func TestDashboardRetiredOverrideChordOpensNothing(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("alt+a must not run a command")
 	}
+	if got.attendedPick != nil {
+		t.Fatal("alt+a must open no chooser over a list with nothing to choose")
+	}
 	if got.menu != nil || got.filter != nil || got.detail != nil {
 		t.Fatal("alt+a must not open any overlay")
 	}
@@ -38,11 +41,12 @@ func TestDashboardRetiredOverrideChordOpensNothing(t *testing.T) {
 	}
 }
 
-// The chord's carve-out from kind-supplied key space goes with the picker, so a
-// kind may claim it. Movement keys stay reserved.
-func TestActionKeySpaceReleasesTheRetiredChord(t *testing.T) {
-	if actionKeyReserved("alt+a") {
-		t.Fatal("alt+a must be claimable by a Work kind again")
+// The chord opens the attended chooser over every row, so no Work kind may
+// claim it: what it means cannot depend on which row the cursor sits on
+// (ADR-0264 decision 3). Movement keys stay reserved beside it.
+func TestActionKeySpaceReservesTheAttendedPickChord(t *testing.T) {
+	if !actionKeyReserved(ui.AttendedPickChord) {
+		t.Fatal("alt+a must be reserved from Work-kind key space")
 	}
 	for _, key := range []string{"j", "k", "J", "K"} {
 		if !actionKeyReserved(key) {
@@ -184,5 +188,122 @@ agents = [{ display_name = "Cursor", cmd = "cursor" }]
 	}
 	if !strings.Contains(m.View().Content, "Cursor") {
 		t.Fatalf("main view missing the override's entry:\n%s", m.View().Content)
+	}
+}
+
+// twoEntryDashboard is a page over a config holding a choice: two usable
+// attended entries, which is what makes the chord live (ADR-0264 decision 4).
+func twoEntryDashboard(t *testing.T) QueueDashboard {
+	t.Helper()
+	cfg := &config.Config{Work: &config.WorkConfig{
+		Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{
+			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
+			{DisplayName: "Cursor", Cmd: "cursor"},
+		}},
+	}}
+	m := NewDashboard(nil, cfg, DashboardSnapshot{
+		Containers: []DashboardRow{
+			{ID: "demo", CursorKey: "demo"},
+			{ID: "other", CursorKey: "other"},
+		},
+	})
+	m.width, m.height = 120, 30
+	return m
+}
+
+func pressKey(t *testing.T, m QueueDashboard, msg tea.KeyPressMsg) QueueDashboard {
+	t.Helper()
+	updated, _ := m.Update(msg)
+	return updated.(QueueDashboard)
+}
+
+func altA() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt} }
+
+// The affordance is on the row that names the entry, and only while a choice
+// exists — a list of one has nothing to open.
+func TestDashboardAttendedRowAdvertisesTheChordOnlyWithAChoice(t *testing.T) {
+	m := twoEntryDashboard(t)
+	label := m.enrichAttendedActionLabel(setkind.VerbAssist, "assist")
+	if !strings.Contains(label, ui.AttendedPickChordLabel+" to change") {
+		t.Fatalf("action row = %q, want the chord advertised", label)
+	}
+
+	one := &config.Config{Work: &config.WorkConfig{
+		Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{
+			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
+		}},
+	}}
+	m.cfg = one
+	if label := m.enrichAttendedActionLabel(setkind.VerbAssist, "assist"); strings.Contains(label, ui.AttendedPickChordLabel) {
+		t.Fatalf("action row = %q, want no chord over a list of one", label)
+	}
+}
+
+// While the chooser is open the page's own keys are suspended: the movement, the
+// menu openers and the marking keys all belong to the list being chosen from.
+func TestDashboardAttendedChooserSuspendsThePagesKeys(t *testing.T) {
+	m := pressKey(t, twoEntryDashboard(t), altA())
+	if m.attendedPick == nil {
+		t.Fatal("alt+a opened no chooser over two usable entries")
+	}
+	if !strings.Contains(m.View().Content, "Attended agent") {
+		t.Fatalf("chooser not rendered over the rows:\n%s", m.View().Content)
+	}
+	if m.ViewToggleAllowed() {
+		t.Fatal("the chooser must own the keyboard, page toggle included")
+	}
+
+	cursor := m.ListCursor()
+	m = pressKey(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.menu != nil {
+		t.Fatal("`r` opened the run menu through the chooser")
+	}
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.selection.Active() {
+		t.Fatal("tab marked a row through the chooser")
+	}
+	if m.ListCursor() != cursor {
+		t.Fatalf("the row cursor moved to %d under the chooser", m.ListCursor())
+	}
+	if m.attendedPick == nil {
+		t.Fatal("the chooser closed on a key that is not its own")
+	}
+}
+
+// Esc leaves the agent unchanged, and the two keys that mark rows keep working
+// on either side of the chooser (ADR-0254 decision 4).
+func TestDashboardMarkingSurvivesTheChooser(t *testing.T) {
+	m := twoEntryDashboard(t)
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if !m.selection.Active() {
+		t.Fatal("tab marked nothing before the chooser")
+	}
+
+	m = pressKey(t, m, altA())
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.attendedPick != nil {
+		t.Fatal("esc left the chooser open")
+	}
+	if m.actionErr != nil {
+		t.Fatalf("esc wrote something: %v", m.actionErr)
+	}
+
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.selection.Active() {
+		t.Fatal("shift+tab cleared nothing after the chooser")
+	}
+}
+
+// The assist verb is unchanged by the chooser existing: it opens the assist-pane
+// menu on the entry in force, never the chooser (ADR-0264 decision 3).
+func TestDashboardAssistVerbOpensNoChooser(t *testing.T) {
+	m := twoEntryDashboard(t)
+	updated, _ := m.dispatchVerb(setkind.VerbAssist, m.snap.Containers[0])
+	got := updated.(QueueDashboard)
+	if got.attendedPick != nil {
+		t.Fatal("the assist verb opened the chooser")
+	}
+	if got.menu == nil || got.menu.assist == nil {
+		t.Fatal("the assist verb opened no assist-pane menu")
 	}
 }

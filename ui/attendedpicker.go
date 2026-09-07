@@ -214,3 +214,24 @@ var attendedPickerKeys = struct {
 	Submit: key.NewBinding(key.WithKeys("enter")),
 	Cancel: key.NewBinding(key.WithKeys("esc", "ctrl+c")),
 }
+
+// AttendedPickChordLabel is how the chord that opens this list from a dashboard
+// reads in chrome, in ui's A- prefix form. The gate opens the same list with a
+// bare key (AttendedPickKeyLabel); a dashboard cannot, because `tab` there marks
+// the cursored row and no mode may gate it, and the assist verb's own submenu
+// speaks in digits and `n` (ADR-0264 decision 3). A chord contends with neither.
+const AttendedPickChordLabel = "A-a"
+
+// AttendedPickChord is that same chord as a key string, for a host that names
+// its bindings in text rather than matching them.
+const AttendedPickChord = "alt+a"
+
+// IsAttendedPickChord reports whether msg is that chord. Hosts match through
+// this rather than spelling it, so they cannot drift apart — and so a terminal
+// reporting the alt-modified rune in either case still opens the list.
+func IsAttendedPickChord(msg tea.KeyPressMsg) bool {
+	if msg.Code != 'a' && msg.Code != 'A' {
+		return false
+	}
+	return msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl)
+}

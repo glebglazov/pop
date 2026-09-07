@@ -174,6 +174,14 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s = s.reloadPagesConfig()
 	}
 
+	// An attended pick on a page writes the override itself and asks for the
+	// re-read here, through the same reconciliation every other config change
+	// takes: the shell is the only place that knows which file the pages were
+	// built from and holds the other page that must follow the change.
+	if dashboard.IsAttendedAgentWrite(msg) {
+		return s.reloadPagesConfig(), nil
+	}
+
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		// While the Config modal is open it owns the keyboard outright (ADR-0202
 		// decision 11): no page toggle, no kind's action verb, nothing. It is the
@@ -186,9 +194,11 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// that includes the two the shell would otherwise take first: the operator
 		// reading the key list gets neither a page switch nor the Config dashboard
 		// on top of what they are reading. The keys fall through to the page, which
-		// swallows them and lets ? or esc close the overlay.
-		helpOpen := s.page(s.active).HelpOpen()
-		if kpm, ok := keyMsg.(tea.KeyPressMsg); ok && !helpOpen && ui.IsConfigDashboardKey(kpm) {
+		// swallows them and lets ? or esc close the overlay. The attended chooser a
+		// page opens holds the keyboard the same way, and is owed the suspension
+		// this shell asks of a page for its own modal (ADR-0264 decision 3).
+		pageOwnsKeys := s.page(s.active).HelpOpen() || s.page(s.active).AttendedPickOpen()
+		if kpm, ok := keyMsg.(tea.KeyPressMsg); ok && !pageOwnsKeys && ui.IsConfigDashboardKey(kpm) {
 			return s.openConfigModal(), nil
 		}
 		if keyMsg.String() == "v" && s.activePageToggleAllowed() {

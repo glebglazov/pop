@@ -1075,10 +1075,14 @@ type QueueDashboard struct {
 	bind      *dashboardBindModal
 	drainPick *dashboardDrainModal
 	abandon   *dashboardAbandonModal
-	detail    *detailView
-	menu      *dashboardMenu
-	itemMenu  *itemMenu
-	filter    *dashboardFilterMenu
+	// attendedPick is the attended-agent chooser when it is open over the rows.
+	// While it is set it owns the keyboard, this page's and its host's alike:
+	// see attended_agent.go.
+	attendedPick *ui.AttendedAgentPicker
+	detail       *detailView
+	menu         *dashboardMenu
+	itemMenu     *itemMenu
+	filter       *dashboardFilterMenu
 
 	// searchTyping is the Work dashboard search's typing phase: a Text entry mode,
 	// so while it is on the keyboard belongs to searchInput and only Enter, Esc and
@@ -1317,6 +1321,7 @@ func (m QueueDashboard) resizeMainList() {
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return !m.showHelp && !m.searchTyping &&
 		m.bind == nil && m.drainPick == nil && m.abandon == nil && m.bulkPrompt == nil &&
+		m.attendedPick == nil &&
 		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
 }
 
@@ -1476,6 +1481,10 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingG = false
 			return m.updateBulkPrompt(msg)
 		}
+		if m.attendedPick != nil {
+			m.pendingG = false
+			return m.updateAttendedPick(msg)
+		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
 		}
@@ -1501,6 +1510,15 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingG = false
+		if kpm, ok := msg.(tea.KeyPressMsg); ok && ui.IsAttendedPickChord(kpm) {
+			// Only where a choice exists: with one usable entry the chord opens
+			// nothing, exactly as the row that advertises it says (ADR-0264
+			// decision 4).
+			if !tasks.AttendedPickOffered(m.cfg) {
+				return m, nil
+			}
+			return m.openAttendedPick()
+		}
 		switch msg.String() {
 		case "ctrl+c", "esc", "h", "left":
 			return m, tea.Quit
@@ -3622,6 +3640,14 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "y", Desc: "confirm unbind"},
 			{Key: "enter/n/esc", Desc: "cancel"},
 		}
+	case m.attendedPick != nil:
+		// The attended chooser, which owns the keyboard until it is answered.
+		return []ui.HelpEntry{
+			{Key: "1-9", Desc: "pick that entry"},
+			{Key: "j/k", Desc: "move highlight"},
+			{Key: "enter", Desc: "pick the highlighted entry"},
+			{Key: "esc", Desc: "leave the agent unchanged"},
+		}
 	case m.bulkPrompt != nil:
 		// A bulk verb's confirmation, which owns the keyboard until it is answered.
 		return []ui.HelpEntry{
@@ -3814,6 +3840,9 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		if m.page.rowFilters {
 			entries = append(entries, ui.HelpEntry{Key: "f", Desc: "filter menu"})
 		}
+		if tasks.AttendedPickOffered(m.cfg) {
+			entries = append(entries, ui.HelpEntry{Key: ui.AttendedPickChordLabel, Desc: "choose the attended agent"})
+		}
 		entries = append(entries,
 			// The Config dashboard is opened by the entry shell rather than by this
 			// model, but it is one chord away from every page, and the help page is
@@ -3864,6 +3893,8 @@ func (m QueueDashboard) View() tea.View {
 			title = page + " · drain"
 		} else if m.abandon != nil {
 			title = page + " · unbind"
+		} else if m.attendedPick != nil {
+			title = "Help · " + page + " · attended agent"
 		}
 		content := ui.RenderHelpOverlay(title, m.helpEntries(), m.width, m.height)
 		v := tea.NewView(content)
@@ -3887,7 +3918,7 @@ func (m QueueDashboard) View() tea.View {
 		content = m.viewWithMenu()
 	case m.filter != nil:
 		content = m.viewWithFilterMenu()
-	case m.bind != nil || m.drainPick != nil || m.abandon != nil:
+	case m.bind != nil || m.drainPick != nil || m.abandon != nil || m.attendedPick != nil:
 		content = m.viewWithModal()
 	default:
 		content = m.frameSpec().Render(m.mainBody())
@@ -4193,6 +4224,8 @@ func (m QueueDashboard) viewWithModal() string {
 		renderDashboardDrainModal(&body, m.drainPick, avail, m.width)
 	case m.abandon != nil:
 		renderDashboardAbandonModal(&body, m.abandon, m.width)
+	case m.attendedPick != nil:
+		renderAttendedPickModal(&body, m.attendedPick, avail, m.width)
 	}
 	return body.String()
 }

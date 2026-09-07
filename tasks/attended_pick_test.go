@@ -257,8 +257,8 @@ func TestAttendedPickChoicesSkipMalformedEntries(t *testing.T) {
 			t.Fatalf("a malformed entry was offered: %+v", choice)
 		}
 	}
-	if err := promoteAttendedEntry(fx.d, fx.cfg, "cursor"); err != nil {
-		t.Fatalf("promoteAttendedEntry: %v", err)
+	if err := PromoteAttendedAgent(fx.d, fx.cfg, "cursor"); err != nil {
+		t.Fatalf("PromoteAttendedAgent: %v", err)
 	}
 	// The head moves and the tail keeps the order it was configured in.
 	assertStoredOrder(t, fx.overridePath, `"cursor"`, `"claude --model opus"`)

@@ -64,16 +64,20 @@ func PickAttendedAgent(d *Deps, cfg *config.Config, in io.Reader, out io.Writer,
 	if picked == nil {
 		return ""
 	}
-	if err := promoteAttendedEntry(d, cfg, picked.Cmd); err != nil {
+	if err := PromoteAttendedAgent(d, cfg, picked.Cmd); err != nil {
 		return fmt.Sprintf("Agent unchanged — %v", err)
 	}
 	return ""
 }
 
-// promoteAttendedEntry stores the attended list with cmd at its head. The
+// PromoteAttendedAgent stores the attended list with cmd at its head. The
 // override layer's own schema gate judges the value, so a list pop would later
 // complain about is refused here and never reaches the disk.
-func promoteAttendedEntry(d *Deps, cfg *config.Config, cmd string) error {
+//
+// It is the write on its own, for a host that runs the chooser itself: a
+// dashboard hosts the list as a modal inside its own program rather than opening
+// one, so it arrives here with a picked entry and no prompt to have run.
+func PromoteAttendedAgent(d *Deps, cfg *config.Config, cmd string) error {
 	cd := configDeps(d)
 	if cd == nil {
 		return errors.New("no filesystem to write the Agent override through")
