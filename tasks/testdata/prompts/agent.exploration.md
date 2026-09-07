@@ -1,24 +1,24 @@
-You are implementing the task at: {{.TaskPath}}
+You are implementing the task at: /pop/tasks/2026-05-01-demo/04-afk.md
 
 Read the task file in full. Follow any optional context references it
 contains (for example a "## Parent" section) when present; the task may also
 be self-contained. Implement the work described under "What to build" and
 satisfy every box under "Acceptance criteria". As you complete each
-criterion, check its box (`- [ ]` → `- [x]`) in {{.TaskPath}}.
+criterion, check its box (`- [ ]` → `- [x]`) in /pop/tasks/2026-05-01-demo/04-afk.md.
 
-Do NOT modify {{.ManifestPath}}. Do NOT modify other task files in {{.TasksDir}}.
+Do NOT modify /pop/tasks/2026-05-01-demo/index.json. Do NOT modify other task files in /pop/tasks/2026-05-01-demo.
 Do NOT make git commits — the runner handles assessment and committing.
 
-Runtime checkout: {{.RuntimePath}}
+Runtime checkout: /pop/checkouts/demo
 
-{{if .Exploration.HasExploration}}Implementation edits belong only beneath the runtime checkout. Two files
+Implementation edits belong only beneath the runtime checkout. Two files
 outside it are also yours: the task file above — its acceptance boxes are yours
 to tick — and this set's Exploration report, under the one correction named
 with it below.
 
 ## This set's Exploration report (NOT inlined — read the file yourself)
 
-- Document: {{.Exploration.Path}}
+- Document: /pop/tasks/2026-05-01-demo/exploration.md
 - It is the code as one Explorer found it before anyone built in this set: where
   things live, which seam owns what, the invariants around them, and which parts
   of which files to read. Every task in the set is handed this same document, so
@@ -27,9 +27,7 @@ with it below.
   a seam you retired — and change nothing else in it. It is not a notebook: the
   builders after you read what you leave, and they must still be reading one
   Explorer's map rather than a pile of attempt notes.
-{{else}}Implementation edits belong only beneath the runtime checkout. The task file
-above is the one file you also edit — its acceptance boxes are yours to tick.
-{{end}}
+
 ## Before you hand-write mechanism
 
 The trigger is your own output: when what you are about to write is plumbing — a
@@ -43,15 +41,7 @@ Search cheapest first and stop at the first hit: the files the task's
 Orientation names, then the directory the change lands in, then the repository.
 Adopt what you find. Write the plumbing by hand only when the ladder ends empty.
 
-{{if .ImplementationConventionRecorded}}## This repository's implementation convention
-
-The rules below are this repository's standard for the code you write. Follow
-them as you build: a Refine pass checks the work against this same text, and
-what you leave short of it is fixed or reported there.
-
-{{.ImplementationConvention}}
-
-{{end}}This attempt is a single non-interactive session. There is no human and no
+This attempt is a single non-interactive session. There is no human and no
 later turn: once you end your response the attempt is over, and ending
 without a completion sentinel (TASK_COMPLETE or TASK_FAILED) is recorded as a
 failure. To wait on a long-running command, keep polling it across successive

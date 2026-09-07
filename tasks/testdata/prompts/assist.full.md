@@ -14,6 +14,10 @@ Worktree binding / Runtime path (Binding-first): /pop/checkouts/demo
 ## Latest Verify verdict findings
 01-afk: the golden for the Assist prompt is missing.
 
+## Exploration report (NOT inlined — read the file yourself)
+- Document: /pop/tasks/2026-05-01-demo/exploration.md
+- The code as one Explorer found it before this set was built in, and what every builder in the set was handed instead of mapping the area itself. A builder may have corrected a line its own attempt falsified; nothing else in it moves.
+
 ## Recent progress
 - 2026-05-01T09:00:00Z [01-afk.md] DONE
   captured a golden for each builder

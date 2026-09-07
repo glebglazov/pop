@@ -121,6 +121,11 @@ func taskHeading(task Task) string {
 
 // BuildAgentPrompt generates the instruction prompt for an task attempt.
 //
+// A set that has an Exploration report hands it to every attempt as a path,
+// with the one edit an attempt may make to it: the line this attempt falsified
+// (ADR-0262). A set with none says nothing about it, and the frame reads as it
+// did before the pass existed.
+//
 // implementationConvention is the resolved `implementation` convention prose,
 // already free of the Read-whole notice, or empty when the repository has not
 // asked for it ([work.implement].include_implementation_convention, ADR-0246).
@@ -132,13 +137,23 @@ func taskHeading(task Task) string {
 // TASK_COMPLETE, TASK_FAILED) stay literal text there. They are also compiled
 // into the assessor's regexes and written again in the retry lessons; folding
 // the three sites onto a shared constant is its own change (ADR-0208).
-func BuildAgentPrompt(taskPath, runtimePath, implementationConvention string) string {
+func BuildAgentPrompt(d *Deps, taskPath, runtimePath, implementationConvention string) string {
+	if d == nil {
+		d = defaultDeps
+	}
+	if d.FS == nil {
+		d.FS = DefaultDeps().FS
+	}
 	tasksDir := filepath.Dir(taskPath)
 	view := agentPromptView{
 		TaskPath:     taskPath,
 		TasksDir:     tasksDir,
 		ManifestPath: filepath.Join(tasksDir, ManifestFileName),
 		RuntimePath:  runtimePath,
+		// Named as a path, like the task body and like the Refine report every
+		// attended prompt carries: a builder in the checkout opens the file, and
+		// a map of a large area never has to fit in an argv or a context window.
+		Exploration: explorationBlock(d, tasksDir),
 	}
 	if convention := strings.TrimSpace(implementationConvention); convention != "" {
 		view.ImplementationConventionRecorded = true
@@ -155,6 +170,11 @@ type agentPromptView struct {
 	TasksDir     string
 	ManifestPath string
 	RuntimePath  string
+	// Exploration is the set's report, empty for a set that has never been
+	// explored. It also decides which edit boundary the frame states, since the
+	// report is the one file outside the checkout an attempt may edit besides
+	// its own task file.
+	Exploration explorationBlockView
 	// ImplementationConventionRecorded guards the convention block the way every other
 	// prompt view guards an optional section: a named boolean beside the text,
 	// so the template never asks why a field is empty.
@@ -549,6 +569,9 @@ func BuildAssistPrompt(d *Deps, cfg *config.Config, taskSetID string, m *Manifes
 	// body, so "read the report and let's work out what to do about it" needs no
 	// plumbing beyond the agent opening the file.
 	view.Refine = refineBlock(d, m, runtimePath)
+	// The same document the set's builders were handed, named the same way, so
+	// the human and the agent are looking at one picture of the code.
+	view.Exploration = explorationBlock(d, m.Dir)
 	// The mark answers what the pointer cannot: an agent handed a set with no
 	// report, or with one an interrupted pass left stale, would otherwise read
 	// the absence as nothing to say (ADR-0260).
@@ -569,6 +592,7 @@ type assistPromptView struct {
 	FindingsRecorded bool
 	Findings         string
 	Refine           refineBlockView
+	Exploration      explorationBlockView
 	// RefineMark is the mark as the gate words it, empty for a set that carries
 	// none.
 	RefineMark          string

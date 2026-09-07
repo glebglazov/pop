@@ -12,7 +12,11 @@ Derived status: {{.Status}}
 {{end}}{{if .RefineMark}}
 ## Refinement
 - {{.RefineMark}}. Nothing gates on this; it says only whether the implementation standard was applied to this set's changeset.
-{{end}}{{template "latest-refine-report" .Refine}}
+{{end}}{{template "latest-refine-report" .Refine}}{{if .Exploration.HasExploration}}
+## Exploration report (NOT inlined — read the file yourself)
+- Document: {{.Exploration.Path}}
+- The code as one Explorer found it before this set was built in, and what every builder in the set was handed instead of mapping the area itself. A builder may have corrected a line its own attempt falsified; nothing else in it moves.
+{{end}}
 
 ## Recent progress
 {{if .ProgressUnavailable}}- No progress.txt is available yet.
