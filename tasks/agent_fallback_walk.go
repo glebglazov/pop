@@ -21,7 +21,7 @@ type agentRole struct {
 	// Gerund opens the once-per-preset heading: "━━ <Gerund> with <agent>".
 	Gerund string
 	// Phase is the Work group the role's attempts are spent in, as a Captured run
-	// and a Spent retry cap both name it ("verify", "refine").
+	// and a Spent retry cap both name it ("verify", "refine", "explore").
 	Phase string
 	// Persist records as a Captured run one invocation that ended without the
 	// role answering — interrupted, quota-paused, or refused — best-effort.
@@ -39,10 +39,9 @@ type agentRole struct {
 	// answer should be retried on the current preset.
 	RetryEligible func(outcome *attemptOutcome, raw string) bool
 	// ReadOnly spawns this role's agents under the read-only agent posture
-	// (ADR-0221). No role sets it today: the Refiner was its only consumer, and
-	// a Refiner that fixes in place cannot run without its editing tools
-	// (ADR-0252). The posture stays declared on every preset for the next
-	// role that wants to look without touching.
+	// (ADR-0221). The Explorer sets it — its whole output is the prose pop files,
+	// so it has no reason to touch the checkout. The Refiner does not: a Refiner
+	// that fixes in place cannot run without its editing tools (ADR-0252).
 	ReadOnly bool
 }
 
@@ -65,6 +64,21 @@ func (r agentRole) persistSkipped(rec *streamRecorder, invocation *AgentInvocati
 	if r.PersistSkipped != nil {
 		r.PersistSkipped(rec, invocation, model, try, reason, exitCode)
 	}
+}
+
+// proseAttemptRetryEligible is the retry rule of every role whose whole answer
+// is prose — the Refiner and the Explorer. It reads the Verifier's rule with
+// the verdict parse taken out: those passes have no format, so the ending is
+// all there is to judge. A run that timed out, could not be launched, or exited
+// non-zero was cut off mid-thought, and the prose it left is a fragment rather
+// than a shorter report — retrying costs one more attempt, while accepting it
+// would publish that fragment as the pass's document. A clean run that said
+// nothing at all is retried for the same reason it is under the Verifier.
+func proseAttemptRetryEligible(outcome *attemptOutcome, raw string) bool {
+	if outcome != nil && (outcome.timedOut || outcome.runErr != nil || outcome.exitCode != 0) {
+		return true
+	}
+	return strings.TrimSpace(raw) == ""
 }
 
 // agentFallbackWalk is one role's walk over its resolved agent list: the inputs

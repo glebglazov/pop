@@ -218,7 +218,8 @@ Set-level keys:
   because the set is large, and never because the area is unfamiliar; you have
   just read the code, so this is your judgment, not a count pop can make. The
   pass writes `+"`%s`"+`, which every later slice reads instead of re-deriving
-  the same map.
+  the same map, and a hand-run `+"`pop tasks explore`"+` writes it on any set
+  whatever this key says.
 - `+"`%s`"+` / `+"`%s`"+` / `+"`%s`"+` — optional
   `+"`{\"agents\": [...], \"effort\": \"...\"}`"+` objects steering *how* this
   set is verified, refined or explored: they override the configured agent

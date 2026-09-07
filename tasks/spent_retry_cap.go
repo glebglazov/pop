@@ -14,6 +14,7 @@ const (
 	spendPhaseImplement = "implement"
 	spendPhaseVerify    = "verify"
 	spendPhaseRefine    = "refine"
+	spendPhaseExplore   = "explore"
 )
 
 // SpentRetryCapRecord is one spent-cap event at the tasks boundary: an agent

@@ -19,12 +19,14 @@ import (
 // to "why did verification judge as it did" that the cache never was. The two
 // can therefore disagree about how many verdicts a set has had, deliberately.
 var verifyReport = passReport{
+	reportHeader: reportHeader{
+		Title:        "Verify report",
+		WrittenLabel: "Verified",
+		AgentLabel:   "Verifier",
+	},
 	ArtifactType: ArtifactTypeVerify,
 	DirName:      VerifyDirName,
 	FilePrefix:   "verify-",
-	Title:        "Verify report",
-	WrittenLabel: "Verified",
-	AgentLabel:   "Verifier",
 	Noun:         "verify",
 	PointerLabel: "Verify",
 }

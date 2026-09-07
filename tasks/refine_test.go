@@ -303,16 +303,16 @@ func TestRefineRunsOnAnUnfinishedSetAndChangesNoStatus(t *testing.T) {
 	}
 }
 
-// manifestWithRefiner builds a bare manifest carrying a per-set `refiner`
-// override object under Unknown, so RefinerOverride() parses it exactly as it
-// would from a loaded index.json.
-func manifestWithRefiner(t *testing.T, agents []string, effort string) *Manifest {
+// manifestWithAgentDirective builds a bare manifest carrying one per-set agent
+// directive object under Unknown, so the phase's accessor parses it exactly as
+// it would from a loaded index.json.
+func manifestWithAgentDirective(t *testing.T, key string, agents []string, effort string) *Manifest {
 	t.Helper()
 	raw, err := json.Marshal(AgentDirective{Agents: agents, Effort: effort})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Manifest{Unknown: map[string]json.RawMessage{"refiner": raw}}
+	return &Manifest{Unknown: map[string]json.RawMessage{key: raw}}
 }
 
 // TestResolveRefinerPrecedence covers the Refiner chain (ADR-0252), highest
@@ -366,7 +366,7 @@ func TestResolveRefinerPrecedence(t *testing.T) {
 		},
 		{
 			name:       "per-set refiner overrides config",
-			manifest:   manifestWithRefiner(t, []string{"pi"}, "light"),
+			manifest:   manifestWithAgentDirective(t, "refiner", []string{"pi"}, "light"),
 			cfg:        refineCfg([]string{"codex"}, "standard"),
 			wantAgents: []string{"pi"},
 			wantEffort: "light",
@@ -375,7 +375,7 @@ func TestResolveRefinerPrecedence(t *testing.T) {
 			name:       "CLI overrides the per-set refiner",
 			cliAgents:  []string{"opencode"},
 			cliEffort:  "heavy",
-			manifest:   manifestWithRefiner(t, []string{"pi"}, "light"),
+			manifest:   manifestWithAgentDirective(t, "refiner", []string{"pi"}, "light"),
 			cfg:        refineCfg([]string{"codex"}, "standard"),
 			wantAgents: []string{"opencode"},
 			wantEffort: "heavy",
@@ -383,7 +383,7 @@ func TestResolveRefinerPrecedence(t *testing.T) {
 		{
 			name:       "per-set agents and effort resolve independently",
 			cliAgents:  []string{"opencode"},
-			manifest:   manifestWithRefiner(t, nil, "light"),
+			manifest:   manifestWithAgentDirective(t, "refiner", nil, "light"),
 			cfg:        refineCfg([]string{"codex"}, "standard"),
 			wantAgents: []string{"opencode"}, // CLI agents win
 			wantEffort: "light",              // per-set effort wins (no CLI effort)

@@ -314,6 +314,16 @@ func TestRefinerPromptGoldens(t *testing.T) {
 			workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", "", passDocument{}, false))
 }
 
+func TestExplorerPromptGoldens(t *testing.T) {
+	prompttest.Assert(t, goldenPath("explorer.full.md"),
+		buildExplorerPrompt(goldenFixtureDeps(t), goldenFullManifest(), "shaHEAD"))
+
+	// Absent side: no spec, one task whose body cannot be read, and a checkout
+	// whose HEAD pop could not name.
+	prompttest.Assert(t, goldenPath("explorer.bare.md"),
+		buildExplorerPrompt(&Deps{FS: &unreadableFS{}}, goldenBareManifest(), ""))
+}
+
 func TestFoldConflictPromptGoldens(t *testing.T) {
 	ctx := FoldConflictContext{
 		SetID:       goldenSetID,

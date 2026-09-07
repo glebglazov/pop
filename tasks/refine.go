@@ -22,12 +22,14 @@ const DefaultRefineEffort = "heavy"
 // `refine/` directory, headed by the facts a reader needs to know what was
 // refined.
 var refineReport = passReport{
+	reportHeader: reportHeader{
+		Title:        "Refine report",
+		WrittenLabel: "Refined",
+		AgentLabel:   "Refiner",
+	},
 	ArtifactType: ArtifactTypeRefine,
 	DirName:      RefineDirName,
 	FilePrefix:   "refine-",
-	Title:        "Refine report",
-	WrittenLabel: "Refined",
-	AgentLabel:   "Refiner",
 	Noun:         "refine",
 	PointerLabel: "Refine",
 }
@@ -452,7 +454,7 @@ func refinerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) a
 		PersistSkipped: func(rec *streamRecorder, invocation *AgentInvocation, model string, try int, reason string, exitCode int) {
 			_ = persistSkippedRefineRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, reason, exitCode)
 		},
-		RetryEligible: refineAttemptRetryEligible,
+		RetryEligible: proseAttemptRetryEligible,
 	}
 }
 
@@ -468,21 +470,6 @@ func refineRunOutcome(answer string) string {
 	}
 	_, outcome, _ := splitRefinerReply(answer)
 	return outcome
-}
-
-// refineAttemptRetryEligible reports whether a Refiner invocation should be
-// retried on the current preset. It reads the Verifier's rule with the verdict
-// parse taken out: a refine pass has no format, so the ending is all there is
-// to judge. A run that timed out, could not be launched, or exited non-zero was
-// cut off mid-thought, and the prose it left is a fragment rather than a
-// shorter report — retrying costs one more attempt, while accepting it would
-// write that fragment over the set's last complete document. A clean run that
-// said nothing at all is retried for the same reason it is under the Verifier.
-func refineAttemptRetryEligible(outcome *attemptOutcome, raw string) bool {
-	if outcome != nil && (outcome.timedOut || outcome.runErr != nil || outcome.exitCode != 0) {
-		return true
-	}
-	return strings.TrimSpace(raw) == ""
 }
 
 // refineEnabled reports whether automatic Refine is enabled in user config
