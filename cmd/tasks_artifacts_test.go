@@ -80,6 +80,7 @@ func TestTaskArtifactsListsTypeTierOrderTheDashboardAlsoReads(t *testing.T) {
 		filepath.Join(setDir, tasks.ManifestFileName):          `{"tasks":[]}`,
 		filepath.Join(setDir, tasks.SpecFileName):              "spec body\n",
 		filepath.Join(setDir, "progress.txt"):                  "just drained\n",
+		filepath.Join(setDir, tasks.ExplorationFileName):       "the code as found\n",
 		filepath.Join(refineDir, "refine-20260817T120000Z.md"): "new report\n",
 		filepath.Join(refineDir, "refine-20260815T120000Z.md"): "old report\n",
 	} {
@@ -101,7 +102,7 @@ func TestTaskArtifactsListsTypeTierOrderTheDashboardAlsoReads(t *testing.T) {
 	if err := runTaskArtifactsWith(td, &list, "demo", ""); err != nil {
 		t.Fatal(err)
 	}
-	printed := make([]string, 0, 4)
+	printed := make([]string, 0, 5)
 	for _, line := range strings.Split(strings.TrimSpace(list.String()), "\n") {
 		fields := strings.Split(line, "\t")
 		printed = append(printed, fields[0]+":"+fields[len(fields)-1])
@@ -110,6 +111,7 @@ func TestTaskArtifactsListsTypeTierOrderTheDashboardAlsoReads(t *testing.T) {
 		"refine:refine-20260817T120000Z.md",
 		"refine:refine-20260815T120000Z.md",
 		"spec:spec.md",
+		"exploration:exploration.md",
 		"progress:progress.txt",
 	}
 	if !reflect.DeepEqual(printed, want) {

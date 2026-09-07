@@ -35,6 +35,17 @@ const (
 	DefaultTaskEffort = "standard"
 )
 
+// The set-level phase keys, named once so the accessors that read them and the
+// authoring guide that teaches them cannot disagree about a word.
+const (
+	verifyKey   = "verify"
+	verifierKey = "verifier"
+	refineKey   = "refine"
+	refinerKey  = "refiner"
+	exploreKey  = "explore"
+	explorerKey = "explorer"
+)
+
 var (
 	taskTypeOrder   = []string{"AFK", "HITL"}
 	taskStatusOrder = []TaskStatus{TaskOpen, TaskDone, TaskFailed, TaskSkipped}
@@ -502,8 +513,8 @@ func validateManifest(d *Deps, m *Manifest, entries []os.DirEntry, listErr error
 // and is invisible — never drained, never counted, never reported missing.
 //
 // The set folder is pop's storage rather than scratch space, so the only markdown
-// exempt is the co-located spec; anything else is a stray file to move out or a
-// slice to list.
+// exempt is what pop itself keeps there — the co-located spec and the Exploration
+// report; anything else is a stray file to move out or a slice to list.
 func validateNoOrphanMarkdown(m *Manifest, entries []os.DirEntry, listErr error, listed map[string]int) {
 	if listErr != nil {
 		if os.IsNotExist(listErr) {
@@ -518,7 +529,7 @@ func validateNoOrphanMarkdown(m *Manifest, entries []os.DirEntry, listErr error,
 		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".md") {
 			continue
 		}
-		if name == SpecFileName || name == legacySpecFileName || listed[name] > 0 {
+		if unlistedSetMarkdown[name] || listed[name] > 0 {
 			continue
 		}
 		orphans = append(orphans, name)
@@ -527,8 +538,25 @@ func validateNoOrphanMarkdown(m *Manifest, entries []os.DirEntry, listErr error,
 	for _, name := range orphans {
 		m.Errors = append(m.Errors, fmt.Sprintf(
 			"%s: no manifest entry; every markdown in a set folder but %s is a task",
-			name, SpecFileName))
+			name, unlistedSetMarkdownNames()))
 	}
+}
+
+// unlistedSetMarkdown is the closed set of markdown a set folder holds without a
+// manifest entry: pop's own documents, plus the retired spec name a pre-rename
+// set may still carry (ADR-0115's reasoning — a rename must not turn every older
+// set on a machine into a fix list).
+var unlistedSetMarkdown = map[string]bool{
+	SpecFileName:        true,
+	legacySpecFileName:  true,
+	ExplorationFileName: true,
+}
+
+// unlistedSetMarkdownNames renders the exempt names for the orphan diagnostic and
+// the authoring guide, without the retired spec name: a message telling an author
+// what may sit unlisted should not teach a name nothing writes any more.
+func unlistedSetMarkdownNames() string {
+	return SpecFileName + " and " + ExplorationFileName
 }
 
 func validateAcceptanceCriteria(d *Deps, mdPath string) error {
@@ -639,7 +667,7 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 // malformed value is treated as participating (fail toward verifying); the key
 // rides through WriteManifestAtomic in Unknown, so a rewrite preserves it.
 func (m *Manifest) VerifyOptedOut() bool {
-	return m.optedOut("verify")
+	return m.optedOut(verifyKey)
 }
 
 // RefineOptedOut reports whether the set explicitly opted out of Refine
@@ -652,37 +680,58 @@ func (m *Manifest) VerifyOptedOut() bool {
 // ignores `"verify": false`: the key declines the automatic drain step, not a
 // human asking the question.
 func (m *Manifest) RefineOptedOut() bool {
-	return m.optedOut("refine")
+	return m.optedOut(refineKey)
+}
+
+// ExploreRequested reports whether the set's author declared that it needs an
+// Explore pass with `"explore": true` (ADR-0262). It is the one set-level phase
+// key that is opt-**in**: absent, false or malformed means the set never
+// explores, where verify and refine participate unless they decline. The author
+// who broke the set down has just read the code, so the judgment that its tasks
+// share a seam is theirs — pop infers nothing from the set's size.
+func (m *Manifest) ExploreRequested() bool {
+	value, present := m.setFlag(exploreKey)
+	return present && value
 }
 
 // optedOut reads a boolean set key as an opt-out. The key rides through
 // WriteManifestAtomic in Unknown, so a rewrite preserves it; anything that does
 // not parse as `false` leaves the set participating.
 func (m *Manifest) optedOut(key string) bool {
+	value, present := m.setFlag(key)
+	return present && !value
+}
+
+// setFlag reads one boolean set-level key out of the manifest's unread keys,
+// reporting whether it was there and parsed. Absent and malformed answer alike —
+// present is false — which is what lets each phase key choose its own safe
+// direction: verify and refine fail toward participating, explore toward not.
+func (m *Manifest) setFlag(key string) (value bool, present bool) {
 	if m == nil {
-		return false
+		return false, false
 	}
 	raw, ok := m.Unknown[key]
 	if !ok {
-		return false
+		return false, false
 	}
 	var enabled bool
 	if err := json.Unmarshal(raw, &enabled); err != nil {
-		return false
+		return false, false
 	}
-	return !enabled
+	return enabled, true
 }
 
 // AgentDirective is a set's per-set override of the agent list and effort a
 // set-level phase runs at, read from the manifest's
-// `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086) and its
-// `"refiner"` twin (ADR-0252). One type serves both because the two phases
-// resolve the same two values by the same precedence.
+// `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086), its
+// `"refiner"` twin (ADR-0252) and its `"explorer"` twin (ADR-0262). One type
+// serves all three because the phases resolve the same two values by the same
+// precedence.
 //
-// It overrides the phase's config default for that set, but it is opt-out only
-// for participation: user config is the master gate, so a directive can steer
-// *how* a set is verified or refined but never opt it *in* while the feature is
-// globally off (that stays VerifyOptedOut / RefineOptedOut and the config switch).
+// It overrides the phase's config default for that set, and it never carries
+// participation: a directive steers *how* a set is verified, refined or
+// explored and never opts it in — that stays VerifyOptedOut / RefineOptedOut /
+// ExploreRequested and the config switch behind them.
 type AgentDirective struct {
 	Agents []string `json:"agents,omitempty"`
 	Effort string   `json:"effort,omitempty"`
@@ -692,13 +741,21 @@ type AgentDirective struct {
 // manifest carries no `verifier` object (or a malformed one — a bad value is
 // ignored so it falls through to the config default).
 func (m *Manifest) VerifierOverride() *AgentDirective {
-	return m.agentDirective("verifier")
+	return m.agentDirective(verifierKey)
 }
 
 // RefinerOverride returns the set's per-set Refiner override, read from the
 // manifest's `refiner` object, or nil when there is none.
 func (m *Manifest) RefinerOverride() *AgentDirective {
-	return m.agentDirective("refiner")
+	return m.agentDirective(refinerKey)
+}
+
+// ExplorerOverride returns the set's per-set Explorer override, read from the
+// manifest's `explorer` object, or nil when there is none. It steers only —
+// participation is the `explore` key's business, which is why the directive
+// object family keeps its invariant that a directive never opts a set in.
+func (m *Manifest) ExplorerOverride() *AgentDirective {
+	return m.agentDirective(explorerKey)
 }
 
 // agentDirective parses one override object out of the manifest's unread keys.

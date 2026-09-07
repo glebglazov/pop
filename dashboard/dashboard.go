@@ -702,10 +702,12 @@ type detailColumns struct {
 // Detail item-table column widths. Status, type, and title are fixed; the ID
 // column grows to the widest item ID (floored at the "ID" header).
 const (
-	detailStatusW          = 10
-	detailTypeW            = 4
-	detailTitleW           = 40
-	detailArtifactTypeW    = 8
+	detailStatusW = 10
+	detailTypeW   = 4
+	detailTitleW  = 40
+	// The artifact type column fits the widest type name pop publishes, so a
+	// wider member does not shove the written instant out of its column.
+	detailArtifactTypeW    = len(tasks.ArtifactTypeExploration)
 	detailArtifactWrittenW = len("2006-01-02T15:04:05Z")
 )
 

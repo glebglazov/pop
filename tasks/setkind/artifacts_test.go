@@ -24,6 +24,7 @@ func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
 	files := map[string]string{
 		filepath.Join(setDir, tasks.SpecFileName):                    "spec body\n",
 		filepath.Join(setDir, progressFileName):                      "progress body\n",
+		filepath.Join(setDir, tasks.ExplorationFileName):             "the code as found\n",
 		filepath.Join(setDir, tasks.ManifestFileName):                "{}",
 		filepath.Join(setDir, "01-task.md"):                          "task",
 		filepath.Join(setDir, "streams", "runs", "attempt.jsonl.gz"): "run",
@@ -64,6 +65,7 @@ func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
 		"refine:refine-20260817T120000Z.md",
 		"refine:refine-20260815T120000Z.md",
 		"spec:spec.md",
+		"exploration:exploration.md",
 		"progress:progress.txt",
 	}
 	if !reflect.DeepEqual(rows, want) {
