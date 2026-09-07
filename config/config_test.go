@@ -233,6 +233,41 @@ include_refine_convention = true
 	}
 }
 
+// TestLoadWorkExploreSettings pins the [work.explore] group (ADR-0262): one key
+// that defaults on, so an undeclared group and an undeclared key both explore
+// and only an explicit `false` stops the drain's step.
+func TestLoadWorkExploreSettings(t *testing.T) {
+	tests := []struct {
+		name string
+		toml string
+		want bool
+	}{
+		{name: "no group at all", toml: "\n", want: true},
+		{name: "the group with no key", toml: "[work.explore]\n", want: true},
+		{name: "switched off", toml: "[work.explore]\nenabled = false\n", want: false},
+		{name: "switched on", toml: "[work.explore]\nenabled = true\n", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.ExploreEnabled(); got != tt.want {
+				t.Fatalf("ExploreEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	// A caller that never loaded configuration at all explores too.
+	if !(*Config)(nil).ExploreEnabled() {
+		t.Fatal("a nil config must explore")
+	}
+}
+
 // TestLoadWorkRefineSettings pins the [work.refine] group (ADR-0252): three keys
 // and no more, disabled unless the human says otherwise, and an omitted agents
 // list left empty so resolution falls through to [work.implement].agents.

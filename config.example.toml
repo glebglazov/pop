@@ -322,6 +322,15 @@ projects = [
 # agents = ["claude"]
 # effort = "heavy"
 #
+# [work.explore]
+# The Explorer (ADR-0262): a fresh read-only agent maps the code the set's
+# tasks touch, once, at the head of the drain, and every builder in the set is
+# handed that report instead of re-deriving the map per attempt. `enabled` is
+# the only key and defaults to true, because the trigger is the set's own
+# `"explore": true` — a set that never declared it never explores. Switched
+# off, `pop tasks explore <set>` still runs on demand.
+# enabled = true
+#
 # [work.routine]
 # Recurring Routine runs. A Routine manifest's own agents beats this group; an
 # empty list falls through to [work.implement].agents.

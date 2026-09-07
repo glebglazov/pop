@@ -367,6 +367,19 @@ type RefineConfig struct {
 	Effort string `toml:"effort" include:"replace" desc:"Refiner model-strength tier: light, standard, or heavy (default heavy)."`
 }
 
+// ExploreConfig holds Explore settings (ADR-0262). It carries one key and no
+// agent list: the Explorer resolves from the set's own `explorer` object and
+// then from what a human configured for building this repository, exploring
+// being the same reading skill.
+type ExploreConfig struct {
+	// Enabled gates the Explore step at the head of a drain. Absent ⇒ enabled,
+	// alone among the agent phases. It runs unasked only in the sense that the
+	// group is on: the set's own Explore directive is the participation trigger,
+	// so a set carrying none costs nothing whatever this says. Switched off, `pop
+	// tasks explore <set>` still runs on demand.
+	Enabled *bool `toml:"enabled" include:"replace" desc:"Enable automatic Explore at the head of a drain (default true)."`
+}
+
 // TaskGitConfig holds commit-time git configuration applied to Pop's own
 // commits during a task drain (e.g. disabling GPG signing so an unattended
 // queue drain never hangs on a 1Password presence prompt).
@@ -552,6 +565,8 @@ type WorkConfig struct {
 	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"fields" desc:"Agent-verification settings ([work.verify] table)."`
 	// Refine is the Refiner's group (ADR-0252).
 	Refine *RefineConfig `toml:"refine" merge:"fields" include:"fields" desc:"Refine settings ([work.refine] table)."`
+	// Explore is the Explorer's group (ADR-0262).
+	Explore *ExploreConfig `toml:"explore" merge:"fields" include:"fields" desc:"Explore settings ([work.explore] table)."`
 	// Routine is the recurring-Routine group. An absent list falls through to
 	// [work.implement].agents — an override of `agents = []` does not
 	// (agent_list.go); a Routine manifest's own agents still beats both.
@@ -1232,6 +1247,18 @@ func (c *Config) RefineSettings() *RefineConfig {
 		return nil
 	}
 	return c.Work.Refine
+}
+
+// ExploreEnabled reports whether a drain explores a set that asked for it
+// (ADR-0262). Absent configuration explores: the phase exists so that the
+// builders of an interrelated set do not start from separate maps, and a set
+// that never declared the Explore directive is untouched either way, so there
+// is no machine this default costs anything on.
+func (c *Config) ExploreEnabled() bool {
+	if c == nil || c.Work == nil || c.Work.Explore == nil || c.Work.Explore.Enabled == nil {
+		return true
+	}
+	return *c.Work.Explore.Enabled
 }
 
 // RoutineAgents returns the commands of the [work.routine].agents list, or nil.
