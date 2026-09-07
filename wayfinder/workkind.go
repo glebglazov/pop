@@ -540,8 +540,11 @@ func (k *MapKind) fanOutFrontier(c work.Container, focus bool) (work.Outcome, er
 
 // assistMap opens the Map's own attended session and hands it off. It reads no
 // frontier and takes no claim, so it is the one Map verb that works on a Map in
-// any state (ADR-0184). A live assist pane is a jump target rather than a second
-// session, which is what keeps two conversations off one Map's prose.
+// any state (ADR-0184). Naming no slot, it lands on the pane the Map already
+// holds rather than opening a second one — but that is a convenience of this
+// path only: the dashboard menu can open up to nine assist panes on a Map
+// (ADR-0263), and prose two of them write outside the `pop:generated` markers is
+// last-writer-wins.
 func (k *MapKind) assistMap(c work.Container) (work.Outcome, error) {
 	target, wd, checkout, err := k.resolveMapForSpawn(c)
 	if err != nil {

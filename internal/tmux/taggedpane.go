@@ -8,8 +8,9 @@ import (
 )
 
 // DrainWindow is the shared tmux window pop's routine-fire and drain panes live
-// in: one pane per key (routine id or Task-set id), tagged with a @pop_* option
-// and tiled alongside its siblings. The tagged-pane composites take the window
+// in: panes keyed by routine id or Task-set id, tagged with a @pop_* option and
+// tiled alongside their siblings. Most keys hold a single pane; an assist key
+// holds one per slot (ADR-0263). The tagged-pane composites take the window
 // as a parameter — a Map's session tiles its grilling panes in a window of its
 // own — so this names the drain window rather than being the only window the
 // primitive can reach.
