@@ -23,11 +23,12 @@ import (
 const manifestMemoCapacity = 512
 
 // manifestMemo caches LoadManifest's whole answer for the life of the process,
-// keyed on the content of the set directory it was derived from (ADR-0189). It is
-// process-wide rather than per-load because the cost it removes is the repeat: a
-// poll that re-walks an unchanged definition path pays a full read plus a
-// line-split plus two regexes per line for every task markdown in every set, and
-// nothing about that answer depends on when it was asked.
+// keyed on the content of the set directory it was derived from and on the build
+// that derived it (ADR-0189, ADR-0265). It is process-wide rather than per-load
+// because the cost it removes is the repeat: a poll that re-walks an unchanged
+// definition path pays a full read plus a line-split plus two regexes per line
+// for every task markdown in every set, and nothing about that answer depends on
+// when it was asked.
 var manifestMemo = deps.NewContentMemo[*Manifest](manifestMemoCapacity)
 
 // manifestContentKey names every input LoadManifest's answer is a function of, so

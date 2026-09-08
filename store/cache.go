@@ -12,9 +12,9 @@ import (
 // It is emphatically not the execution state store. Nothing here is
 // authoritative: every entry is re-validated against its source before it is
 // served, so `pop cache clear` — or deleting the file by hand — is always a
-// valid repair. Keeping it in its own file
-// is what stops read-path writes contending with authoritative ones on the
-// execution state store's single process-cached connection.
+// valid repair. Keeping it in its own file is what stops read-path writes
+// contending with authoritative ones on the execution state store's single
+// process-cached connection.
 //
 // Every method is nil-safe. A caller that could not open the cache holds a nil
 // *Cache and calls it anyway; reads then miss and writes drop. That is the whole

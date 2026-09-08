@@ -11,11 +11,11 @@ import "encoding/json"
 // hit never opens a markdown at all.
 //
 // It changes what a miss costs and never what a hit means. The key is the same
-// key: the manifest's bytes plus every dirent's size, mtime and name, recomputed
-// from the directory on every serve and compared before anything is handed back.
-// That comparison is what separates this from the glob cache ADR-0242 deleted
-// for going stale invisibly — here a stale serve is not unlikely, it cannot be
-// expressed.
+// key: the running build's derivation stamp plus the manifest's bytes plus every
+// dirent's size, mtime and name, recomputed on every serve and compared before
+// anything is handed back. That comparison is what separates this from the glob
+// cache ADR-0242 deleted for going stale invisibly — here a stale serve is not
+// unlikely, it cannot be expressed.
 //
 // Every failure is a miss. Nothing in this file returns an error, because there
 // is no caller that could do anything with one but re-validate, which is what a

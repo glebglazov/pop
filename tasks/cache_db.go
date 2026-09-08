@@ -53,8 +53,8 @@ type cacheDBHolder struct {
 	// warmed names the content keys this process has already written through
 	// handle. It is allocated with the handle and dropped with it, which is what
 	// makes `pop cache clear` under a running daemon a repair rather than a
-	// permanent cold cache: the fresh database is warmed again from the first tick, because
-	// nothing is remembered as written to it.
+	// permanent cold cache: the fresh database is warmed again from the first
+	// tick, because nothing is remembered as written to it.
 	warmed *deps.ContentMemo[struct{}]
 }
 
