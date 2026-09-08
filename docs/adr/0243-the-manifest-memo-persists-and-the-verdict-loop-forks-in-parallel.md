@@ -5,6 +5,12 @@ relates: "fires the revisit trigger of [ADR-0189](0189-a-work-read-surface-pays-
 
 # The Manifest memo persists, and the verdict loop forks in parallel
 
+> **Amended by [ADR-0265](0265-a-cached-verdict-names-the-build-that-derived-it.md):**
+> decision 1's content key names only file inputs, so a change to pop's own
+> validation rules left every unchanged set folder hitting a row derived under
+> the old rules — the stale serve this ADR calls unrepresentable. The key now
+> carries a **Derivation stamp** naming the build that computed the entry.
+
 ## Context
 
 ADR-0189 gave the Work read surface a budget and declined a persisted
