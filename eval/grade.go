@@ -51,7 +51,10 @@ func runGradeCommand(args []string) error {
 	return runGradeCommandWithProgress(args, evalProgress{out: os.Stderr}, true)
 }
 
-func runGradeCommandWithProgress(args []string, progress evalProgress, reportCompletion bool) error {
+// standalone says this grading is the whole `grade` command rather than one step
+// of a Matrix run, so it owns the Trial-level completion line and the Trial
+// prefix on a grading error. Inside a Matrix, runMatrix writes both.
+func runGradeCommandWithProgress(args []string, progress evalProgress, standalone bool) error {
 	flags := flag.NewFlagSet("grade", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	cases := flags.String("cases", defaultCasesRoot, "Case directory root")
@@ -110,6 +113,7 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, reportCom
 	}
 	grade := &gradeRecord{Status: "ungraded", Gates: []gateResult{}, OutsideScope: []string{}}
 	record.Grade = grade
+	label := trialLabel(record.Case, record.Arm, record.Repeat)
 	gradeErr := gradeOneTrial(manifest, acceptance, behaviourCount, &record, gradeOptions{
 		work: *work, configPath: *configPath, graders: *graders, arms: *arms,
 		timeout: *timeout, resultDir: resultDir, progress: progress,
@@ -125,14 +129,12 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, reportCom
 		return errors.Join(gradeErr, err)
 	}
 	fmt.Println(recordPath)
-	if reportCompletion {
-		progress.line("Trial %s finished: outcome=%s %s result=%s", trialLabel(record.Case, record.Arm, record.Repeat), record.Outcome, gradeSummary(record), resultDir)
-	}
-	if gradeErr != nil {
-		if reportCompletion {
-			return fmt.Errorf("Trial %s phase grading: %w", trialLabel(record.Case, record.Arm, record.Repeat), gradeErr)
-		}
+	if !standalone {
 		return gradeErr
+	}
+	progress.line("Trial %s finished: outcome=%s %s result=%s", label, record.Outcome, gradeSummary(record), resultDir)
+	if gradeErr != nil {
+		return fmt.Errorf("Trial %s phase grading: %w", label, gradeErr)
 	}
 	return nil
 }
@@ -145,16 +147,17 @@ type gradeOptions struct {
 
 func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int, record *trialRecord, opts gradeOptions) error {
 	grade := record.Grade
+	label := trialLabel(record.Case, record.Arm, record.Repeat)
 
 	if record.Outcome == outcomeInvalid {
 		grade.Reason = "Invalid Trial is excluded"
-		opts.progress.line("Trial %s grading skipped: Invalid Trial is excluded", trialLabel(record.Case, record.Arm, record.Repeat))
+		opts.progress.line("Trial %s grading skipped: Invalid Trial is excluded", label)
 		return nil
 	}
 	if record.Outcome == outcomeTimedOut {
 		grade.Status = "timed_out"
 		grade.Scores = &gradeScores{}
-		opts.progress.line("Trial %s grading skipped: Trial ceiling reached; zero scores recorded", trialLabel(record.Case, record.Arm, record.Repeat))
+		opts.progress.line("Trial %s grading skipped: Trial ceiling reached; zero scores recorded", label)
 		return nil
 	}
 	if record.Outcome != outcomeCompleted {
@@ -177,7 +180,6 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	}
 	defer os.RemoveAll(dir)
 	clone := filepath.Join(dir, "repository")
-	label := trialLabel(record.Case, record.Arm, record.Repeat)
 	opts.progress.line("Trial %s grading preparation started", label)
 	stopWaiting := opts.progress.wait(label, "grading repository preparation", 0)
 	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, clone); err != nil {

@@ -63,16 +63,31 @@ func TestEvalProgressReportsWaitingAtThirtySecondIntervals(t *testing.T) {
 }
 
 func TestEvalWaitingLinesAreBoundedAndDoNotInventACeiling(t *testing.T) {
-	phase := "Objective gate\n" + strings.Repeat("long ", 40)
-	if got := boundedPhase(phase); len(got) != 120 || strings.Contains(got, "\n") || !strings.HasSuffix(got, "...") {
-		t.Fatalf("bounded phase = %q", got)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	lines := make(chan string)
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	started := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	ticker := &fakeEvalProgressTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
+	progress := evalProgress{
+		out:       writer,
+		now:       func() time.Time { return started },
+		newTicker: func(time.Duration) evalProgressTicker { return ticker },
 	}
-	waits, stopped := []evalWait{}, 0
-	progress := evalProgress{waiter: recordingWaiter(&waits, &stopped)}
-	progress.wait("Case=example Arm=pop repeat=1", phase, 0)()
-	if len(waits) != 1 || waits[0].ceiling != 0 || len(waits[0].phase) != 120 || stopped != 1 {
-		t.Fatalf("waits = %+v, stopped = %d", waits, stopped)
+	stop := progress.wait("Case=example Arm=pop repeat=1", "Objective gate\n"+strings.Repeat("long ", 40), 0)
+	ticker.ticks <- started.Add(30 * time.Second)
+	want := "Trial Case=example Arm=pop repeat=1 waiting: phase=Objective gate " + strings.Repeat("long ", 20) + "lo... elapsed=30s"
+	if got := <-lines; got != want {
+		t.Fatalf("line = %q; want %q", got, want)
 	}
+	stop()
+	_ = writer.Close()
 }
 
 func recordingWaiter(waits *[]evalWait, stopped *int) func(evalWait) func() {
