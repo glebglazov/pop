@@ -1,0 +1,25 @@
+{
+  "commit_convention": "----- ANSWER: SHIPPED (pop's own, displaced by any above) -----\nembedded: shipped/commits.md\n\n# Match the commit grammar this repository already uses\n\nNobody has written this repository's commit convention down, so this is pop's\nown answer: read the recent log and write your commit to match it. It is\ngeneric by construction — pop cannot know this project's taste — and any\ndocument written at a rank above this one displaces it whole.\n\n**One sample, both halves.** The `commits` convention covers **both** the\nsubject grammar — the type set, the scope vocabulary, mood, capitalisation and\nlength — **and** the body style: whether there is a body at all, what it is\nexpected to explain, and how it is wrapped. One log sample answers both. A\nreading that pins the subject and says nothing about bodies is half a reading.\n\n## Sample the last five commits\n\nRead the last five commits — subjects and bodies — as a set, and take what they\nshare rather than what any one of them does. What they share is the convention;\nmatch it.\n\n**Discard pop-generated commits before sampling.** Pop's own default subjects\n(`tasks(...)`) and pop's skill-commit shapes are pop's accent, not the team's.\nDrop them and read the non-pop commits that remain. **Walk further back when the\nrecent window is all pop's**: take the next five, and keep walking until you hold\nfive non-pop commits or the history runs out. Without this guard pop learns its\nown accent back from the log on every repository it has drained, and the\nconvention degenerates into a copy of itself.\n\n## No discernible convention is a real result\n\nA log whose non-pop commits share no type set, no scope vocabulary and no\nconsistent subject or body shape has answered the question: there is no grammar\nhere to match. Write the commit in pop's default format and say so if you are\nasked what resolved. It is a result, not a failed reading, and it is not licence\nto sample further back than the rule above allows or to invent a grammar the\nrepository never used.\n\n----- APPENDED: USER OVERLAY (yours, appended to whichever answered) -----\n~/.agents/docs/commits.overlay.md\n\nMatch the prefix the repo's recent commits use. Where that is a bracketed ticket key — `[SC-1234] \u003csubject\u003e`, `[GS-1234] \u003csubject\u003e` — use `[DEV]` when the key is not evident, and let the key be the whole prefix: after it, plain prose — `[SC-1234] Retry failed webhook deliveries`. Where the repo's convention is something else, follow that convention instead, including its type markers.\n\nWrite the subject as one sentence naming the intent of the change from the user's perspective. Commas are the only punctuation it needs. Leave implementation detail out unless the ticket's work is itself deeply technical.\n\nRefer to a decision by its title or its substance — \"switch sessions to signed cookies\" — so the message reads whole without the ADR to hand. Keep ADR numbers out of the subject and the body.\n\nProvenance: commits resolved to shipped (embedded: shipped/commits.md). Your overlay is appended (~/.agents/docs/commits.overlay.md).",
+  "tasks": [
+    {
+      "id": "01-drain-header",
+      "file": "01-drain-header.md",
+      "title": "Drain header",
+      "type": "AFK",
+      "status": "open",
+      "blocked_by": null,
+      "effort": "standard",
+      "commit_subject": "feat(drain-rendering): a drain always opens by saying where it runs"
+    },
+    {
+      "id": "02-task-result-line",
+      "file": "02-task-result-line.md",
+      "title": "Task result line",
+      "type": "AFK",
+      "status": "open",
+      "blocked_by": null,
+      "effort": "standard",
+      "commit_subject": "feat(drain-rendering): every task ending prints one colored result line"
+    }
+  ]
+}

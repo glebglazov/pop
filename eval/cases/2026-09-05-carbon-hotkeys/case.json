@@ -1,0 +1,16 @@
+{
+  "name": "2026-09-05-carbon-hotkeys",
+  "repository_url": "git@github.com:glebglazov/vibe-coding-done-right.git",
+  "parent_commit": "1f74be5a3f595e59e228bb0a223ee328230e1e18",
+  "reference_range": "1f74be5a3f595e59e228bb0a223ee328230e1e18..c7cec7a03665562c3d2b91664904b951973253f1",
+  "gate_commands": [
+    "xcodebuild -scheme vcdr-mac -destination platform=macOS build",
+    "xcodebuild test -scheme vcdr-mac -destination platform=macOS"
+  ],
+  "scope": [
+    "."
+  ],
+  "standard_documents": [
+    "AGENTS.md"
+  ]
+}

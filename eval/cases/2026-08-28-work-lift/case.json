@@ -1,0 +1,17 @@
+{
+  "name": "2026-08-28-work-lift",
+  "repository_url": "git@github.com:glebglazov/pop.git",
+  "parent_commit": "9a24df8d8d6be535929889619bf7c1561d97a637",
+  "reference_range": "9a24df8d8d6be535929889619bf7c1561d97a637..f21c8e220079d8fc16ebf23f40ff57481bac58cd",
+  "gate_commands": [
+    "go build ./...",
+    "go vet ./...",
+    "go test ./..."
+  ],
+  "scope": [
+    "."
+  ],
+  "standard_documents": [
+    "AGENTS.md"
+  ]
+}

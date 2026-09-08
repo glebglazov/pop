@@ -1,0 +1,39 @@
+{
+  "agent": "claude",
+  "run_id": "83523e2f-9dfe-4de2-ab7d-6d3723e2d1a5",
+  "outcome": "completed",
+  "actual_model": "claude-opus-5[1m]",
+  "spend": {
+    "Tokens": {
+      "Input": 10,
+      "Output": 3144,
+      "CacheRead": 83873,
+      "CacheWrite": 21046,
+      "HasInput": true,
+      "HasOutput": true,
+      "HasCacheRead": true,
+      "HasCacheWrite": true
+    },
+    "Cost": {
+      "Dollars": 0.3310465,
+      "HasCost": true
+    },
+    "Turns": {
+      "Count": 5,
+      "HasTurn": true
+    },
+    "PeakInput": {
+      "Tokens": 27033,
+      "HasPeak": true
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0.3310465,
+      "HasCost": true
+    },
+    "RateSource": "",
+    "ModelKey": "anthropic/claude-opus-5[1m]",
+    "ModelKeySource": "actual"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "2026-08-21-drain-rendering",
+  "repository_url": "git@github.com:glebglazov/pop.git",
+  "parent_commit": "e4b930532cfb6488ed83187fea179f77d32e2015",
+  "reference_range": "e4b930532cfb6488ed83187fea179f77d32e2015..ced6d6f7dde01c8b038472211ca4b116545ce2cc",
+  "gate_commands": [
+    "go build ./...",
+    "go vet ./...",
+    "go test ./..."
+  ],
+  "scope": [
+    "."
+  ],
+  "standard_documents": [
+    "AGENTS.md"
+  ]
+}

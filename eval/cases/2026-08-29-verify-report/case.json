@@ -1,0 +1,17 @@
+{
+  "name": "2026-08-29-verify-report",
+  "repository_url": "git@github.com:glebglazov/pop.git",
+  "parent_commit": "7a4062da156d8c6ab0503a37f00642e39b1769b5",
+  "reference_range": "7a4062da156d8c6ab0503a37f00642e39b1769b5..31cea805b467611730ba06e42a209ee4d1b3acef",
+  "gate_commands": [
+    "go build ./...",
+    "go vet ./...",
+    "go test ./..."
+  ],
+  "scope": [
+    "."
+  ],
+  "standard_documents": [
+    "AGENTS.md"
+  ]
+}
