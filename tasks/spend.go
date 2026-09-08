@@ -230,6 +230,7 @@ type spendSetBreakdownJSON struct {
 	ImplementCacheReadTokens     int64                   `json:"implement_cache_read_tokens"`
 	ImplementCacheWriteTokens    int64                   `json:"implement_cache_write_tokens"`
 	ImplementPartialCostUSD      *float64                `json:"implement_partial_cost_usd,omitempty"`
+	ImplementNotionalCostUSD     *float64                `json:"implement_notional_cost_usd,omitempty"`
 	ImplementRunCount            int                     `json:"implement_run_count"`
 	ImplementTokenBlindRuns      int                     `json:"implement_token_blind_runs"`
 	VerificationInputTokens      int64                   `json:"verification_input_tokens"`
@@ -237,6 +238,7 @@ type spendSetBreakdownJSON struct {
 	VerificationCacheReadTokens  int64                   `json:"verification_cache_read_tokens"`
 	VerificationCacheWriteTokens int64                   `json:"verification_cache_write_tokens"`
 	VerificationPartialCostUSD   *float64                `json:"verification_partial_cost_usd,omitempty"`
+	VerificationNotionalCostUSD  *float64                `json:"verification_notional_cost_usd,omitempty"`
 	VerificationRunCount         int                     `json:"verification_run_count"`
 	VerificationTokenBlindRuns   int                     `json:"verification_token_blind_runs"`
 	RefineInputTokens            int64                   `json:"refine_input_tokens"`
@@ -244,6 +246,7 @@ type spendSetBreakdownJSON struct {
 	RefineCacheReadTokens        int64                   `json:"refine_cache_read_tokens"`
 	RefineCacheWriteTokens       int64                   `json:"refine_cache_write_tokens"`
 	RefinePartialCostUSD         *float64                `json:"refine_partial_cost_usd,omitempty"`
+	RefineNotionalCostUSD        *float64                `json:"refine_notional_cost_usd,omitempty"`
 	RefineRunCount               int                     `json:"refine_run_count"`
 	RefineTokenBlindRuns         int                     `json:"refine_token_blind_runs"`
 	Rows                         []spendBreakdownJSONRow `json:"rows"`
@@ -1442,6 +1445,7 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 		ImplementCacheReadTokens:     result.ImplementTokens.CacheRead,
 		ImplementCacheWriteTokens:    result.ImplementTokens.CacheWrite,
 		ImplementPartialCostUSD:      partialCostUSDPtr(result.ImplementCost),
+		ImplementNotionalCostUSD:     partialCostUSDPtr(result.ImplementNotional),
 		ImplementRunCount:            result.ImplementRunCount,
 		ImplementTokenBlindRuns:      result.ImplementTokenBlindRuns,
 		VerificationInputTokens:      result.VerificationTokens.Input,
@@ -1449,6 +1453,7 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 		VerificationCacheReadTokens:  result.VerificationTokens.CacheRead,
 		VerificationCacheWriteTokens: result.VerificationTokens.CacheWrite,
 		VerificationPartialCostUSD:   partialCostUSDPtr(result.VerificationCost),
+		VerificationNotionalCostUSD:  partialCostUSDPtr(result.VerificationNotional),
 		VerificationRunCount:         result.VerificationRunCount,
 		VerificationTokenBlindRuns:   result.VerificationTokenBlindRuns,
 		RefineInputTokens:            result.RefineTokens.Input,
@@ -1456,6 +1461,7 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 		RefineCacheReadTokens:        result.RefineTokens.CacheRead,
 		RefineCacheWriteTokens:       result.RefineTokens.CacheWrite,
 		RefinePartialCostUSD:         partialCostUSDPtr(result.RefineCost),
+		RefineNotionalCostUSD:        partialCostUSDPtr(result.RefineNotional),
 		RefineRunCount:               result.RefineRunCount,
 		RefineTokenBlindRuns:         result.RefineTokenBlindRuns,
 		Rows:                         make([]spendBreakdownJSONRow, len(result.Rows)),

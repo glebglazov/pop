@@ -86,19 +86,38 @@ files cannot contain these overrides. Unknown top-level keys are refused.
 Keep the Agent preset and model equal across the Bare and Pop arms to compare
 Pop's effect. The shipped Bare arm uses `claude` with `opus`.
 
-## Run a Trial
+## Run the Trial Matrix
 
 ```sh
 go run ./eval run --case <name> --arm bare
 ```
 
-The Acceptance list must have `Status: approved`. The command checks this
-before it creates a clone. It clones the Case repository, checks out the parent
-SHA detached, and makes one captured invocation. The prompt has a fixed
+Repeat `--case`, `--arm`, and `--repeat` to select a Matrix. This is the
+two-Case, two-Arm milestone command:
+
+```sh
+go run ./eval run --case <first-case> --case <second-case> --arm bare --arm pop --repeat 1
+```
+
+With no selection flags, the command runs every approved Case against the Bare
+and Pop arms at repeat 1. A selected Acceptance list must have
+`Status: approved`. The command checks approval before it creates a clone.
+Trials run in repeat-major order: every selected Case and Arm runs for one
+repeat before the next repeat starts. An existing `trial.json` is skipped, so
+the same command resumes a stopped Matrix. An Invalid Trial runs one more time
+in the same result location. A second invalid outcome stays recorded and does
+not stop the rest of the Matrix.
+
+The command grades each Trial after its final attempt. `--grade-timeout 1h`,
+`--graders`, and `--config` set the same Grader inputs as the standalone
+`grade` command.
+
+For a Bare-arm Trial, the command clones the Case repository, checks out the
+parent SHA detached, and makes one captured invocation. The prompt has a fixed
 preamble with the repository URL, completion instruction, no-commit rule, and
 Objective gate commands, followed by the spec without changes.
 
-Use `--repeat 2` for another Trial. An existing repeat is never overwritten.
+Use another `--repeat` flag to select another repeat number.
 `--ceiling 4h` sets the agent's Trial ceiling (four hours by default).
 `--cases`, `--arms`, `--work`, and `--results` change the directory roots.
 Run the Pop arm with `--arm pop`. It uses the shipped `pop` binary on PATH;
@@ -122,7 +141,7 @@ one override: `refine-off.toml`, `verify-off.toml`, `max-tries-1.toml`,
 Do not run these arms until the Bare/Pop result is stable.
 
 Records are written to `eval/results/<case>/<arm>/<NN>/trial.json` and
-`diff.patch`. The record holds the Case, Arm, repeat, requested and actual model,
+`diff.patch`. The record holds the Case, Arm, repeat, attempt count, requested and actual model,
 start and end times, outcome, Captured run ID, spend, notional cost, and work
 directory. Unknown spend figures retain the capture seam's presence flags.
 The patch compares the final tree with the parent, includes new files and
@@ -130,8 +149,8 @@ binary data, and has no Trial path or Arm label added by the harness.
 
 The outcomes are `completed`, `timed_out`, and `invalid`. A quota pause or
 agent crash produces an Invalid Trial; its agent outcome and reason remain in
-the record. Each command runs once. Select an unused repeat to rerun an Invalid
-Trial. Objective gates and grading run through the separate `grade` command.
+the record. The Matrix retries it once. The standalone `grade` command remains
+available to grade a stored Trial again without running its Arm again.
 
 Clones and Captured runs stay under `eval/work/trial-<random>/repository` and
 `capture`. These names do not identify the Arm. A later Grader must receive only
@@ -193,3 +212,20 @@ it does not run the Arm again or change its spend. Previous capture files stay.
 `--config`, `--graders`, `--cases`, `--arms`, `--work`, and `--results` select other
 paths. `--timeout` sets the Grader ceiling (one hour by default). Flags precede
 the three positional arguments.
+
+## Read the Rollup
+
+```sh
+go run ./eval rollup
+go run ./eval rollup --json
+```
+
+The Rollup reads every `trial.json` below `eval/results` and prints one row per
+Case and Arm. Each spend and work-shape cell is `median/spread`; spread is the
+maximum minus the minimum. The cells cover total tokens, notional cost, turns,
+peak input, and wall-clock seconds. The row also shows median Acceptance-list
+ratio and quality score, plus gate-failure, Trial-ceiling, Invalid, and
+ungraded counts. Invalid Trials do not contribute figures. An absent figure is
+`—`; the final column counts token-, rate-, turn-, peak-, and wall-clock-blind
+Trials. `--json` emits these same rows and uses `null` for absent medians and
+spreads. Use `--results` to read another Trial record root.

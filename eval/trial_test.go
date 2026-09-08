@@ -38,7 +38,7 @@ func TestBareTrialCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	manifest := caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"true"}}
+	manifest := caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"false"}}
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -160,8 +160,8 @@ esac
 			if err != nil || len(captures) != 2 {
 				t.Fatalf("capture = %v, %v", captures, err)
 			}
-			if err := run(trialArgs); err == nil {
-				t.Fatal("existing repeat overwritten")
+			if err := run(trialArgs); err != nil {
+				t.Fatalf("resume existing repeat: %v", err)
 			}
 		})
 	}

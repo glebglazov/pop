@@ -30,7 +30,7 @@ func TestPopTrialCommand(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(caseDir, "tasks"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"true"}})
+	raw, _ := json.Marshal(caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"false"}})
 	writeFile(t, filepath.Join(caseDir, caseManifestName), string(raw))
 	writeFile(t, filepath.Join(caseDir, "spec.md"), "Change the file.\n")
 	writeFile(t, filepath.Join(caseDir, acceptanceName), "Status: approved\n\n1. File changes.\n")
@@ -98,7 +98,7 @@ esac
 			}
 			results := filepath.Join(root, "results")
 			err := run([]string{"run", "--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling})
-			if (err != nil) != (status == "CRASH") {
+			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
 			result := filepath.Join(results, "example", "pop", fmt.Sprintf("%02d", i+1))
@@ -125,13 +125,25 @@ esac
 			if !strings.Contains(patch, "+changed") || !strings.Contains(patch, "+new") {
 				t.Fatalf("patch: %s", patch)
 			}
-			clone, err := filepath.EvalSymlinks(filepath.Join(record.WorkDir, "repository"))
-			if err != nil {
-				t.Fatal(err)
-			}
 			var want strings.Builder
-			for _, command := range []string{"register example", "implement example", "status example", "spend example --json"} {
-				fmt.Fprintf(&want, "tasks %s|%s|%s|%s\n", command, clone, filepath.Join(record.WorkDir, "data"), filepath.Join(record.WorkDir, "config"))
+			attempts := 1
+			if status == "CRASH" {
+				attempts = 2
+			}
+			for attempt := 0; attempt < attempts; attempt++ {
+				attemptDir := record.WorkDir
+				if attempt == 0 && attempts == 2 {
+					lines := strings.Split(strings.TrimSpace(readFile(t, log)), "\n")
+					fields := strings.Split(lines[0], "|")
+					attemptDir = filepath.Dir(fields[2])
+				}
+				attemptClone, err := filepath.EvalSymlinks(filepath.Join(attemptDir, "repository"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, command := range []string{"register example", "implement example", "status example", "spend example --json"} {
+					fmt.Fprintf(&want, "tasks %s|%s|%s|%s\n", command, attemptClone, filepath.Join(attemptDir, "data"), filepath.Join(attemptDir, "config"))
+				}
 			}
 			if got := readFile(t, log); got != want.String() {
 				t.Fatalf("commands:\n%s\nwant:\n%s", got, want.String())

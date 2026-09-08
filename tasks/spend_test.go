@@ -836,8 +836,10 @@ func TestRenderSpendSetBreakdownJSON(t *testing.T) {
 		CompletedTasks:         1,
 		TokensPerCompletedTask: &perTask,
 		ImplementTokens:        TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+		ImplementNotional:      PartialCost{Dollars: 1.25, HasCost: true},
 		ImplementRunCount:      1,
 		VerificationTokens:     TokenUsage{Input: 500, Output: 250, HasInput: true, HasOutput: true},
+		VerificationNotional:   PartialCost{Dollars: 0.75, HasCost: true},
 		VerificationRunCount:   1,
 		Rows: []SpendBreakdownRow{{
 			TaskID: "01-a", Title: "A",
@@ -862,6 +864,9 @@ func TestRenderSpendSetBreakdownJSON(t *testing.T) {
 	}
 	if decoded.ImplementInputTokens != 100 || decoded.VerificationInputTokens != 500 {
 		t.Fatalf("scoped totals = implement %d verify %d", decoded.ImplementInputTokens, decoded.VerificationInputTokens)
+	}
+	if decoded.ImplementNotionalCostUSD == nil || *decoded.ImplementNotionalCostUSD != 1.25 || decoded.VerificationNotionalCostUSD == nil || *decoded.VerificationNotionalCostUSD != 0.75 {
+		t.Fatalf("notional totals = implement %v verify %v", decoded.ImplementNotionalCostUSD, decoded.VerificationNotionalCostUSD)
 	}
 	if len(decoded.Rows) != 2 || decoded.Rows[1].TaskID != "verify" {
 		t.Fatalf("rows = %#v", decoded.Rows)
