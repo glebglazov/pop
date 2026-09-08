@@ -335,16 +335,24 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	label := trialLabel(manifest.Name, armName, repeat)
 	cloneDir := filepath.Join(workDir, "repository")
 	opts.progress.line("Trial %s attempt=%d preparation started", label, attempts)
+	stopWaiting := opts.progress.wait(label, "repository preparation", 0)
 	trialErr := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, cloneDir)
+	stopWaiting()
 	var patch []byte
 	if trialErr == nil {
 		opts.progress.line("Trial %s attempt=%d preparation finished", label, attempts)
 		opts.progress.line("Trial %s attempt=%d Arm execution started", label, attempts)
+		armPhase := "Bare-agent invocation"
+		if selected.Kind == "pop" {
+			armPhase = "Pop drain"
+		}
+		stopWaiting = opts.progress.wait(label, armPhase, opts.ceiling)
 		if selected.Kind == "pop" {
 			trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.ceiling, &record)
 		} else {
 			trialErr = runBareTrial(cloneDir, selected, manifest, string(spec), opts.ceiling, &record)
 		}
+		stopWaiting()
 		if trialErr != nil {
 			opts.progress.line("Trial %s attempt=%d Arm execution finished: outcome=%s error=%v", label, attempts, record.Outcome, trialErr)
 		} else {

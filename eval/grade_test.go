@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGradeTrialCommand(t *testing.T) {
@@ -91,8 +92,18 @@ cat "$FAKE_GRADE_REPLY"
 			t.Setenv("FAKE_GRADE_REPLY", replyPath)
 			args := []string{"grade", "--cases", filepath.Dir(caseDir), "--arms", arms, "--graders", graders, "--config", config, "--work", filepath.Join(root, "work"), "--results", results, "example", "hidden-arm-name", "1"}
 			var progress bytes.Buffer
-			if err := runGradeCommandWithProgress(args[1:], evalProgress{out: &progress}, true); err != nil {
+			waits, stopped := []evalWait{}, 0
+			if err := runGradeCommandWithProgress(args[1:], evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)}, true); err != nil {
 				t.Fatal(err)
+			}
+			if stopped != len(waits) {
+				t.Fatalf("waiting reporters: started=%d stopped=%d", len(waits), stopped)
+			}
+			if tc.status == "graded" {
+				want := "grading repository preparation,Objective gate 1/3,Objective gate 2/3,Objective gate 3/3,Grader repository preparation,Grader invocation"
+				if got := strings.Join(waitPhases(waits), ","); got != want || waits[len(waits)-1].ceiling != time.Hour {
+					t.Fatalf("waiting phases = %s, waits = %+v", got, waits)
+				}
 			}
 			var got trialRecord
 			decodeJSONFile(t, filepath.Join(resultDir, "trial.json"), &got)

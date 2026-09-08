@@ -179,7 +179,9 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	clone := filepath.Join(dir, "repository")
 	label := trialLabel(record.Case, record.Arm, record.Repeat)
 	opts.progress.line("Trial %s grading preparation started", label)
+	stopWaiting := opts.progress.wait(label, "grading repository preparation", 0)
 	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, clone); err != nil {
+		stopWaiting()
 		opts.progress.line("Trial %s grading preparation failed: %v", label, err)
 		return err
 	}
@@ -187,11 +189,13 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 		cmd := exec.Command("git", "-C", clone, "apply", "--index", "--binary", "-")
 		cmd.Stdin = strings.NewReader(string(patch))
 		if output, err := cmd.CombinedOutput(); err != nil {
+			stopWaiting()
 			return fmt.Errorf("restore Trial tree: %w: %s", err, output)
 		}
 	}
 	changed, err := exec.Command("git", "-C", clone, "diff", "--cached", "--name-only", "--no-renames", "-z").Output()
 	if err != nil {
+		stopWaiting()
 		return err
 	}
 	for _, file := range strings.Split(string(changed), "\x00") {
@@ -199,13 +203,16 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 			grade.OutsideScope = append(grade.OutsideScope, file)
 		}
 	}
+	stopWaiting()
 	opts.progress.line("Trial %s grading preparation finished", label)
 	failed := false
-	for _, command := range manifest.GateCommands {
+	for i, command := range manifest.GateCommands {
 		opts.progress.line("Trial %s Objective gate started: %s", label, command)
+		stopWaiting = opts.progress.wait(label, fmt.Sprintf("Objective gate %d/%d", i+1, len(manifest.GateCommands)), 0)
 		cmd := exec.Command("sh", "-c", command)
 		cmd.Dir = clone
 		output, err := cmd.CombinedOutput()
+		stopWaiting()
 		gate := gateResult{Command: command, Output: string(output), ExitCode: -1}
 		if cmd.ProcessState != nil {
 			gate.ExitCode = cmd.ProcessState.ExitCode()
@@ -263,9 +270,12 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	}
 	// Gates may change files or HEAD. Give the Grader a separate parent tree.
 	parentTree := filepath.Join(dir, "parent")
+	stopWaiting = opts.progress.wait(label, "Grader repository preparation", 0)
 	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, parentTree); err != nil {
+		stopWaiting()
 		return err
 	}
+	stopWaiting()
 	standards := manifest.StandardDocuments
 	if standards == nil {
 		standards, err = defaultStandardDocuments(parentTree, manifest.ParentCommit)
@@ -285,10 +295,12 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 		}
 	}
 	opts.progress.line("Trial %s Grader execution started", label)
+	stopWaiting = opts.progress.wait(label, "Grader invocation", opts.timeout)
 	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
 		AgentSpec: grader.agentSpec(), Prompt: graderPrompt(string(patch), acceptance, quoted.String(), grade.OutsideScope),
 		RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: filepath.Join(opts.resultDir, "grading"),
 	})
+	stopWaiting()
 	if attempt != nil {
 		grade.Reply = attempt.Output
 		grade.Grader = &capturedRunRecord{Agent: grader.agentSpec(), RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}

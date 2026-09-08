@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBarePromptExactShape(t *testing.T) {
@@ -126,10 +127,20 @@ esac
 			}
 			trialArgs := append(append([]string{}, args...), "--repeat", repeat, "--ceiling", ceiling)
 			var progress bytes.Buffer
-			if err := runTrialCommandWithProgress(trialArgs[1:], evalProgress{out: &progress}); err != nil {
+			waits, stopped := []evalWait{}, 0
+			if err := runTrialCommandWithProgress(trialArgs[1:], evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)}); err != nil {
 				t.Fatal(err)
 			}
+			if stopped != len(waits) {
+				t.Fatalf("waiting reporters: started=%d stopped=%d", len(waits), stopped)
+			}
 			if tc.mode == "success" {
+				if got := strings.Join(waitPhases(waits), ","); got != "repository preparation,Bare-agent invocation,grading repository preparation,Objective gate 1/1" {
+					t.Fatalf("waiting phases = %s", got)
+				}
+				if waits[1].ceiling != time.Minute || waits[0].ceiling != 0 || waits[2].ceiling != 0 || waits[3].ceiling != 0 {
+					t.Fatalf("waiting ceilings = %+v", waits)
+				}
 				assertProgressOrder(t, progress.String(),
 					"Eval Matrix: Trials=1 results=",
 					"Trial 1/1 Case=example Arm=anonymous-arm repeat=1 attempt=1",

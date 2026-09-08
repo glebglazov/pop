@@ -99,11 +99,18 @@ esac
 			}
 			results := filepath.Join(root, "results")
 			var progress bytes.Buffer
-			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling}, evalProgress{out: &progress})
+			waits, stopped := []evalWait{}, 0
+			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling}, evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)})
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
+			if stopped != len(waits) {
+				t.Fatalf("waiting reporters: started=%d stopped=%d", len(waits), stopped)
+			}
 			if status == "DONE" {
+				if !strings.Contains(strings.Join(waitPhases(waits), ","), "repository preparation,Pop drain,grading repository preparation,Objective gate 1/1") {
+					t.Fatalf("waiting phases = %+v", waits)
+				}
 				assertProgressOrder(t, progress.String(), "Arm=pop repeat=1 attempt=1", "preparation started", "Arm execution started", "Arm execution finished: outcome=completed", "patch saving finished:", "Objective gate started: false", "Grader execution skipped:", "finished: outcome=completed grade=gate_failed")
 			}
 			if status == "TIMEOUT" && !strings.Contains(progress.String(), "grading skipped: Trial ceiling reached; zero scores recorded") {

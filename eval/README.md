@@ -149,6 +149,20 @@ Eval Matrix finished: completed=1 timed_out=0 invalid=0 graded=1 gate_failed=0 u
 Read the Rollup: go run ./eval rollup --results /path/to/repository/eval/results
 ```
 
+When an operation stays quiet, the harness writes a bounded line every 30
+seconds. For example:
+
+```text
+Trial Case=example Arm=bare repeat=1 waiting: phase=Bare-agent invocation elapsed=1m0s ceiling=4h0m0s
+Trial Case=example Arm=bare repeat=1 waiting: phase=Objective gate 1/2 elapsed=30s
+```
+
+These lines prove only that the harness is still waiting for the named
+operation. They do not measure agent progress or estimate a completion
+percentage. A line shows a ceiling only when the harness enforces one for that
+operation. The same plain stderr lines appear on a terminal and in redirected
+logs; raw agent transcripts remain in their captured files.
+
 Resume output says whether Eval skips a saved, graded Trial or grades a saved
 patch without another Arm invocation. Invalid Trial retries, Trial ceiling
 results, skipped grading, and failed phases also state their reason here.
