@@ -56,15 +56,24 @@ implementation convention inlined, max tries 3, no turn cap. Human sign-off
 tasks are stripped from the Case's set, so a Pop-arm Trial ends at Done,
 Verify-failed or Failed with Verify still firing on the Done set.
 
-**4. A Case is prepared from a historical set, and the reference code is never
-the standard.** **Case preparation** concatenates the set's task files in
-manifest order into the spec both arms receive — identical words, the Pop arm
-additionally getting them split into tasks, an asymmetry recorded in the
-harness README because planning is not yet a headless captured step. The
-parent commit and **Reference diff** come from the provenance trailers. An
-agent drafts the **Acceptance list** from the task bodies and the reference's
-*behaviour*; the human edits and approves it before any arm runs. The reference
-diff's code is graded against by nothing: correct behaviour and good code are
+**4. A Case is self-contained: a repository URL, a commit SHA and its own
+files.** Nothing about a Case points at this laptop. Its directory under
+`eval/cases/` holds a manifest naming the repository's clone URL, the parent
+commit SHA, the gate commands and the stated scope; the spec both arms
+receive; the approved **Acceptance list**; and the Pop arm's task split — the
+set manifest and task files, sign-off tasks stripped, every status open. A
+Trial clones the URL, checks out the SHA detached, and runs; the harness
+touches no Task storage but its own. **Case preparation** is the one step that
+reads a historical set from the local work store, and it runs once: it
+concatenates the set's task files in manifest order into the spec — identical
+words for both arms, the Pop arm additionally getting them split into tasks,
+an asymmetry recorded in the harness README because planning is not yet a
+headless captured step — derives the parent commit and the **Reference diff**
+from the provenance trailers, records the reference commit range in the
+manifest, and drafts the Acceptance list from the task bodies and the
+reference's *behaviour* for the human to edit and approve before any arm runs.
+A Case may equally be written by hand in the same shape. The reference diff's
+code is graded against by nothing: correct behaviour and good code are
 separate questions, and a reference can have the first without the second.
 
 **5. Objective gates first, then one blind Grader on another model.** The
@@ -92,7 +101,8 @@ once and excluded.
 
 **7. It lives in `eval/` at the repository root and is not a pop command.** A
 Go main run with `go run`, importing the tasks package for the capture seam,
-with cases, arm files, the isolated data directory and results beside it. A
+with cases, arm files, the isolated data directory, per-Trial clones and
+results beside it. A
 subcommand would fix an interface before the eval has taught us what it
 measures. Corpus: four Cases from pop covering a multi-file feature, a bug
 with a reproduction, a refactor on one seam and a docs-or-convention change,
@@ -110,8 +120,11 @@ Cases are prepared, and the human runs the Trials.
   cost and sixty agent hours per arm pair. Wall-clock, not money, is the
   binding constraint, which is why case size is fixed at the middle band.
 - The model may know pop's later state. A Case runs at the parent commit in a
-  detached checkout, which removes later files from reach but not from the
+  fresh detached clone, which removes later files from reach but not from the
   model's training; the second repository is the check on that.
+- A Case is a portable directory, so the corpus can be run from any machine
+  with the two repositories' clone credentials, and a Case survives the local
+  work store being pruned.
 - The Pop arm receives pop's task split for free. Until a headless planning
   step exists and is captured, the eval understates the Pop arm's cost by
   planning and is read with that caveat.

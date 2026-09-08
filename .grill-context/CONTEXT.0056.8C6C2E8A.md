@@ -113,3 +113,11 @@ branch: master (grill: cost-versus-quality eval)
   in a rollup, so an outage can never read as a cheap arm.
   avoid: failed trial, error, retry
   under: Eval
+
+~ Case
+  One unit of eval work, self-contained under the harness: a manifest naming a
+  repository clone URL, a parent commit SHA, gate commands and scope; the spec
+  both arms receive; the approved **Acceptance list**; and the Pop arm's task
+  split. It points at no local folder, so it runs from any machine that can
+  clone the repository.
+  was: One unit of eval work: a spec, an acceptance list written before any arm runs, and a pinned parent commit of a named repository that every arm starts from.
