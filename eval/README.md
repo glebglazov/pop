@@ -101,7 +101,25 @@ Objective gate commands, followed by the spec without changes.
 Use `--repeat 2` for another Trial. An existing repeat is never overwritten.
 `--ceiling 4h` sets the agent's Trial ceiling (four hours by default).
 `--cases`, `--arms`, `--work`, and `--results` change the directory roots.
-Pop arm files can be read, but Pop arm execution is not yet implemented.
+Run the Pop arm with `--arm pop`. It uses the shipped `pop` binary on PATH;
+`--pop /path/to/pop` selects a built binary. It registers the prepared Task set
+without auto-drain, then runs whole-set implement with closed stdin. All Pop
+commands use the Trial's own `data/` and `config/` directories. The config
+pins the Arm agent for Implement, Verify, Refine, and Explore, enables Verify
+and Refine, inlines the implementation convention, sets max tries to 3, and
+removes the Turn cap. Both config layers stay inside the Trial. Explore is
+enabled and requested.
+
+The Pop record adds `set_status` and `set_spend`. `set_spend` retains the complete
+Spend lens JSON, including phase totals and rows; the single-run `spend` and
+`notional` fields apply to the Bare arm. Done, Verify-failed, and Failed are
+completed Trials. A nonterminal stop is invalid. A ceiling expiry is timed out;
+status and spend collection then have a separate one-minute bound.
+
+The following files are declared and **not yet run**. Each is the Pop arm with
+one override: `refine-off.toml`, `verify-off.toml`, `max-tries-1.toml`,
+`convention-off.toml`, `explore-off.toml`, and `model-swap.toml` (Sonnet).
+Do not run these arms until the Bare/Pop result is stable.
 
 Records are written to `eval/results/<case>/<arm>/<NN>/trial.json` and
 `diff.patch`. The record holds the Case, Arm, repeat, requested and actual model,

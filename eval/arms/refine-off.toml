@@ -1,0 +1,21 @@
+kind = "pop"
+agent = "claude"
+model = "opus"
+
+[config.work.implement]
+max_tries = 3
+include_implementation_convention = true
+
+[config.work.verify]
+enabled = true
+
+[config.work.refine]
+enabled = false
+
+[config.work.explore]
+enabled = true
+
+[manifest]
+verify = true
+refine = true
+explore = true

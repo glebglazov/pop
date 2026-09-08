@@ -27,6 +27,8 @@ type trialRecord struct {
 	AgentOutcome string            `json:"agent_outcome,omitempty"`
 	RunID        string            `json:"run_id,omitempty"`
 	WorkDir      string            `json:"work_dir"`
+	SetStatus    string            `json:"set_status,omitempty"`
+	SetSpend     json.RawMessage   `json:"set_spend,omitempty"`
 	Spend        tasks.RunSpend    `json:"spend"`
 	Notional     tasks.PricedSpend `json:"notional"`
 }
@@ -40,6 +42,7 @@ func runTrialCommand(args []string) error {
 	work := flags.String("work", filepath.Join("eval", "work"), "Eval work directory")
 	results := flags.String("results", filepath.Join("eval", "results"), "Trial record directory root")
 	repeat := flags.Int("repeat", 1, "Trial repeat number")
+	pop := flags.String("pop", "pop", "Pop binary path")
 	ceiling := flags.Duration("ceiling", 4*time.Hour, "Trial ceiling")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -64,9 +67,6 @@ func runTrialCommand(args []string) error {
 	selected, err := loadArm(*arms, *arm)
 	if err != nil {
 		return err
-	}
-	if selected.Kind != "bare" {
-		return errors.New("Pop arm execution is not implemented")
 	}
 	spec, err := os.ReadFile(filepath.Join(caseDir, tasks.SpecFileName))
 	if err != nil {
@@ -95,17 +95,21 @@ func runTrialCommand(args []string) error {
 	trialErr := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, cloneDir)
 	var patch []byte
 	if trialErr == nil {
-		attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
-			AgentSpec: selected.agentSpec(), Prompt: barePrompt(manifest, string(spec)), RuntimePath: cloneDir,
-			Timeout: *ceiling, DestinationDir: filepath.Join(workDir, "capture"),
-		})
-		trialErr = captureErr
-		if attempt != nil {
-			record.ActualModel, record.RunID = attempt.ActualModel, attempt.RunID
-			record.Spend, record.Notional = attempt.Spend, attempt.Notional
-			record.AgentOutcome, record.Reason = attempt.Outcome, attempt.Reason
-			if captureErr == nil && (attempt.Outcome == "completed" || attempt.Outcome == "timed_out") {
-				record.Outcome = attempt.Outcome
+		if selected.Kind == "pop" {
+			trialErr = runPopTrial(*pop, caseDir, cloneDir, selected, *ceiling, &record)
+		} else {
+			attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
+				AgentSpec: selected.agentSpec(), Prompt: barePrompt(manifest, string(spec)), RuntimePath: cloneDir,
+				Timeout: *ceiling, DestinationDir: filepath.Join(workDir, "capture"),
+			})
+			trialErr = captureErr
+			if attempt != nil {
+				record.ActualModel, record.RunID = attempt.ActualModel, attempt.RunID
+				record.Spend, record.Notional = attempt.Spend, attempt.Notional
+				record.AgentOutcome, record.Reason = attempt.Outcome, attempt.Reason
+				if captureErr == nil && (attempt.Outcome == "completed" || attempt.Outcome == "timed_out") {
+					record.Outcome = attempt.Outcome
+				}
 			}
 		}
 		var patchErr error
