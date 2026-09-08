@@ -11,6 +11,7 @@ A Case is a portable directory under `eval/cases/<name>/`:
 case.json       repository URL, parent SHA, reference range, gates, scope, standards
 spec.md         identical source words given to both arms
 acceptance.md   Acceptance list, initially not approved
+drafting/       Captured drafting run and its spend record
 tasks/
   index.json    Pop arm Task-set manifest
   *.md          Pop arm AFK task files
@@ -19,6 +20,19 @@ tasks/
 The Case manifest contains no local repository or Task-storage path. A Case can
 also be written by hand in this shape. `acceptance.md` must be reviewed and
 approved before any Trial runs.
+
+Draft the Acceptance list after Case preparation:
+
+```sh
+go run ./eval draft-acceptance <case-name>
+```
+
+The command uses the `claude` Agent preset by default. Use `--agent` to provide
+another preset and model, for example `--agent "claude --model sonnet"`. It
+writes `Status: draft` and a numbered list to `acceptance.md`. Review and edit
+that list, then change its status line to `Status: approved` before a Trial.
+The drafting Captured run and spend record live under the Case's `drafting/`
+directory and do not belong to an Arm.
 
 The manifest is JSON with this shape:
 

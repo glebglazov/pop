@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/tasks"
 )
@@ -132,6 +133,110 @@ func TestPrepareCaseFromHistoricalTaskSet(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDraftAcceptanceWritesBehavioursAndRecordsSpend(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "config", "user.name", "Eval Test")
+	runGit(t, repo, "config", "user.email", "eval@example.test")
+	writeFile(t, filepath.Join(repo, "feature.txt"), "before\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "parent")
+	parent := runGit(t, repo, "rev-parse", "HEAD")
+	writeFile(t, filepath.Join(repo, "feature.txt"), "after\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "reference")
+	reference := runGit(t, repo, "rev-parse", "HEAD")
+
+	caseDir := filepath.Join(t.TempDir(), "sample-case")
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := caseManifest{Name: "sample-case", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + ".." + reference}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(caseDir, caseManifestName), string(manifestData))
+	writeFile(t, filepath.Join(caseDir, tasks.SpecFileName), "The command reports the new state.\n")
+	writeFile(t, filepath.Join(caseDir, acceptanceName), "# Acceptance list\n\nStatus: not approved\n\n## Lifted criteria\n\n- [ ] The new state is reported\n")
+
+	binDir := t.TempDir()
+	promptPath := filepath.Join(t.TempDir(), "prompt.txt")
+	agent := `#!/bin/sh
+for argument in "$@"; do
+  prompt="$argument"
+done
+case "$prompt" in
+  "Read the file "*)
+    prompt_file=${prompt#Read the file }
+    prompt_file=${prompt_file%% in full:*}
+    cp "$prompt_file" "$FAKE_DRAFT_PROMPT"
+    ;;
+  *) printf '%s' "$prompt" > "$FAKE_DRAFT_PROMPT" ;;
+esac
+printf '%s\n' '{"type":"system","subtype":"init","model":"claude-test"}'
+printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":123,"output_tokens":45}}}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"1. The command reports the new state.\n2. Existing output remains available.","usage":{"input_tokens":123,"output_tokens":45}}'
+`
+	writeFile(t, filepath.Join(binDir, "claude"), agent)
+	if err := os.Chmod(filepath.Join(binDir, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_DRAFT_PROMPT", promptPath)
+
+	path, err := draftAcceptance(draftAcceptanceOptions{
+		casePath: caseDir, casesRoot: t.TempDir(), workRoot: filepath.Join(t.TempDir(), "work"),
+		agentSpec: "claude --model claude-test", timeout: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != filepath.Join(caseDir, acceptanceName) {
+		t.Fatalf("Acceptance list path = %q", path)
+	}
+	want := "# Acceptance list\n\nStatus: draft\n\n1. The command reports the new state.\n2. Existing output remains available.\n"
+	if got := readFile(t, path); got != want {
+		t.Fatalf("Acceptance list:\n%s\nwant:\n%s", got, want)
+	}
+	prompt := readFile(t, promptPath)
+	for _, text := range []string{
+		"observable behaviours only", "Never record code shape", "checkable against a diff",
+		"The command reports the new state.", "- [ ] The new state is reported",
+		"diff --git a/feature.txt b/feature.txt", "+after",
+	} {
+		if !strings.Contains(prompt, text) {
+			t.Fatalf("drafting prompt does not contain %q:\n%s", text, prompt)
+		}
+	}
+
+	runs, err := os.ReadDir(filepath.Join(caseDir, draftingDirName, "runs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("Captured run files = %v", runs)
+	}
+	var record draftingRecord
+	decodeJSONFile(t, filepath.Join(caseDir, draftingDirName, draftingRecordName), &record)
+	if record.Agent != "claude --model claude-test" || record.RunID == "" || record.Outcome != "completed" || record.Spend.Tokens.Input != 123 || !record.Spend.Tokens.HasInput {
+		t.Fatalf("drafting record = %+v", record)
+	}
+}
+
+func TestLoadApprovedAcceptanceRefusesDraftAndNamesFile(t *testing.T) {
+	caseDir := t.TempDir()
+	path := filepath.Join(caseDir, acceptanceName)
+	writeFile(t, path, "# Acceptance list\n\nStatus: draft\n\n1. A behaviour.\n")
+	if _, err := loadApprovedAcceptance(caseDir); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "Status: approved") {
+		t.Fatalf("draft approval error = %v", err)
+	}
+	writeFile(t, path, "# Acceptance list\n\nStatus: approved\n\n1. A behaviour.\n")
+	if got, err := loadApprovedAcceptance(caseDir); err != nil || !strings.Contains(got, "1. A behaviour.") {
+		t.Fatalf("approved Acceptance list = %q, %v", got, err)
 	}
 }
 

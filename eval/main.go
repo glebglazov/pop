@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/tasks"
 )
@@ -61,14 +62,37 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("expected a command (available: prepare)")
+		return errors.New("expected a command (available: prepare, draft-acceptance)")
 	}
 	switch args[0] {
 	case "prepare":
 		return runPrepareCommand(args[1:])
+	case "draft-acceptance":
+		return runDraftAcceptanceCommand(args[1:])
 	default:
-		return fmt.Errorf("unknown command %q (available: prepare)", args[0])
+		return fmt.Errorf("unknown command %q (available: prepare, draft-acceptance)", args[0])
 	}
+}
+
+func runDraftAcceptanceCommand(args []string) error {
+	flags := flag.NewFlagSet("draft-acceptance", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	agent := flags.String("agent", tasks.DefaultAgentPreset, "Drafting Agent preset and optional arguments")
+	casesRoot := flags.String("cases", filepath.Join("eval", "cases"), "Case directory root")
+	workRoot := flags.String("work", filepath.Join("eval", "work"), "Temporary Eval work directory")
+	timeout := flags.Duration("timeout", time.Hour, "Drafting Agent ceiling")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("usage: go run ./eval draft-acceptance [flags] <case>")
+	}
+	path, err := draftAcceptance(draftAcceptanceOptions{casePath: flags.Arg(0), casesRoot: *casesRoot, workRoot: *workRoot, agentSpec: *agent, timeout: *timeout})
+	if err != nil {
+		return err
+	}
+	fmt.Println(path)
+	return nil
 }
 
 func runPrepareCommand(args []string) error {

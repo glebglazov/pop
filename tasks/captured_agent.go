@@ -29,6 +29,7 @@ type CapturedAgentOptions struct {
 // Notional follows the Spend lens: agent-reported cost outranks table pricing.
 type CapturedAgentAttempt struct {
 	RunID          string
+	Output         string
 	Outcome        string
 	Reason         string
 	ExitCode       int
@@ -60,13 +61,15 @@ func RunCapturedAgentInvocation(d *Deps, opts CapturedAgentOptions) (*CapturedAg
 	if err != nil {
 		return nil, err
 	}
+	normalized := invocation.NormalizeOutput(raw)
 	result := &CapturedAgentAttempt{
+		Output:   normalized.Output,
 		Outcome:  verifyAttemptOutcome(attempt),
 		Reason:   verifyAttemptReason(attempt),
 		ExitCode: attempt.exitCode,
 	}
 	if !attempt.interrupted && !attempt.timedOut && attempt.runErr == nil {
-		if verdict := invocation.NormalizeOutput(raw).ProceedVerdict; verdict != nil {
+		if verdict := normalized.ProceedVerdict; verdict != nil {
 			v := stampDetectedVerdict(*verdict, invocation.AgentPreset(), invocation.PinnedModel())
 			result.Outcome = streamOutcomeAgentUnusable
 			if _, ok := v.TimeHealing(); ok {
