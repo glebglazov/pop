@@ -125,7 +125,7 @@ agents = ["claude --model opus", "cursor"]
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(newOverrideFixture(t).d, configPath)
 	if err != nil {
 		t.Fatal(err)
 	}

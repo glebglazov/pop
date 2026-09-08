@@ -140,6 +140,7 @@ Trial Case=example Arm=bare repeat=1 attempt=1 Arm execution finished: outcome=c
 Trial Case=example Arm=bare repeat=1 attempt=1 patch saving started
 Trial Case=example Arm=bare repeat=1 attempt=1 patch saving finished: path=/path/to/result/diff.patch
 Trial Case=example Arm=bare repeat=1 grading preparation started
+Trial Case=example Arm=bare repeat=1 grading preparation finished
 Trial Case=example Arm=bare repeat=1 Objective gate started: go test ./...
 Trial Case=example Arm=bare repeat=1 Objective gate finished: passed exit=0 command=go test ./...
 Trial Case=example Arm=bare repeat=1 Grader execution started
