@@ -302,13 +302,13 @@ func (r *implementRun) refreshConfig() {
 	err := r.plan.refresh(r.loadConfig)
 	if err != nil {
 		if !r.configReadFailed {
-			outputFor(r.out).line(ansiYellow, "Configuration re-read failed; keeping the previous configuration: %v", err)
+			outputFor(r.out).line(ansiYellow, "Configuration re-read failed for %s; keeping the previous configuration: %v", config.DefaultConfigPath(), err)
 		}
 		r.configReadFailed = true
 		return
 	}
 	if r.configReadFailed {
-		outputFor(r.out).line(ansiGreen, "Configuration re-read recovered")
+		outputFor(r.out).line(ansiGreen, "Configuration re-read recovered for %s", config.DefaultConfigPath())
 	}
 	r.configReadFailed = false
 }
