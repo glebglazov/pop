@@ -5,6 +5,13 @@ relates: "completes decision 5 of [ADR-0202](0202-config-overrides-are-a-top-ran
 
 # An attended launch surface writes the agent override it renders
 
+> **Amended by [attended session choices](0266-attended-agent-choices-end-with-the-session-and-never-fall-back.md):**
+> Tab choices now last only for the current interactive run and take precedence
+> over its attended agent flag. Dashboard alt+a is removed. Attended launches
+> select one entry and never fall back. The earlier persistence rules below
+> record the previous behaviour.
+
+
 ## Context
 
 ADR-0202 deleted a session-lived attended-agent picker and diagnosed the failure

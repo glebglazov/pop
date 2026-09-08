@@ -5,6 +5,9 @@ relates: "supersedes decision 8 of [ADR-0196](0196-one-agent-override-picker-and
 
 # Config overrides are a top-ranked pop-written layer, edited by one component
 
+> **Amended by [attended session choices](0266-attended-agent-choices-end-with-the-session-and-never-fall-back.md):** Tab choices for attended launches take precedence over the invocation flag and end with that interactive run.
+
+
 ## Context
 
 ADR-0196 gave pop an **Agent override**: `alt+a` opened a two-level numeric

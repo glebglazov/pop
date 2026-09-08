@@ -1,0 +1,19 @@
+---
+fragment: 2D698B1A
+generation: 0054
+branch: 2026-09-07-assist-pane-slots
+---
+
++ Attended session choice
+  The whole Agent entry a human selects with Tab for one interactive run. It takes precedence over the attended agent flag, ends when that run ends, and changes neither saved config nor another session.
+  under: Task execution
+
+~ Agent override
+  A persisted replacement of one Work agent group's ordered agents list in the Config override layer, edited through the Config dashboard. An explicit agent flag takes precedence for its invocation; for attended launches, an Attended session choice takes precedence over both. Removing an override restores the source list.
+  was: A persisted replacement of one **Work agent group**'s whole ordered `agents` list, written to the **Config override layer**. It is the list, not a promotion of one entry: the ordering a human leaves behind the head line *is* the tail **Agent fallback** walks, so there is no separate pin-versus-promote question. Two writers reach it, and they differ in reach, not in what they write. The **Config dashboard** is the general one — any exposed key, the whole value as TOML text. The attended group has a second, narrow one: a chooser over the attended list, opened from the very surface that renders the entry about to run (**Attended entry render**), which moves the picked **Agent entry** to the head and preserves the tail's relative order, so it states exactly the list an editor session would have typed. It edits no other key and invents no value of its own, and its write passes the same schema gate every writer passes, which is why admitting it leaves ADR-0202's one-editor rule standing. The pick therefore has no lifetime of its own — it is visible, and removable with `ctrl+x`, exactly where an override typed by hand is, which is what separates it from the session-lived promotion ADR-0202 decision 5 deleted and did not restore. Removing the override restores the source list, which for `verify` and `routine` means their fallthrough to `implement`'s list — deliberately different from an override set to an empty array, which disables that fallthrough. Repeated `--agent` flags still beat it for one command.
+
+~ Attended entry render
+  The agent and model shown before an attended launch, resolved from its Attended session choice, attended agent flag, or configured default in that order. Gate rows offer Tab where at least two valid entries can be chosen; dashboard rows display the entry but offer no agent chooser.
+  was: The visibility discipline pop keeps wherever the choice of attended agent is about to be made: it names the **Agent entry** in force. Four surfaces carry it — the shared one-line render on a gate menu's assist row, every attended verb's action-menu row on a dashboard, the title of the pane that verb opens, and the Work dashboard's persistent subheader — and all four resolve the entry through the merged config, so an override written anywhere is what they report (ADR-0196 decision 9, kept by ADR-0202 decision 5, which deleted the session-lived `alt+a` picker this discipline was built beside). Where the choice can still be made, the render also names the key that makes it: a gate menu's assist row says `tab` and a dashboard's attended action row says `alt+a`, both only while the attended list holds a second usable entry, so a surface that says what will run says how to change it rather than leaving the **Agent override** reachable nowhere (ADR-0264). The subheader keeps naming the Config dashboard's key instead, being the one surface that renders no launch. An entry whose command names no model renders as the entry alone — width on an inline surface costs more than the words are worth, and the agent catalog's own model column still says the agent decides.
+
+- Attended launch-time skip

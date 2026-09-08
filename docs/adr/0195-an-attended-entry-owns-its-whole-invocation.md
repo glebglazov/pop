@@ -5,6 +5,9 @@ relates: "supersedes [ADR-0187](0187-attended-agent-arguments-are-per-preset-def
 
 # An attended entry owns its whole invocation
 
+> **Amended by [attended session choices](0266-attended-agent-choices-end-with-the-session-and-never-fall-back.md):** Attended launches no longer skip unavailable entries or try another agent. They launch the selected entry or report the failure.
+
+
 ## Context
 
 ADR-0187 fixed a real accident — a `--model` tuned for unattended drains was
