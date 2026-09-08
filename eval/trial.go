@@ -16,6 +16,14 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+// The three outcomes a Trial can end in. A Rollup counts on them, a Grader
+// gates on them, and both arms have to reach one of them.
+const (
+	outcomeCompleted = "completed"
+	outcomeTimedOut  = "timed_out"
+	outcomeInvalid   = "invalid"
+)
+
 type trialRecord struct {
 	Grade        *gradeRecord      `json:"grade,omitempty"`
 	Case         string            `json:"case"`
@@ -45,12 +53,12 @@ func runTrialCommand(args []string) error {
 	flags.Var(&caseNames, "case", "Case name; repeat to select more than one")
 	flags.Var(&armNames, "arm", "Arm file name; repeat to select more than one")
 	flags.Var(&repeats, "repeat", "Trial repeat number; repeat to select more than one")
-	cases := flags.String("cases", filepath.Join("eval", "cases"), "Case directory root")
-	arms := flags.String("arms", filepath.Join("eval", "arms"), "Arm directory root")
-	graders := flags.String("graders", filepath.Join("eval", "graders"), "Grader arm directory root")
-	configPath := flags.String("config", filepath.Join("eval", "config.toml"), "Harness config")
-	work := flags.String("work", filepath.Join("eval", "work"), "Eval work directory")
-	results := flags.String("results", filepath.Join("eval", "results"), "Trial record directory root")
+	cases := flags.String("cases", defaultCasesRoot, "Case directory root")
+	arms := flags.String("arms", defaultArmsRoot, "Arm directory root")
+	graders := flags.String("graders", defaultGradersRoot, "Grader arm directory root")
+	configPath := flags.String("config", defaultConfigPath, "Harness config")
+	work := flags.String("work", defaultWorkRoot, "Eval work directory")
+	results := flags.String("results", defaultResultsRoot, "Trial record directory root")
 	pop := flags.String("pop", "pop", "Pop binary path")
 	ceiling := flags.Duration("ceiling", 4*time.Hour, "Trial ceiling")
 	gradeTimeout := flags.Duration("grade-timeout", time.Hour, "Grader ceiling")
@@ -96,7 +104,7 @@ func runTrialCommand(args []string) error {
 		})
 }
 
-func runMatrix(cases, arms []string, repeats []int, results string, runTrial func(string, string, int) (string, error), gradeTrial func(string, string, int) error) error {
+func runMatrix(cases, arms []string, repeats []int, results string, runTrial func(string, string, int) (string, error), gradeOneTrial func(string, string, int) error) error {
 	for _, repeat := range repeats {
 		for _, name := range cases {
 			for _, arm := range arms {
@@ -107,19 +115,19 @@ func runMatrix(cases, arms []string, repeats []int, results string, runTrial fun
 					return err
 				}
 				outcome := ""
-				if !exists || (existing.Outcome == "invalid" && existing.Attempts < 2) {
+				if !exists || (existing.Outcome == outcomeInvalid && existing.Attempts < 2) {
 					outcome, err = runTrial(name, arm, repeat)
-					if outcome == "invalid" {
+					if outcome == outcomeInvalid {
 						outcome, err = runTrial(name, arm, repeat)
 					}
-					if err != nil && outcome != "invalid" {
+					if err != nil && outcome != outcomeInvalid {
 						return err
 					}
 				} else if existing.Grade != nil {
 					fmt.Printf("skip %s\n", resultDir)
 					continue
 				}
-				if err := gradeTrial(name, arm, repeat); err != nil {
+				if err := gradeOneTrial(name, arm, repeat); err != nil {
 					return err
 				}
 			}
@@ -203,7 +211,7 @@ func selectCases(root string, selected []string) ([]string, error) {
 	}
 	var approved []string
 	for _, entry := range entries {
-		if !entry.IsDir() || !caseNamePattern.MatchString(entry.Name()) {
+		if !entry.IsDir() || !namePattern.MatchString(entry.Name()) {
 			continue
 		}
 		caseDir := filepath.Join(root, entry.Name())
@@ -235,7 +243,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	if err != nil {
 		return "", err
 	}
-	if !caseNamePattern.MatchString(manifest.Name) || manifest.Name != name {
+	if !namePattern.MatchString(manifest.Name) || manifest.Name != name {
 		return "", fmt.Errorf("invalid Case name %q", manifest.Name)
 	}
 	if _, err := loadApprovedAcceptance(caseDir); err != nil {
@@ -270,7 +278,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	} else if exists {
 		attempts = previous.Attempts + 1
 	}
-	record := trialRecord{Case: manifest.Name, Arm: armName, Repeat: repeat, Attempts: attempts, Model: selected.Model, WorkDir: workDir, StartedAt: time.Now().UTC(), Outcome: "invalid"}
+	record := trialRecord{Case: manifest.Name, Arm: armName, Repeat: repeat, Attempts: attempts, Model: selected.Model, WorkDir: workDir, StartedAt: time.Now().UTC(), Outcome: outcomeInvalid}
 	cloneDir := filepath.Join(workDir, "repository")
 	trialErr := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, cloneDir)
 	var patch []byte
@@ -278,19 +286,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 		if selected.Kind == "pop" {
 			trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.ceiling, &record)
 		} else {
-			attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
-				AgentSpec: selected.agentSpec(), Prompt: barePrompt(manifest, string(spec)), RuntimePath: cloneDir,
-				Timeout: opts.ceiling, DestinationDir: filepath.Join(workDir, "capture"),
-			})
-			trialErr = captureErr
-			if attempt != nil {
-				record.ActualModel, record.RunID = attempt.ActualModel, attempt.RunID
-				record.Spend, record.Notional = attempt.Spend, attempt.Notional
-				record.AgentOutcome, record.Reason = attempt.Outcome, attempt.Reason
-				if captureErr == nil && (attempt.Outcome == "completed" || attempt.Outcome == "timed_out") {
-					record.Outcome = attempt.Outcome
-				}
-			}
+			trialErr = runBareTrial(cloneDir, selected, manifest, string(spec), opts.ceiling, &record)
 		}
 		var patchErr error
 		patch, patchErr = trialPatch(cloneDir, manifest.ParentCommit)
@@ -298,7 +294,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	}
 	record.EndedAt = time.Now().UTC()
 	if trialErr != nil {
-		record.Outcome, record.Reason = "invalid", trialErr.Error()
+		record.Outcome, record.Reason = outcomeInvalid, trialErr.Error()
 	}
 	if err := tasks.WriteAtomic(filepath.Join(resultDir, "diff.patch"), patch, 0o644); err != nil {
 		return "", fmt.Errorf("write Trial patch: %w", err)
@@ -312,6 +308,28 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	}
 	fmt.Println(resultDir)
 	return record.Outcome, trialErr
+}
+
+// runBareTrial gives the Case spec to one captured invocation and reads the
+// Trial outcome out of it. Only an agent that finished or hit the ceiling has
+// produced a Trial worth grading; a crash or a quota pause leaves the record
+// Invalid. The capture seam spells those two outcomes the way a Trial does,
+// which is what lets the agent's word carry straight into the record.
+func runBareTrial(clone string, arm armFile, manifest caseManifest, spec string, ceiling time.Duration, record *trialRecord) error {
+	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
+		AgentSpec: arm.agentSpec(), Prompt: barePrompt(manifest, spec), RuntimePath: clone,
+		Timeout: ceiling, DestinationDir: filepath.Join(record.WorkDir, "capture"),
+	})
+	if attempt == nil {
+		return captureErr
+	}
+	record.ActualModel, record.RunID = attempt.ActualModel, attempt.RunID
+	record.Spend, record.Notional = attempt.Spend, attempt.Notional
+	record.AgentOutcome, record.Reason = attempt.Outcome, attempt.Reason
+	if captureErr == nil && (attempt.Outcome == "completed" || attempt.Outcome == "timed_out") {
+		record.Outcome = attempt.Outcome
+	}
+	return captureErr
 }
 
 func barePrompt(manifest caseManifest, spec string) string {

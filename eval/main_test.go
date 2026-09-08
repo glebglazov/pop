@@ -220,7 +220,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"1. The command rep
 	if len(runs) != 2 {
 		t.Fatalf("Captured run files = %v", runs)
 	}
-	var record draftingRecord
+	var record capturedRunRecord
 	decodeJSONFile(t, filepath.Join(caseDir, draftingDirName, draftingRecordName), &record)
 	if record.Agent != "claude --model claude-test" || record.RunID == "" || record.Outcome != "completed" || record.Spend.Tokens.Input != 123 || !record.Spend.Tokens.HasInput {
 		t.Fatalf("drafting record = %+v", record)

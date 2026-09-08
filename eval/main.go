@@ -20,7 +20,20 @@ const (
 	acceptanceName   = "acceptance.md"
 )
 
-var caseNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+// The harness roots every command reads and writes under. They are defaults
+// rather than fixed paths so a caller can point a whole run at another tree.
+var (
+	defaultCasesRoot   = filepath.Join("eval", "cases")
+	defaultArmsRoot    = filepath.Join("eval", "arms")
+	defaultGradersRoot = filepath.Join("eval", "graders")
+	defaultConfigPath  = filepath.Join("eval", "config.toml")
+	defaultWorkRoot    = filepath.Join("eval", "work")
+	defaultResultsRoot = filepath.Join("eval", "results")
+)
+
+// A Case, an Arm and a Grader are each named by a directory entry, so one shape
+// governs all three.
+var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type caseManifest struct {
 	Name              string   `json:"name"`
@@ -84,8 +97,8 @@ func runDraftAcceptanceCommand(args []string) error {
 	flags := flag.NewFlagSet("draft-acceptance", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	agent := flags.String("agent", tasks.DefaultAgentPreset, "Drafting Agent preset and optional arguments")
-	casesRoot := flags.String("cases", filepath.Join("eval", "cases"), "Case directory root")
-	workRoot := flags.String("work", filepath.Join("eval", "work"), "Temporary Eval work directory")
+	casesRoot := flags.String("cases", defaultCasesRoot, "Case directory root")
+	workRoot := flags.String("work", defaultWorkRoot, "Temporary Eval work directory")
 	timeout := flags.Duration("timeout", time.Hour, "Drafting Agent ceiling")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -106,7 +119,7 @@ func runPrepareCommand(args []string) error {
 	flags.SetOutput(os.Stderr)
 	var gates, scope, standards stringList
 	name := flags.String("name", "", "Case name (defaults to the Task-set identifier)")
-	output := flags.String("output", filepath.Join("eval", "cases"), "Case directory root")
+	output := flags.String("output", defaultCasesRoot, "Case directory root")
 	flags.Var(&gates, "gate", "Objective gate command; repeat for more than one")
 	flags.Var(&scope, "scope", "Allowed repository path; repeat for more than one")
 	flags.Var(&standards, "standard", "Repository standard document; repeat for more than one")
@@ -141,7 +154,7 @@ func prepareCase(opts prepareOptions) (string, error) {
 	if opts.name == "" {
 		opts.name = opts.setID
 	}
-	if !caseNamePattern.MatchString(opts.name) {
+	if !namePattern.MatchString(opts.name) {
 		return "", fmt.Errorf("invalid Case name %q", opts.name)
 	}
 
@@ -205,10 +218,11 @@ func prepareCase(opts prepareOptions) (string, error) {
 	}
 	manifestData = append(manifestData, '\n')
 
-	cleanManifest, taskFiles, spec, acceptance, err := prepareTaskSet(setManifest, setDir)
+	prepared, err := prepareTaskSet(setManifest, setDir)
 	if err != nil {
 		return "", err
 	}
+	prepared.manifest = manifestData
 
 	if err := os.MkdirAll(opts.outputRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create Case root: %w", err)
@@ -224,7 +238,7 @@ func prepareCase(opts prepareOptions) (string, error) {
 		return "", fmt.Errorf("create Case staging directory: %w", err)
 	}
 	defer os.RemoveAll(staging)
-	if err := writeCase(staging, manifestData, cleanManifest, taskFiles, spec, acceptance); err != nil {
+	if err := prepared.write(staging); err != nil {
 		return "", err
 	}
 	if err := os.Rename(staging, destination); err != nil {
@@ -312,7 +326,18 @@ func defaultStandardDocuments(repoPath, parent string) ([]string, error) {
 	return found, nil
 }
 
-func prepareTaskSet(manifest *tasks.Manifest, setDir string) ([]byte, map[string][]byte, []byte, []byte, error) {
+// preparedCase is the file set a Case directory is written from: the Case
+// manifest, the stripped Task-set manifest, the AFK task bodies keyed by their
+// file name, and the two documents lifted out of those bodies.
+type preparedCase struct {
+	manifest     []byte
+	taskManifest []byte
+	taskFiles    map[string][]byte
+	spec         []byte
+	acceptance   []byte
+}
+
+func prepareTaskSet(manifest *tasks.Manifest, setDir string) (preparedCase, error) {
 	stripped := make(map[string]bool)
 	for _, task := range manifest.Tasks {
 		if task.Type == "HITL" {
@@ -329,7 +354,7 @@ func prepareTaskSet(manifest *tasks.Manifest, setDir string) ([]byte, map[string
 		}
 		body, err := os.ReadFile(filepath.Join(setDir, task.File))
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("read task %q: %w", task.ID, err)
+			return preparedCase{}, fmt.Errorf("read task %q: %w", task.ID, err)
 		}
 		taskFiles[task.File] = body
 		specParts = append(specParts, strings.TrimRight(string(body), "\n"))
@@ -349,16 +374,16 @@ func prepareTaskSet(manifest *tasks.Manifest, setDir string) ([]byte, map[string
 		cleanTasks = append(cleanTasks, task)
 	}
 	if len(cleanTasks) == 0 {
-		return nil, nil, nil, nil, errors.New("Task set has no AFK tasks")
+		return preparedCase{}, errors.New("Task set has no AFK tasks")
 	}
 
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(manifest.Raw, &raw); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("decode Task-set manifest: %w", err)
+		return preparedCase{}, fmt.Errorf("decode Task-set manifest: %w", err)
 	}
 	tasksData, err := json.Marshal(cleanTasks)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("encode stripped tasks: %w", err)
+		return preparedCase{}, fmt.Errorf("encode stripped tasks: %w", err)
 	}
 	raw["tasks"] = tasksData
 	for _, key := range []string{"base_commit", "human_completed", "worktree", "auto_drain", "source_map"} {
@@ -366,13 +391,16 @@ func prepareTaskSet(manifest *tasks.Manifest, setDir string) ([]byte, map[string
 	}
 	cleanManifest, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("encode stripped Task-set manifest: %w", err)
+		return preparedCase{}, fmt.Errorf("encode stripped Task-set manifest: %w", err)
 	}
 	cleanManifest = append(cleanManifest, '\n')
 
-	spec := []byte(strings.Join(specParts, "\n\n") + "\n")
-	acceptance := []byte("# Acceptance list\n\nStatus: not approved\n\n## Lifted criteria\n\n" + strings.Join(criteria, "\n") + "\n")
-	return cleanManifest, taskFiles, spec, acceptance, nil
+	return preparedCase{
+		taskManifest: cleanManifest,
+		taskFiles:    taskFiles,
+		spec:         []byte(strings.Join(specParts, "\n\n") + "\n"),
+		acceptance:   []byte("# Acceptance list\n\nStatus: not approved\n\n## Lifted criteria\n\n" + strings.Join(criteria, "\n") + "\n"),
+	}, nil
 }
 
 func acceptanceCheckboxes(body []byte) []string {
@@ -395,18 +423,19 @@ func acceptanceCheckboxes(body []byte) []string {
 	return result
 }
 
-func writeCase(dir string, manifest, taskManifest []byte, taskFiles map[string][]byte, spec, acceptance []byte) error {
+// write lays the Case out in the directory shape eval/README.md documents.
+func (c preparedCase) write(dir string) error {
 	taskDir := filepath.Join(dir, "tasks")
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		return fmt.Errorf("create Case tasks directory: %w", err)
 	}
 	files := map[string][]byte{
-		filepath.Join(dir, caseManifestName):           manifest,
-		filepath.Join(dir, tasks.SpecFileName):         spec,
-		filepath.Join(dir, acceptanceName):             acceptance,
-		filepath.Join(taskDir, tasks.ManifestFileName): taskManifest,
+		filepath.Join(dir, caseManifestName):           c.manifest,
+		filepath.Join(dir, tasks.SpecFileName):         c.spec,
+		filepath.Join(dir, acceptanceName):             c.acceptance,
+		filepath.Join(taskDir, tasks.ManifestFileName): c.taskManifest,
 	}
-	for name, data := range taskFiles {
+	for name, data := range c.taskFiles {
 		files[filepath.Join(taskDir, name)] = data
 	}
 	for path, data := range files {

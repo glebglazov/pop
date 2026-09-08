@@ -38,28 +38,28 @@ type gradeScores struct {
 }
 
 type gradeRecord struct {
-	Status       string          `json:"status"`
-	Reason       string          `json:"reason,omitempty"`
-	Gates        []gateResult    `json:"gates"`
-	OutsideScope []string        `json:"outside_scope"`
-	Scores       *gradeScores    `json:"scores,omitempty"`
-	Grader       *draftingRecord `json:"grader,omitempty"`
-	Reply        string          `json:"reply"`
+	Status       string             `json:"status"`
+	Reason       string             `json:"reason,omitempty"`
+	Gates        []gateResult       `json:"gates"`
+	OutsideScope []string           `json:"outside_scope"`
+	Scores       *gradeScores       `json:"scores,omitempty"`
+	Grader       *capturedRunRecord `json:"grader,omitempty"`
+	Reply        string             `json:"reply"`
 }
 
 func runGradeCommand(args []string) error {
 	flags := flag.NewFlagSet("grade", flag.ContinueOnError)
-	cases := flags.String("cases", "eval/cases", "Case directory root")
-	arms := flags.String("arms", "eval/arms", "Arm directory root")
-	graders := flags.String("graders", "eval/graders", "Grader arm directory root")
-	configPath := flags.String("config", "eval/config.toml", "Harness config")
-	work := flags.String("work", "eval/work", "Eval work directory")
-	results := flags.String("results", "eval/results", "Trial record directory root")
+	cases := flags.String("cases", defaultCasesRoot, "Case directory root")
+	arms := flags.String("arms", defaultArmsRoot, "Arm directory root")
+	graders := flags.String("graders", defaultGradersRoot, "Grader arm directory root")
+	configPath := flags.String("config", defaultConfigPath, "Harness config")
+	work := flags.String("work", defaultWorkRoot, "Eval work directory")
+	results := flags.String("results", defaultResultsRoot, "Trial record directory root")
 	timeout := flags.Duration("timeout", time.Hour, "Grader ceiling")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 3 || !caseNamePattern.MatchString(flags.Arg(1)) || *timeout <= 0 {
+	if flags.NArg() != 3 || !namePattern.MatchString(flags.Arg(1)) || *timeout <= 0 {
 		return errors.New("usage: go run ./eval grade [flags] <case> <arm> <repeat>")
 	}
 	repeat, err := strconv.Atoi(flags.Arg(2))
@@ -74,20 +74,20 @@ func runGradeCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !caseNamePattern.MatchString(manifest.Name) {
+	if !namePattern.MatchString(manifest.Name) {
 		return errors.New("invalid Case name")
 	}
 	acceptance, err := loadApprovedAcceptance(caseDir)
 	if err != nil {
 		return err
 	}
-	count := 0
+	behaviourCount := 0
 	for _, line := range strings.Split(acceptance, "\n") {
 		if numberedBehaviour.MatchString(line) {
-			count++
+			behaviourCount++
 		}
 	}
-	if count == 0 {
+	if behaviourCount == 0 {
 		return errors.New("Acceptance list has no numbered behaviours")
 	}
 	resultDir := filepath.Join(*results, manifest.Name, flags.Arg(1), fmt.Sprintf("%02d", repeat))
@@ -105,7 +105,7 @@ func runGradeCommand(args []string) error {
 	}
 	grade := &gradeRecord{Status: "ungraded", Gates: []gateResult{}, OutsideScope: []string{}}
 	record.Grade = grade
-	gradeErr := gradeTrial(manifest, acceptance, count, &record, gradeOptions{
+	gradeErr := gradeOneTrial(manifest, acceptance, behaviourCount, &record, gradeOptions{
 		work: *work, configPath: *configPath, graders: *graders, arms: *arms,
 		timeout: *timeout, resultDir: resultDir,
 	})
@@ -128,19 +128,19 @@ type gradeOptions struct {
 	timeout                                    time.Duration
 }
 
-func gradeTrial(manifest caseManifest, acceptance string, count int, record *trialRecord, opts gradeOptions) error {
+func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int, record *trialRecord, opts gradeOptions) error {
 	grade := record.Grade
 
-	if record.Outcome == "invalid" {
+	if record.Outcome == outcomeInvalid {
 		grade.Reason = "Invalid Trial is excluded"
 		return nil
 	}
-	if record.Outcome == "timed_out" {
+	if record.Outcome == outcomeTimedOut {
 		grade.Status = "timed_out"
 		grade.Scores = &gradeScores{}
 		return nil
 	}
-	if record.Outcome != "completed" {
+	if record.Outcome != outcomeCompleted {
 		return fmt.Errorf("unknown Trial outcome %q", record.Outcome)
 	}
 	patch, err := os.ReadFile(filepath.Join(opts.resultDir, "diff.patch"))
@@ -234,20 +234,20 @@ func gradeTrial(manifest caseManifest, acceptance string, count int, record *tri
 		}
 	}
 	// Gates may change files or HEAD. Give the Grader a separate parent tree.
-	parent := filepath.Join(dir, "parent")
-	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, parent); err != nil {
+	parentTree := filepath.Join(dir, "parent")
+	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, parentTree); err != nil {
 		return err
 	}
 	standards := manifest.StandardDocuments
 	if standards == nil {
-		standards, err = defaultStandardDocuments(parent, manifest.ParentCommit)
+		standards, err = defaultStandardDocuments(parentTree, manifest.ParentCommit)
 		if err != nil {
 			return err
 		}
 	}
 	var quoted strings.Builder
 	for _, file := range standards {
-		body, err := git(parent, "show", manifest.ParentCommit+":"+file)
+		body, err := git(parentTree, "show", manifest.ParentCommit+":"+file)
 		if err != nil {
 			return fmt.Errorf("read standard %s: %w", file, err)
 		}
@@ -258,11 +258,11 @@ func gradeTrial(manifest caseManifest, acceptance string, count int, record *tri
 	}
 	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
 		AgentSpec: grader.agentSpec(), Prompt: graderPrompt(string(patch), acceptance, quoted.String(), grade.OutsideScope),
-		RuntimePath: parent, Timeout: opts.timeout, DestinationDir: filepath.Join(opts.resultDir, "grading"),
+		RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: filepath.Join(opts.resultDir, "grading"),
 	})
 	if attempt != nil {
 		grade.Reply = attempt.Output
-		grade.Grader = &draftingRecord{Agent: grader.agentSpec(), RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}
+		grade.Grader = &capturedRunRecord{Agent: grader.agentSpec(), RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}
 	}
 	if captureErr != nil {
 		return captureErr
@@ -271,7 +271,7 @@ func gradeTrial(manifest caseManifest, acceptance string, count int, record *tri
 		grade.Reason = "Grader outcome: " + attempt.Outcome
 		return nil
 	}
-	scores, err := parseGraderReply(attempt.Output, count)
+	scores, err := parseGraderReply(attempt.Output, behaviourCount)
 	if err != nil {
 		grade.Reason = err.Error()
 		return nil
@@ -309,14 +309,14 @@ Files outside scope are a flag for judgment, not an automatic failure.
 ` + fmt.Sprintf("Files outside stated scope: %q", outside) + "\n\n## Acceptance list\n\n" + acceptance + "\n\n## Repository standards (quoted from parent)\n" + standards + "\n\n## Trial diff\n\n" + diff
 }
 
-func parseGraderReply(reply string, count int) (*gradeScores, error) {
+func parseGraderReply(reply string, behaviourCount int) (*gradeScores, error) {
 	lines := strings.Split(strings.TrimSpace(reply), "\n")
-	if len(lines) != count+1 {
+	if len(lines) != behaviourCount+1 {
 		return nil, errors.New("Grader reply has the wrong number of lines")
 	}
 	scores := &gradeScores{}
 	met := 0
-	for i, line := range lines[:count] {
+	for i, line := range lines[:behaviourCount] {
 		label, reason, ok := strings.Cut(line, ":")
 		prefix := fmt.Sprintf("ITEM %d ", i+1)
 		verdict := strings.TrimPrefix(label, prefix)
@@ -328,11 +328,11 @@ func parseGraderReply(reply string, count int) (*gradeScores, error) {
 			met++
 		}
 	}
-	label, rationale, ok := strings.Cut(lines[count], ":")
+	label, rationale, ok := strings.Cut(lines[behaviourCount], ":")
 	quality, err := strconv.Atoi(strings.TrimPrefix(label, "QUALITY "))
 	if !ok || !strings.HasPrefix(label, "QUALITY ") || err != nil || quality < 1 || quality > 5 || strings.TrimSpace(rationale) == "" {
 		return nil, errors.New("invalid Grader quality score")
 	}
-	scores.Quality, scores.Rationale, scores.ListRatio = quality, strings.TrimSpace(rationale), float64(met)/float64(count)
+	scores.Quality, scores.Rationale, scores.ListRatio = quality, strings.TrimSpace(rationale), float64(met)/float64(behaviourCount)
 	return scores, nil
 }

@@ -110,11 +110,11 @@ func runPopTrial(binary, caseDir, clone string, arm armFile, ceiling time.Durati
 		}
 	}
 	if timedOut {
-		record.Outcome, record.Reason = "timed_out", "Trial ceiling reached"
+		record.Outcome, record.Reason = outcomeTimedOut, "Trial ceiling reached"
 	} else {
 		switch record.SetStatus {
 		case string(tasks.StatusDone), string(tasks.StatusFailed), string(tasks.StatusVerifyFailed):
-			record.Outcome = "completed"
+			record.Outcome = outcomeCompleted
 		default:
 			if implementErr == nil {
 				implementErr = fmt.Errorf("Pop stopped at nonterminal status %q", record.SetStatus)

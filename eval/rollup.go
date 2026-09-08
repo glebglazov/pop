@@ -78,7 +78,7 @@ type popSpendJSON struct {
 func runRollupCommand(args []string) error {
 	flags := flag.NewFlagSet("rollup", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	results := flags.String("results", filepath.Join("eval", "results"), "Trial record directory root")
+	results := flags.String("results", defaultResultsRoot, "Trial record directory root")
 	jsonOutput := flags.Bool("json", false, "Emit the Rollup as JSON")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -153,10 +153,10 @@ func loadEvalRollup(root string) (evalRollup, error) {
 
 func (a *rollupAccumulator) add(record trialRecord) error {
 	a.row.Trials++
-	if record.Outcome == "invalid" {
+	if record.Outcome == outcomeInvalid {
 		a.row.Invalid++
 	}
-	if record.Outcome == "timed_out" {
+	if record.Outcome == outcomeTimedOut {
 		a.row.Timeouts++
 	}
 	if record.Grade == nil || record.Grade.Status == "ungraded" {
@@ -165,7 +165,7 @@ func (a *rollupAccumulator) add(record trialRecord) error {
 	if record.Grade != nil && record.Grade.Status == "gate_failed" {
 		a.row.GateFailures++
 	}
-	if record.Outcome == "invalid" {
+	if record.Outcome == outcomeInvalid {
 		return nil
 	}
 	a.row.Counted++

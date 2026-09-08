@@ -20,7 +20,7 @@ type armFile struct {
 
 func loadArm(root, name string) (armFile, error) {
 	var arm armFile
-	if !caseNamePattern.MatchString(name) {
+	if !namePattern.MatchString(name) {
 		return arm, fmt.Errorf("invalid Arm name %q", name)
 	}
 	metadata, err := toml.DecodeFile(filepath.Join(root, name+".toml"), &arm)

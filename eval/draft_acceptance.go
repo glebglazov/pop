@@ -30,7 +30,10 @@ type draftAcceptanceOptions struct {
 	timeout   time.Duration
 }
 
-type draftingRecord struct {
+// capturedRunRecord is what one captured Agent invocation left behind: which
+// agent ran, the run it filed, and what it spent. The Acceptance-list drafting
+// run and the Grader each store one, both outside any Arm's spend.
+type capturedRunRecord struct {
 	Agent       string            `json:"agent"`
 	RunID       string            `json:"run_id"`
 	Outcome     string            `json:"outcome"`
@@ -113,7 +116,7 @@ func resolveCaseDir(casePath, casesRoot string) (string, error) {
 	if info, err := os.Stat(casePath); err == nil && info.IsDir() {
 		return filepath.Abs(casePath)
 	}
-	if !caseNamePattern.MatchString(casePath) {
+	if !namePattern.MatchString(casePath) {
 		return "", fmt.Errorf("invalid Case name %q", casePath)
 	}
 	path := filepath.Join(casesRoot, casePath)
@@ -202,7 +205,7 @@ func parseDraftedBehaviours(output string) ([]string, error) {
 }
 
 func writeDraftingRecord(path, agent string, attempt *tasks.CapturedAgentAttempt) error {
-	record := draftingRecord{Agent: agent, RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}
+	record := capturedRunRecord{Agent: agent, RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode drafting spend: %w", err)
