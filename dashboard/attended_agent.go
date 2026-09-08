@@ -17,14 +17,12 @@ import (
 // The dashboard's attended-agent surface: the persistent subheader and the
 // action-menu rows that name the entry an attended launch will use (ADR-0196
 // decision 9, kept by ADR-0202 decision 5), and the chooser that changes it
-// (ADR-0264). Every render reads the merged config, so an override — written in
-// the Config dashboard or picked here — is what they report.
+// for this dashboard session (ADR-0269). A session choice wins over the merged
+// config for every render and launch from this dashboard only.
 
-// AfterConfigReload hands the page what its host re-read after an override was
-// written — from the Config dashboard, or from this page's own chooser
-// (ADR-0202 decision 14). The page's renders and its next poll both build from
-// this value, so the subheader and the attended action rows report the override
-// the moment the overlay closes.
+// AfterConfigReload hands the page what its host re-read after a Config dashboard
+// write or an outside edit (ADR-0202 decision 14). A session choice stays in
+// force ahead of the new config until this dashboard closes.
 //
 // A re-read that failed arrives as err instead: the host may not print — it
 // hosts a component whose whole contract is that nothing writes to stdout — so
@@ -42,7 +40,7 @@ func (m QueueDashboard) AfterConfigReload(cfg *config.Config, err error) QueueDa
 // attendedAgentStatusLine is the persistent subheader naming the attended entry
 // in force and where it is changed.
 func (m QueueDashboard) attendedAgentStatusLine() string {
-	return tasks.FormatAttendedAgentStatus(tasks.EffectiveAttendedEntry(m.cfg))
+	return tasks.FormatAttendedAgentStatus(m.effectiveAttendedEntry())
 }
 
 // attendedLaunchSpec is the Agent entry an attended launch from this page must
@@ -51,7 +49,14 @@ func (m QueueDashboard) attendedAgentStatusLine() string {
 // itself, so without it a pick made elsewhere between the draw and the
 // keystroke would launch something the row never said.
 func (m QueueDashboard) attendedLaunchSpec() string {
-	return tasks.EffectiveAttendedEntry(m.cfg).Cmd
+	return m.effectiveAttendedEntry().Cmd
+}
+
+func (m QueueDashboard) effectiveAttendedEntry() tasks.AgentGroupEntry {
+	if m.attendedChoice != nil {
+		return *m.attendedChoice
+	}
+	return tasks.EffectiveAttendedEntry(m.cfg)
 }
 
 // attendedActionVerb reports whether verb's action-menu row must name the
@@ -74,11 +79,11 @@ func (m QueueDashboard) enrichAttendedActionLabel(verb work.Verb, label string) 
 	if !attendedActionVerb(verb) {
 		return label
 	}
-	label += " · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(m.cfg))
+	label += " · " + tasks.FormatAgentEntry(m.effectiveAttendedEntry())
 	if tasks.AttendedPickOffered(m.cfg) {
 		// The affordance is the row's own, and only where a choice exists: a list
-		// of one has nothing to open (ADR-0264 decision 4).
-		label += " · " + ui.AttendedPickChordLabel + " to change"
+		// of one has nothing to open (ADR-0269 decision 5).
+		label += " · " + ui.AttendedPickKeyLabel + " to change"
 	}
 	return label
 }
@@ -98,12 +103,10 @@ func (m QueueDashboard) enrichItemActions(actions []work.Action) []work.Action {
 	return out
 }
 
-// reservedActionKeys are chords no Work kind may claim as Action.Key: the
-// movement keys, which every table shares, and the chord that opens the
-// attended chooser over any row (ADR-0264 decision 3). A kind that claimed
-// alt+a would shadow the chooser on its own rows alone, so what the chord means
-// would depend on which row the cursor sat on.
-var reservedActionKeys = []string{"j", "k", "J", "K", ui.AttendedPickChord}
+// reservedActionKeys are keys no Work kind may claim as Action.Key: the
+// movement keys every table shares. The attended chooser now opens with tab
+// inside the Run menu, so it needs no global key-space reservation (ADR-0269).
+var reservedActionKeys = []string{"j", "k", "J", "K"}
 
 func actionKeyReserved(key string) bool {
 	for _, reserved := range reservedActionKeys {
@@ -132,10 +135,8 @@ func (m QueueDashboard) openAttendedPick() (tea.Model, tea.Cmd) {
 // closed, and it is dropped here: a component that ended the host program would
 // make the dashboard's own quit key a trapdoor.
 //
-// A pick is written straight through — this page holds the deps the override
-// layer is reached with — and the re-read is asked of the host, which is the
-// only place that knows which config file the pages were built from and holds
-// the other page that must follow the change (ADR-0202 decision 14).
+// A pick becomes a session choice on this page and is sent to the shell, which
+// is the only place that holds both pages. No config or store value is written.
 func (m QueueDashboard) updateAttendedPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.attendedPick.Update(msg)
 	if p, ok := updated.(*ui.AttendedAgentPicker); ok {
@@ -149,24 +150,34 @@ func (m QueueDashboard) updateAttendedPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if picked == nil {
 		return m, nil
 	}
-	if err := tasks.PromoteAttendedAgent(m.taskDeps(), m.cfg, picked.Cmd); err != nil {
-		m.actionErr = err
-		return m, nil
-	}
-	return m, func() tea.Msg { return attendedAgentWroteMsg{} }
+	entry := tasks.LaunchedAttendedEntry(m.cfg, picked.Cmd)
+	m = m.WithAttendedSessionChoice(entry)
+	return m, func() tea.Msg { return attendedSessionChoiceMsg{entry: entry} }
 }
 
-// attendedAgentWroteMsg says a pick reached the override layer. The host re-reads
-// config and hands the result back through AfterConfigReload, so the row and the
-// subheader name what a load resolves rather than what was picked (ADR-0264
-// decision 6).
-type attendedAgentWroteMsg struct{}
+type attendedSessionChoiceMsg struct{ entry tasks.AgentGroupEntry }
 
-// IsAttendedAgentWrite reports whether msg is that request, for the host that
-// answers it.
-func IsAttendedAgentWrite(msg tea.Msg) bool {
-	_, ok := msg.(attendedAgentWroteMsg)
-	return ok
+// AttendedSessionChoice returns the choice a page asks its shell to share.
+func AttendedSessionChoice(msg tea.Msg) (tasks.AgentGroupEntry, bool) {
+	picked, ok := msg.(attendedSessionChoiceMsg)
+	return picked.entry, ok
+}
+
+// WithAttendedSessionChoice applies the shell-owned choice to this page and
+// rebuilds an open Run menu so its attended rows change at once.
+func (m QueueDashboard) WithAttendedSessionChoice(entry tasks.AgentGroupEntry) QueueDashboard {
+	m.attendedChoice = &entry
+	if m.menu == nil || m.menu.list == nil {
+		return m
+	}
+	cursor := m.menu.list.Cursor()
+	if m.menu.plural {
+		m.menu.list = ui.NewList(m.selectionMenuItems(m.menu.targets), ui.Opts[dashboardMenuItem]{Wrap: true})
+	} else {
+		m.menu.list = ui.NewList(m.menuItemsFor(m.menu.row), ui.Opts[dashboardMenuItem]{Wrap: true})
+	}
+	m.menu.list.SetCursor(cursor)
+	return m
 }
 
 // AttendedPickOpen reports whether the chooser owns the keyboard, so the host

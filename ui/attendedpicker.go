@@ -13,8 +13,7 @@ import (
 // AttendedAgentEntry is one selectable attended entry: the command a pick
 // returns, and the shared one-line render its host built for it.
 type AttendedAgentEntry struct {
-	// Cmd is the entry's command — what the host promotes to the head of the
-	// attended list.
+	// Cmd is the entry's complete command — the value the host gives the choice.
 	Cmd string
 	// Label is the entry as the Attended entry render spells it.
 	Label string
@@ -24,10 +23,9 @@ type AttendedAgentEntry struct {
 // (ADR-0264). It is the surface behind `tab` on a gate menu's assist row: one
 // level, one list, and a choice handed straight back.
 //
-// It holds no config and reaches no writer. What a pick means — reordering the
-// attended list, storing it as an Agent override, re-reading the merged config —
-// is the host's business (decision 6), so this model can be hosted from a gate
-// prompt and from a dashboard page without either learning the other's plumbing.
+// It holds no config and reaches no writer. What a pick means is the host's
+// business, so a gate may persist its result while a dashboard keeps it only for
+// its session without either behavior entering this component.
 // It writes nothing to stdout on any path, which is the stricter of its two
 // hosts' vows (ADR-0202 decision 11).
 type AttendedAgentPicker struct {
@@ -213,25 +211,4 @@ var attendedPickerKeys = struct {
 	Down:   key.NewBinding(key.WithKeys("down", "j", "ctrl+n")),
 	Submit: key.NewBinding(key.WithKeys("enter")),
 	Cancel: key.NewBinding(key.WithKeys("esc", "ctrl+c")),
-}
-
-// AttendedPickChordLabel is how the chord that opens this list from a dashboard
-// reads in chrome, in ui's A- prefix form. The gate opens the same list with a
-// bare key (AttendedPickKeyLabel); a dashboard cannot, because `tab` there marks
-// the cursored row and no mode may gate it, and the assist verb's own submenu
-// speaks in digits and `n` (ADR-0264 decision 3). A chord contends with neither.
-const AttendedPickChordLabel = "A-a"
-
-// AttendedPickChord is that same chord as a key string, for a host that names
-// its bindings in text rather than matching them.
-const AttendedPickChord = "alt+a"
-
-// IsAttendedPickChord reports whether msg is that chord. Hosts match through
-// this rather than spelling it, so they cannot drift apart — and so a terminal
-// reporting the alt-modified rune in either case still opens the list.
-func IsAttendedPickChord(msg tea.KeyPressMsg) bool {
-	if msg.Code != 'a' && msg.Code != 'A' {
-		return false
-	}
-	return msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl)
 }

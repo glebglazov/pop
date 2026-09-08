@@ -17,11 +17,9 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// The attended pick, whole: the chord on a page opens the chooser, the pick
-// reaches the override layer, and the re-read that follows lands in the row and
-// in the persistent subheader without the dashboard being reopened (ADR-0264
-// decisions 3, 4 and 9). The write and the load are the real ones over a temp
-// config dir, so what the page renders afterwards is what a load resolves.
+// The attended pick, whole: tab on an attended Run-menu row opens the chooser,
+// and the picked session choice reaches the row and persistent subheader on both
+// pages without changing the real config file in the temp config directory.
 
 // assistKind offers the attended verb, so a menu row names the entry a launch
 // from this page would run.
@@ -32,13 +30,15 @@ func (k *assistKind) Actions(work.Container) []work.Action {
 }
 
 // attendedFixture is a temp config dir holding two usable attended entries, the
-// deps that read and write it, and the shell over them.
+// deps that read it, and the shell over them.
 type attendedFixture struct {
 	shell        Shell
 	overridePath string
+	configPath   string
+	configBody   string
 }
 
-func newAttendedFixture(t *testing.T, writeFile func(string, []byte, os.FileMode) error) attendedFixture {
+func newAttendedFixture(t *testing.T) attendedFixture {
 	t.Helper()
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")
@@ -56,9 +56,6 @@ agents = [
 	if err := os.WriteFile(userPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if writeFile == nil {
-		writeFile = os.WriteFile
-	}
 	fs := &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
 			if key == "XDG_DATA_HOME" {
@@ -68,7 +65,7 @@ agents = [
 		},
 		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
 		ReadFileFunc:    os.ReadFile,
-		WriteFileFunc:   writeFile,
+		WriteFileFunc:   os.WriteFile,
 		MkdirAllFunc:    os.MkdirAll,
 		RenameFunc:      os.Rename,
 		RemoveAllFunc:   os.RemoveAll,
@@ -89,6 +86,12 @@ agents = [
 				columns: []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}, noun: "task set",
 			}}}
 		},
+		RoutineKinds: func(*drain.Deps, *config.Config) []work.Kind {
+			return []work.Kind{&assistKind{pageKind: &pageKind{
+				id: ref.KindRoutine, containers: routineRows(),
+				columns: []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}, noun: "routine",
+			}}}
+		},
 	}
 	s, err := newShell(PageWork, d, cfg, userPath)
 	if err != nil {
@@ -99,6 +102,8 @@ agents = [
 	return attendedFixture{
 		shell:        updated.(Shell),
 		overridePath: filepath.Join(dataDir, "pop", "config.override.toml"),
+		configPath:   userPath,
+		configBody:   body,
 	}
 }
 
@@ -119,8 +124,8 @@ func pressThrough(t *testing.T, s Shell, msg tea.Msg) Shell {
 	return s
 }
 
-func TestAttendedPickWritesTheOverrideAndRerendersThePage(t *testing.T) {
-	fx := newAttendedFixture(t, nil)
+func TestAttendedPickStaysInTheShellAndRerendersBothPages(t *testing.T) {
+	fx := newAttendedFixture(t)
 	s := fx.shell
 	before := s.View().Content
 	if !strings.Contains(before, "Claude Usual") {
@@ -129,9 +134,10 @@ func TestAttendedPickWritesTheOverrideAndRerendersThePage(t *testing.T) {
 
 	var view string
 	out := captureShellStdout(t, func() {
-		s = pressThrough(t, s, altA())
+		s = pressThrough(t, s, tea.KeyPressMsg{Code: 'r', Text: "r"})
+		s = pressThrough(t, s, tea.KeyPressMsg{Code: tea.KeyTab})
 		if !s.PageDashboard(PageWork).AttendedPickOpen() {
-			t.Error("the chord opened no chooser")
+			t.Error("tab on the attended Run-menu row opened no chooser")
 			return
 		}
 		// The shell's own chord is suspended for as long as the chooser is up.
@@ -153,13 +159,12 @@ func TestAttendedPickWritesTheOverrideAndRerendersThePage(t *testing.T) {
 		t.Fatal("the chooser stayed open after a pick")
 	}
 
-	stored, err := os.ReadFile(fx.overridePath)
-	if err != nil {
-		t.Fatalf("no override was written: %v", err)
+	if _, err := os.Stat(fx.overridePath); !os.IsNotExist(err) {
+		t.Fatalf("the session choice wrote an override: %v", err)
 	}
-	if got := string(stored); !strings.Contains(got, `"cursor"`) ||
-		strings.Index(got, `"cursor"`) > strings.Index(got, `"claude --model opus"`) {
-		t.Fatalf("override does not head the list with the picked entry:\n%s", got)
+	stored, err := os.ReadFile(fx.configPath)
+	if err != nil || string(stored) != fx.configBody {
+		t.Fatalf("the session choice changed config: err=%v\n%s", err, stored)
 	}
 
 	// The subheader is the persistent one; the row is the assist verb's, reached
@@ -167,40 +172,36 @@ func TestAttendedPickWritesTheOverrideAndRerendersThePage(t *testing.T) {
 	if !strings.Contains(view, tasks.FormatAttendedAgentStatus(tasks.AgentGroupEntry{DisplayName: "Cursor", Cmd: "cursor"})) {
 		t.Fatalf("subheader was not re-rendered on the picked entry:\n%s", view)
 	}
-	s = pressThrough(t, s, tea.KeyPressMsg{Code: 'r', Text: "r"})
 	menu := s.View().Content
 	if !strings.Contains(menu, "assist · Cursor") {
 		t.Fatalf("the attended action row was not re-rendered on the picked entry:\n%s", menu)
 	}
-}
-
-// A refused write says so on the page it was made from — the error line the page
-// already has — and still writes nothing to stdout.
-func TestAttendedPickRefusalStaysOnThePage(t *testing.T) {
-	fx := newAttendedFixture(t, func(string, []byte, os.FileMode) error {
-		return os.ErrPermission
-	})
-	s := fx.shell
-	out := captureShellStdout(t, func() {
-		s = pressThrough(t, s, altA())
-		s = pressThrough(t, s, tea.KeyPressMsg{Code: '2', Text: "2"})
-	})
-	if out != "" {
-		t.Fatalf("the refusal wrote to stdout: %q", out)
-	}
-	if _, err := os.Stat(fx.overridePath); err == nil {
-		t.Fatal("the refused write left an override behind")
-	}
-	view := s.View().Content
-	if !strings.Contains(view, "action failed") {
-		t.Fatalf("the page does not report the refusal:\n%s", view)
-	}
-	if !strings.Contains(view, "Claude Usual") {
-		t.Fatalf("the page stopped naming the entry still in force:\n%s", view)
+	s = pressThrough(t, s, tea.KeyPressMsg{Code: tea.KeyEscape})
+	s = pressThrough(t, s, tea.KeyPressMsg{Code: 'v', Text: "v"})
+	if view := s.View().Content; !strings.Contains(view, "agent Cursor") {
+		t.Fatalf("the other page did not inherit the session choice:\n%s", view)
 	}
 }
 
-func altA() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt} }
+func TestAttendedPickDoesNotReachAnotherShell(t *testing.T) {
+	fx := newAttendedFixture(t)
+	first := fx.shell
+	first = pressThrough(t, first, tea.KeyPressMsg{Code: 'r', Text: "r"})
+	first = pressThrough(t, first, tea.KeyPressMsg{Code: tea.KeyTab})
+	first = pressThrough(t, first, tea.KeyPressMsg{Code: '2', Text: "2"})
+	if !strings.Contains(first.View().Content, "Cursor") {
+		t.Fatal("first shell did not keep its choice")
+	}
+	second, err := newShell(PageWork, first.d, first.cfg, first.cfgPath)
+	if err != nil {
+		t.Fatalf("newShell: %v", err)
+	}
+	updated, _ := second.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	second = updated.(Shell)
+	if view := second.View().Content; !strings.Contains(view, "Claude Usual") || strings.Contains(view, "agent Cursor") {
+		t.Fatalf("a fresh shell inherited another shell's choice:\n%s", view)
+	}
+}
 
 // captureShellStdout swaps os.Stdout for a pipe, runs body, and returns whatever
 // was written to it. Both picker hosts read stdout as a data channel, so the

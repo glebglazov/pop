@@ -18,12 +18,9 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// The chord opens nothing where there is no choice to make: no chooser, no
-// overlay, no menu, and no page state moved (ADR-0264 decision 4).
-func TestDashboardAttendedChordOpensNothingWithoutAChoice(t *testing.T) {
-	m := NewDashboard(nil, &config.Config{}, DashboardSnapshot{
-		Containers: []DashboardRow{{ID: "demo", CursorKey: "demo"}},
-	})
+// The retired chord opens nothing even where the attended list has a choice.
+func TestDashboardRetiredAttendedChordOpensNothing(t *testing.T) {
+	m := twoEntryDashboard(t)
 	m.width, m.height = 80, 24
 	before := m.View().Content
 
@@ -43,12 +40,11 @@ func TestDashboardAttendedChordOpensNothingWithoutAChoice(t *testing.T) {
 	}
 }
 
-// The chord opens the attended chooser over every row, so no Work kind may
-// claim it: what it means cannot depend on which row the cursor sits on
-// (ADR-0264 decision 3). Movement keys stay reserved beside it.
-func TestActionKeySpaceReservesTheAttendedPickChord(t *testing.T) {
-	if !actionKeyReserved(ui.AttendedPickChord) {
-		t.Fatal("alt+a must be reserved from Work-kind key space")
+// Retiring the chord returns its key space to Work kinds. Movement stays
+// reserved because it still belongs to every Run menu.
+func TestActionKeySpaceReleasesTheRetiredAttendedPickChord(t *testing.T) {
+	if actionKeyReserved("alt+a") {
+		t.Fatal("alt+a must be available to Work-kind key space")
 	}
 	for _, key := range []string{"j", "k", "J", "K"} {
 		if !actionKeyReserved(key) {
@@ -221,13 +217,29 @@ func pressKey(t *testing.T, m QueueDashboard, msg tea.KeyPressMsg) QueueDashboar
 
 func altA() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt} }
 
+func openAttendedChooser(t *testing.T, m QueueDashboard) QueueDashboard {
+	t.Helper()
+	m = pressKey(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.menu == nil {
+		t.Fatal("r opened no Run menu")
+	}
+	for i, item := range m.menu.list.Items() {
+		if attendedActionVerb(item.verb) {
+			m.menu.list.SetCursor(i)
+			return pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+		}
+	}
+	t.Fatal("Run menu has no attended row")
+	return m
+}
+
 // The affordance is on the row that names the entry, and only while a choice
 // exists — a list of one has nothing to open.
 func TestDashboardAttendedRowAdvertisesTheChordOnlyWithAChoice(t *testing.T) {
 	m := twoEntryDashboard(t)
 	label := m.enrichAttendedActionLabel(setkind.VerbAssist, "assist")
-	if !strings.Contains(label, ui.AttendedPickChordLabel+" to change") {
-		t.Fatalf("action row = %q, want the chord advertised", label)
+	if !strings.Contains(label, ui.AttendedPickKeyLabel+" to change") {
+		t.Fatalf("action row = %q, want tab advertised", label)
 	}
 
 	one := &config.Config{Work: &config.WorkConfig{
@@ -236,17 +248,17 @@ func TestDashboardAttendedRowAdvertisesTheChordOnlyWithAChoice(t *testing.T) {
 		}},
 	}}
 	m.cfg = one
-	if label := m.enrichAttendedActionLabel(setkind.VerbAssist, "assist"); strings.Contains(label, ui.AttendedPickChordLabel) {
-		t.Fatalf("action row = %q, want no chord over a list of one", label)
+	if label := m.enrichAttendedActionLabel(setkind.VerbAssist, "assist"); strings.Contains(label, ui.AttendedPickKeyLabel+" to change") {
+		t.Fatalf("action row = %q, want no chooser hint over a list of one", label)
 	}
 }
 
 // While the chooser is open the page's own keys are suspended: the movement, the
 // menu openers and the marking keys all belong to the list being chosen from.
 func TestDashboardAttendedChooserSuspendsThePagesKeys(t *testing.T) {
-	m := pressKey(t, twoEntryDashboard(t), altA())
+	m := openAttendedChooser(t, twoEntryDashboard(t))
 	if m.attendedPick == nil {
-		t.Fatal("alt+a opened no chooser over two usable entries")
+		t.Fatal("tab on the attended Run-menu row opened no chooser")
 	}
 	if !strings.Contains(m.View().Content, "Attended agent") {
 		t.Fatalf("chooser not rendered over the rows:\n%s", m.View().Content)
@@ -256,9 +268,10 @@ func TestDashboardAttendedChooserSuspendsThePagesKeys(t *testing.T) {
 	}
 
 	cursor := m.ListCursor()
+	menu := m.menu
 	m = pressKey(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
-	if m.menu != nil {
-		t.Fatal("`r` opened the run menu through the chooser")
+	if m.menu != menu || m.menu.assist != nil {
+		t.Fatal("r changed the Run menu through the chooser")
 	}
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.selection.Active() {
@@ -280,8 +293,12 @@ func TestDashboardMarkingSurvivesTheChooser(t *testing.T) {
 	if !m.selection.Active() {
 		t.Fatal("tab marked nothing before the chooser")
 	}
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.selection.Active() {
+		t.Fatal("shift+tab cleared nothing before the chooser")
+	}
 
-	m = pressKey(t, m, altA())
+	m = openAttendedChooser(t, m)
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.attendedPick != nil {
 		t.Fatal("esc left the chooser open")
@@ -290,9 +307,39 @@ func TestDashboardMarkingSurvivesTheChooser(t *testing.T) {
 		t.Fatalf("esc wrote something: %v", m.actionErr)
 	}
 
+	m.menu = nil
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if !m.selection.Active() {
+		t.Fatal("tab marked nothing after the chooser")
+	}
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if m.selection.Active() {
 		t.Fatal("shift+tab cleared nothing after the chooser")
+	}
+}
+
+func TestDashboardSelectionRunMenuOpensAttendedChooser(t *testing.T) {
+	k := &bulkKind{
+		id:  ref.KindTaskSet,
+		ids: []string{"one", "two"},
+		actions: []work.Action{{
+			Verb: setkind.VerbAssist, Key: "A", Label: "assist", Modes: work.Plural,
+		}},
+		log: &bulkLog{},
+	}
+	m := bulkDashboard(t, k)
+	m.cfg = twoEntryDashboard(t).cfg
+	m = markAll(t, m, 2)
+	m = pressKey(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.menu == nil || !m.menu.plural {
+		t.Fatal("r opened no plural Run menu")
+	}
+	if label := m.menu.list.Items()[0].label; !strings.Contains(label, "tab to change") {
+		t.Fatalf("plural attended row = %q, want chooser hint", label)
+	}
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.attendedPick == nil {
+		t.Fatal("tab on the plural attended row opened no chooser")
 	}
 }
 
@@ -321,9 +368,11 @@ func TestDashboardAssistLaunchNamesTheRowsAttendedEntry(t *testing.T) {
 	row.RuntimePath, row.ProjectPath = repo, repo
 	cfg.Work = &config.WorkConfig{Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{
 		{DisplayName: "Picked", Cmd: "claude --model opus"},
-		{Cmd: "codex"},
+		{DisplayName: "Codex Heavy", Cmd: "codex --model gpt-5 --full-auto"},
 	}}}
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m = openAttendedChooser(t, m)
+	m = pressKey(t, m, tea.KeyPressMsg{Code: '2', Text: "2"})
 
 	m.launchAssist(row, tmuxmod.FirstPaneSlot)()
 
@@ -331,7 +380,7 @@ func TestDashboardAssistLaunchNamesTheRowsAttendedEntry(t *testing.T) {
 	if !ok {
 		t.Fatalf("no assist command was sent; commands=%v", rt.Commands)
 	}
-	if !strings.Contains(command, "--agent 'claude --model opus'") {
+	if !strings.Contains(command, "--agent 'codex --model gpt-5 --full-auto'") {
 		t.Fatalf("assist command = %q, want it pinned to the entry the row names", command)
 	}
 }

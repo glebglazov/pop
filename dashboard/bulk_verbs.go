@@ -165,7 +165,7 @@ func (m QueueDashboard) selectionMenuItems(rows []DashboardRow) []dashboardMenuI
 		}
 		items = append(items, dashboardMenuItem{
 			key:   action.Key,
-			label: action.Label,
+			label: m.enrichAttendedActionLabel(action.Verb, action.Label),
 			verb:  action.Verb,
 		})
 	}

@@ -1079,10 +1079,13 @@ type QueueDashboard struct {
 	// While it is set it owns the keyboard, this page's and its host's alike:
 	// see attended_agent.go.
 	attendedPick *ui.AttendedAgentPicker
-	detail       *detailView
-	menu         *dashboardMenu
-	itemMenu     *itemMenu
-	filter       *dashboardFilterMenu
+	// attendedChoice is the whole Agent entry picked for this dashboard session.
+	// The shell copies it to both pages; it is never persisted.
+	attendedChoice *tasks.AgentGroupEntry
+	detail         *detailView
+	menu           *dashboardMenu
+	itemMenu       *itemMenu
+	filter         *dashboardFilterMenu
 
 	// searchTyping is the Work dashboard search's typing phase: a Text entry mode,
 	// so while it is on the keyboard belongs to searchInput and only Enter, Esc and
@@ -1510,15 +1513,6 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingG = false
-		if kpm, ok := msg.(tea.KeyPressMsg); ok && ui.IsAttendedPickChord(kpm) {
-			// Only where a choice exists: with one usable entry the chord opens
-			// nothing, exactly as the row that advertises it says (ADR-0264
-			// decision 4).
-			if !tasks.AttendedPickOffered(m.cfg) {
-				return m, nil
-			}
-			return m.openAttendedPick()
-		}
 		switch msg.String() {
 		case "ctrl+c", "esc", "h", "left":
 			return m, tea.Quit
@@ -1915,6 +1909,12 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "k", "up":
 		m.menu.list.MoveUp()
+		return m, nil
+	case "tab":
+		item, ok := m.menu.list.Selected()
+		if ok && attendedActionVerb(item.verb) && tasks.AttendedPickOffered(m.cfg) {
+			return m.openAttendedPick()
+		}
 		return m, nil
 	case "enter":
 		return m.invokeMenuItem(m.menu.list.Cursor())
@@ -3840,9 +3840,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		if m.page.rowFilters {
 			entries = append(entries, ui.HelpEntry{Key: "f", Desc: "filter menu"})
 		}
-		if tasks.AttendedPickOffered(m.cfg) {
-			entries = append(entries, ui.HelpEntry{Key: ui.AttendedPickChordLabel, Desc: "choose the attended agent"})
-		}
 		entries = append(entries,
 			// The Config dashboard is opened by the entry shell rather than by this
 			// model, but it is one chord away from every page, and the help page is
@@ -3914,11 +3911,13 @@ func (m QueueDashboard) View() tea.View {
 
 	var content string
 	switch {
+	case m.attendedPick != nil:
+		content = m.viewWithModal()
 	case m.menu != nil:
 		content = m.viewWithMenu()
 	case m.filter != nil:
 		content = m.viewWithFilterMenu()
-	case m.bind != nil || m.drainPick != nil || m.abandon != nil || m.attendedPick != nil:
+	case m.bind != nil || m.drainPick != nil || m.abandon != nil:
 		content = m.viewWithModal()
 	default:
 		content = m.frameSpec().Render(m.mainBody())

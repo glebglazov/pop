@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboard"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
@@ -49,6 +50,9 @@ type Shell struct {
 	pane   work.PaneFacts
 	width  int
 	height int
+	// attendedChoice lasts only for this shell invocation and is shared by both
+	// Work pages. It never enters config or the store.
+	attendedChoice *tasks.AgentGroupEntry
 
 	// configModal is the Config dashboard when it is open over the page in focus.
 	// While it is set it owns the keyboard: see config_modal.go.
@@ -174,12 +178,12 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s = s.reloadPagesConfig()
 	}
 
-	// An attended pick on a page writes the override itself and asks for the
-	// re-read here, through the same reconciliation every other config change
-	// takes: the shell is the only place that knows which file the pages were
-	// built from and holds the other page that must follow the change.
-	if dashboard.IsAttendedAgentWrite(msg) {
-		return s.reloadPagesConfig(), nil
+	if entry, ok := dashboard.AttendedSessionChoice(msg); ok {
+		s.attendedChoice = &entry
+		for id, page := range s.pages {
+			s.pages[id] = page.WithAttendedSessionChoice(entry)
+		}
+		return s, nil
 	}
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
@@ -263,6 +267,9 @@ func (s Shell) buildActivePage() tea.Cmd {
 		return nil
 	}
 	s.pages[s.active] = dashboard.OpenPage(s.d, s.cfg, s.active, s.pane)
+	if s.attendedChoice != nil {
+		s.pages[s.active] = s.pages[s.active].WithAttendedSessionChoice(*s.attendedChoice)
+	}
 	if s.width == 0 && s.height == 0 {
 		return nil
 	}
