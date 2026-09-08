@@ -221,12 +221,13 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 
 // verifyResolvedSet is the resolved-path core of `pop tasks verify`: it loads
 // the set, takes the checkout, runs the Verifier (force — it never reads the SHA
-// cache), persists the verdict, and prints it. The Accept and Remediate
-// dispositions take no claim: neither runs an agent over the tree, and each
-// already guards its own write through Checkout quiescence (ADR-0104). All
-// external effects go through injectable seams
-// (d.Git for SHA and diff, runVerifier for the agent, the store for
-// persistence).
+// cache), persists the verdict, and prints it. A non-PASS verdict then goes to
+// the human rather than being enacted here: the Verify-fail gate at a terminal,
+// the disposition tail otherwise. The Accept and Remediate dispositions take no
+// claim: neither runs an agent over the tree, and each already guards its own
+// write through Checkout quiescence (ADR-0104). All external effects go through
+// injectable seams (d.Git for SHA and diff, runVerifier for the agent, the store
+// for persistence).
 func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*VerifyResult, error) {
 	m, err := loadVerifiableManifest(d, opts)
 	if err != nil {

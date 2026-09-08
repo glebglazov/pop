@@ -719,7 +719,7 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gat
 		Items: []ui.GateMenuItem{
 			{Key: "1", Label: "Accept (record a human-authored PASS)"},
 			{Key: "2", Label: "Remediate (spawn a fix task)"},
-			{Key: "3", Label: "Agent assistance", Details: gateInvocationDetails(invocation), Assists: true, Default: true},
+			{Key: "3", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Assists: true, Default: true},
 			{Key: "4", Label: "Open a shell in the checkout"},
 			{Key: "0", Label: "Exit"},
 		},

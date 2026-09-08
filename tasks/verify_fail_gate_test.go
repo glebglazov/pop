@@ -175,19 +175,32 @@ func TestVerifyFailedGateAgentAssistanceAdvisory(t *testing.T) {
 	}
 }
 
+// TestVerifyFailedGateEnterDefaultsToAgentAssistance: an empty line at the gate
+// takes the Enter default, which is assistance rather than exit — so the cheapest
+// keystroke reads the findings for the human instead of walking away from them.
 func TestVerifyFailedGateEnterDefaultsToAgentAssistance(t *testing.T) {
-	action, err := promptVerifyFailedGateAction(
-		&bytes.Buffer{}, strings.NewReader("\n"), nil, nil, "/rt",
-		newPromptReader(strings.NewReader("\n")), "demo", &Manifest{}, "findings", nil,
-	)
+	d, m := setupDrainVerifyFixture(t, stubGit("shaGATE\n", "", ""), doneAFKSet(), nil)
+	runner := &configurableHITLAssistanceRunner{t: t}
+	d.Runner = runner
+
+	var out bytes.Buffer
+	in := strings.NewReader("\n0\n")
+	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: in, agentOverride: "claude", runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "the retry looks flaky")
 	if err != nil {
-		t.Fatalf("promptVerifyFailedGateAction: %v", err)
+		t.Fatalf("handleInteractiveVerifyFailedGate: %v", err)
 	}
-	if action != verifyFailedGateAssist {
-		t.Fatalf("empty selection = %v, want Agent assistance", action)
+	if handled {
+		t.Fatalf("advisory assistance must return handled=false so the set stays Verify-failed")
+	}
+	if runner.attendedCalls != 1 {
+		t.Fatalf("Enter at the gate ran %d attended assistance sessions, want 1:\n%s", runner.attendedCalls, out.String())
 	}
 }
 
+// standaloneVerifyGateReader is the input a standalone Forced verification
+// reads its gate answer from. Its check fires on the first read — the moment
+// the gate opens — which is where the hold discipline is observable: the
+// Verifier's claim is gone and only the non-claiming gate hold remains.
 func standaloneVerifyGateReader(t *testing.T, d *Deps, response string) io.Reader {
 	t.Helper()
 	return &checkingPromptReader{
@@ -223,6 +236,9 @@ func assertStandaloneVerifyGateReleased(t *testing.T, d *Deps) {
 	}
 }
 
+// TestStandaloneVerifyGateAcceptsVerdict: Accept at the gate a forced non-PASS
+// opened records the same noted human-authored PASS as `--accept` and prints
+// that flag's block, so a human never sees the tail they have just acted on.
 func TestStandaloneVerifyGateAcceptsVerdict(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaGATE\n", "", ""))
 	var out bytes.Buffer
@@ -246,6 +262,9 @@ func TestStandaloneVerifyGateAcceptsVerdict(t *testing.T) {
 	assertStandaloneVerifyGateReleased(t, d)
 }
 
+// TestStandaloneVerifyGateSpawnsRemediation: Remediate at that gate spawns the
+// same Remediation task as `--remediate`, carrying the fresh findings and the
+// typed note.
 func TestStandaloneVerifyGateSpawnsRemediation(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaGATE\n", "", ""))
 	var out bytes.Buffer
@@ -272,6 +291,9 @@ func TestStandaloneVerifyGateSpawnsRemediation(t *testing.T) {
 	assertStandaloneVerifyGateReleased(t, d)
 }
 
+// TestStandaloneVerifyGateExitKeepsCachedVerdict: exit dispositions nothing —
+// the verdict stays cached for the next drain, and the tail says what that
+// drain will do with it.
 func TestStandaloneVerifyGateExitKeepsCachedVerdict(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaGATE\n", "", ""))
 	var out bytes.Buffer
@@ -294,6 +316,8 @@ func TestStandaloneVerifyGateExitKeepsCachedVerdict(t *testing.T) {
 	assertStandaloneVerifyGateReleased(t, d)
 }
 
+// TestStandaloneVerifySkipsGateHeadless: with no terminal to prompt there is
+// nobody to disposition the verdict, so the tail is the whole answer.
 func TestStandaloneVerifySkipsGateHeadless(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaHEADLESS\n", "", ""))
 	var out bytes.Buffer
@@ -313,6 +337,9 @@ func TestStandaloneVerifySkipsGateHeadless(t *testing.T) {
 	assertStandaloneVerifyGateReleased(t, d)
 }
 
+// TestStandaloneVerifySkipsGateForHumanCompletion: a Human completion has
+// nothing to disposition — the verdict lands as a mark — so it gets its own
+// tail and no gate.
 func TestStandaloneVerifySkipsGateForHumanCompletion(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaHUMAN\n", "", ""))
 	m := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
@@ -340,6 +367,8 @@ func TestStandaloneVerifySkipsGateForHumanCompletion(t *testing.T) {
 	assertStandaloneVerifyGateReleased(t, d)
 }
 
+// TestStandaloneVerifyExplicitDispositionsSkipGate: `--accept` / `--remediate`
+// are the human's decision already made, so neither reads gate input.
 func TestStandaloneVerifyExplicitDispositionsSkipGate(t *testing.T) {
 	tests := []struct {
 		name      string
