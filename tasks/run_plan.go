@@ -29,9 +29,11 @@ type runPlan struct {
 	agentQuotaRetryAfter time.Duration
 }
 
-// refresh re-reads the merged configuration for one Drain turn. A failed read
-// keeps the previous snapshot, matching the gate menu's reload contract.
-func (p *runPlan) refresh(loadConfig func(string) (*config.Config, error)) error {
+// reloadConfig re-reads the merged configuration for one Drain turn and touches
+// nothing else on the plan, which is what separates it from reloading the plan:
+// every field beside cfg is frozen for the whole Drain. A failed read keeps the
+// previous snapshot, matching the gate menu's reload contract.
+func (p *runPlan) reloadConfig(loadConfig func(string) (*config.Config, error)) error {
 	cfg, err := loadConfigIfPresent(loadConfig)
 	if err != nil {
 		return err

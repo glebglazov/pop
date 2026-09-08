@@ -221,12 +221,11 @@ func (r *implementRun) finalize(errp *error) {
 }
 
 // setup runs the remaining preparation after the opening BeginDrain: checkout
-// binding (ADR-0036), the dirty-runtime check, the initial render, and attempt
-// timeout resolution. It initializes the result
-// as its last step, so any failure returns before result exists (leaving the
-// deferred finalize to read a nil result ⇒ a plain finished terminal). It runs
-// under RunTaskSetWith's deferred finalize, so a failure here still finalizes the
-// live Drain.
+// binding (ADR-0036), the dirty-runtime check, the initial render, and the
+// attempt-timeout resolution. It initializes the result as its last step, so any
+// failure returns before result exists (leaving the deferred finalize to read a
+// nil result ⇒ a plain finished terminal). It runs under RunTaskSetWith's
+// deferred finalize, so a failure here still finalizes the live Drain.
 func (r *implementRun) setup() error {
 	d := r.d
 	opts := r.opts
@@ -295,12 +294,11 @@ func (r *implementRun) setup() error {
 	return nil
 }
 
-// refreshConfig starts a Drain turn with the newest loadable configuration.
+// reloadConfig starts a Drain turn with the newest loadable configuration.
 // It reports only the transition into and out of a failed-read run; every failed
 // turn in between silently keeps the last snapshot.
-func (r *implementRun) refreshConfig() {
-	err := r.plan.refresh(r.loadConfig)
-	if err != nil {
+func (r *implementRun) reloadConfig() {
+	if err := r.plan.reloadConfig(r.loadConfig); err != nil {
 		if !r.configReadFailed {
 			outputFor(r.out).line(ansiYellow, "Configuration re-read failed for %s; keeping the previous configuration: %v", config.DefaultConfigPath(), err)
 		}
