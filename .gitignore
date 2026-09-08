@@ -7,3 +7,6 @@ config.toml
 # compiled go test binaries
 tasks.test
 *.test
+
+# Eval clones and Captured runs
+/eval/work/

@@ -71,3 +71,52 @@ the AFK tasks and can use its configured retries, Refine, and Verifier.
 This comparison has a planning asymmetry: the Pop arm receives the same words
 already split into tasks, while the Bare arm receives them as one spec. Case
 preparation is not part of either arm's measured spend.
+
+Each Arm is a TOML file at `eval/arms/<name>.toml`:
+
+```toml
+kind = "bare" # bare or pop
+agent = "claude" # Agent preset spec, with optional arguments
+model = "opus" # required; do not also set a model in agent
+```
+
+Pop arm files can also contain `[config]` and `[manifest]` tables. Their keys
+and nested tables hold Pop config and Task-set manifest overrides. Bare arm
+files cannot contain these overrides. Unknown top-level keys are refused.
+Keep the Agent preset and model equal across the Bare and Pop arms to compare
+Pop's effect. The shipped Bare arm uses `claude` with `opus`.
+
+## Run a Trial
+
+```sh
+go run ./eval run --case <name> --arm bare
+```
+
+The Acceptance list must have `Status: approved`. The command checks this
+before it creates a clone. It clones the Case repository, checks out the parent
+SHA detached, and makes one captured invocation. The prompt has a fixed
+preamble with the repository URL, completion instruction, no-commit rule, and
+Objective gate commands, followed by the spec without changes.
+
+Use `--repeat 2` for another Trial. An existing repeat is never overwritten.
+`--ceiling 4h` sets the agent's Trial ceiling (four hours by default).
+`--cases`, `--arms`, `--work`, and `--results` change the directory roots.
+Pop arm files can be read, but Pop arm execution is not yet implemented.
+
+Records are written to `eval/results/<case>/<arm>/<NN>/trial.json` and
+`diff.patch`. The record holds the Case, Arm, repeat, requested and actual model,
+start and end times, outcome, Captured run ID, spend, notional cost, and work
+directory. Unknown spend figures retain the capture seam's presence flags.
+The patch compares the final tree with the parent, includes new files and
+binary data, and has no Trial path or Arm label added by the harness.
+
+The outcomes are `completed`, `timed_out`, and `invalid`. A quota pause or
+agent crash produces an Invalid Trial; its agent outcome and reason remain in
+the record. Each command runs once. Select an unused repeat to rerun an Invalid
+Trial. Objective gates and grading are separate later steps.
+
+Clones and Captured runs stay under `eval/work/trial-<random>/repository` and
+`capture`. These names do not identify the Arm. A later Grader must receive only
+the parent repository, patch, and Acceptance list, never the Trial record or
+Captured run. `eval/work/` is local work and is ignored by Git; results remain
+available to commit.
