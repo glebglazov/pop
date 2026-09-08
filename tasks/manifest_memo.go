@@ -30,10 +30,18 @@ const manifestMemoCapacity = 512
 // nothing about that answer depends on when it was asked.
 var manifestMemo = deps.NewContentMemo[*Manifest](manifestMemoCapacity)
 
-// manifestContentKey names every file input LoadManifest has, so an entry can
-// never serve an answer the directory no longer supports. Three parts, each
-// load-bearing:
+// manifestContentKey names every input LoadManifest's answer is a function of, so
+// an entry can never serve an answer the directory — or the build — no longer
+// supports. Four parts, each load-bearing:
 //
+//   - the derivation stamp of the running build, hashed ahead of the file
+//     inputs, because the file inputs alone were never the whole answer: what is
+//     cached is a function of the files *and* the validation rules that ran them.
+//     Keyed on the files alone, a changed rule leaves every unchanged set folder
+//     served its pre-change verdict forever, with no repair but deleting the
+//     database — which already happened, when exempting `exploration.md` from the
+//     orphan check moved no byte and no mtime in any set folder, so the build
+//     carrying the fix was still served the pre-fix verdict (ADR-0265);
 //   - the manifest's bytes, which decide the task list and every per-entry rule;
 //   - each directory entry's size and mtime, which is how an edited task markdown
 //     that gains or loses its acceptance-criteria section invalidates;
@@ -51,6 +59,7 @@ var manifestMemo = deps.NewContentMemo[*Manifest](manifestMemoCapacity)
 // caller then validates as if no memo existed.
 func manifestContentKey(manifestPath string, manifestData []byte, entries []os.DirEntry) (string, bool) {
 	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00", derivationStamp())
 	fmt.Fprintf(h, "%s\x00%d\x00", manifestPath, len(manifestData))
 	h.Write(manifestData)
 

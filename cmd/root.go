@@ -8,6 +8,7 @@ import (
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -119,5 +120,10 @@ func init() {
 	// have set it; buildVersion covers go run / plain go build.
 	if tmux.Version == "" {
 		tmux.Version = buildVersion()
+	}
+	// The same version, handed to tasks for the derivation stamp its Cache
+	// database keys carry (ADR-0265 decision 2).
+	if tasks.BuildVersion == "" {
+		tasks.BuildVersion = buildVersion()
 	}
 }
