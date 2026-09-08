@@ -22,11 +22,11 @@ import (
 // functions over it — deliberately not implementRun methods — so both callers
 // share them.
 type gateEnv struct {
-	d           *Deps
-	out         io.Writer
-	in          io.Reader
-	reader      *promptReader
-	yes         bool
+	d      *Deps
+	out    io.Writer
+	in     io.Reader
+	reader *promptReader
+	yes    bool
 	// agentOverride is the attended agent a human named for this session, empty
 	// when they named none. A drain's --agent does not reach here: an attended
 	// session launches from [work.attended].agents, never from the list the drain
@@ -719,9 +719,9 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gat
 		Items: []ui.GateMenuItem{
 			{Key: "1", Label: "Accept (record a human-authored PASS)"},
 			{Key: "2", Label: "Remediate (spawn a fix task)"},
-			{Key: "3", Label: "Agent assistance", Details: gateInvocationDetails(invocation), Assists: true},
+			{Key: "3", Label: "Agent assistance", Details: gateInvocationDetails(invocation), Assists: true, Default: true},
 			{Key: "4", Label: "Open a shell in the checkout"},
-			{Key: "0", Label: "Exit", Default: true},
+			{Key: "0", Label: "Exit"},
 		},
 	}
 	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)

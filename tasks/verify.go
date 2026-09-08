@@ -115,8 +115,9 @@ type VerifyOptions struct {
 	// Wait is the `--wait` / `--no-wait` tri-state for admission to the checkout
 	// (ADR-0239). The unset default waits at a terminal and refuses elsewhere.
 	Wait AdmissionWaitChoice
-	// ConfirmIn is the invocation's input, read only to tell a human at a
-	// terminal from a script when resolving Wait.
+	// ConfirmIn is the invocation's input. It distinguishes a human at a terminal
+	// from a script for admission and becomes the Verify-fail gate input after a
+	// non-PASS verdict.
 	ConfirmIn io.Reader
 }
 
@@ -164,6 +165,9 @@ type verifyCoreOptions struct {
 	// (ADR-0238/0239). The drain's own verify phase never sets it: it is already
 	// running under the drain's claim.
 	admission AdmissionPolicy
+	// confirmIn reaches the Verify-fail gate after the Verifier releases its
+	// checkout hold. It is also the input from which admission was resolved.
+	confirmIn io.Reader
 }
 
 // VerifyTaskSet runs the Verifier over a set using default dependencies.
@@ -211,6 +215,7 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		RemediateNote: opts.Note,
 		Convention:    opts.Convention,
 		admission:     opts.Wait.Policy(opts.ConfirmIn),
+		confirmIn:     opts.ConfirmIn,
 	})
 }
 
@@ -244,7 +249,12 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = hold.Release() }()
+	holdReleased := false
+	defer func() {
+		if !holdReleased {
+			_ = hold.Release()
+		}
+	}()
 	// Re-read after admission: a wait ends when whoever held the checkout finished
 	// with it, and what they left behind is the tree this verdict is about.
 	workSHA = verifyWorkSHA(d, opts.RuntimePath)
@@ -254,8 +264,48 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	}
 	verdict := Verdict(v.Verdict)
 	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
-	printForcedVerifyDisposition(opts.Output, opts.SetID, verdict, m, cfg, opts.Agents, opts.Effort)
+	_ = hold.Release()
+	holdReleased = true
+
+	if verdict != VerdictPass {
+		handled, err := handleForcedVerifyFailedGate(d, cfg, opts, m, workSHA, v.Findings)
+		if err != nil {
+			return nil, err
+		}
+		if !handled {
+			printForcedVerifyDisposition(opts.Output, opts.SetID, verdict, m, cfg, opts.Agents, opts.Effort)
+		}
+	}
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: v.Findings}, nil
+}
+
+// handleForcedVerifyFailedGate gives an interactive Forced verification to the
+// human after the Verifier has released its checkout claim. The menu itself is
+// occupancy, not a claim; each mutating disposition borrows the checkout only
+// while it acts, as the Assist session does.
+func handleForcedVerifyFailedGate(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA, findings string) (bool, error) {
+	if m.HumanCompleted || opts.confirmIn == nil || !canPrompt(opts.confirmIn) {
+		return false, nil
+	}
+	if err := RegisterCheckoutGateHold(d, opts.SetID, opts.RuntimePath, false); err != nil {
+		return false, err
+	}
+	defer func() { _ = ReleaseCheckoutGateHold(d, opts.SetID, opts.RuntimePath) }()
+
+	env := gateEnv{
+		d:              d,
+		out:            opts.Output,
+		in:             opts.confirmIn,
+		reader:         newPromptReader(opts.confirmIn),
+		cfg:            newGateConfig(d, cfg),
+		cwd:            opts.RuntimePath,
+		runtimePath:    opts.RuntimePath,
+		definitionPath: opts.DefPath,
+		statePath:      StatePathFor(opts.DefPath),
+		taskSetID:      opts.SetID,
+		treeStable:     assistTreeStable(d, opts.RuntimePath, opts.SetID),
+	}
+	return handleInteractiveVerifyFailedGate(env, opts.Repo, m, workSHA, findings)
 }
 
 // acceptResolvedSet records a human-authored PASS at workSHA (ADR-0103) without

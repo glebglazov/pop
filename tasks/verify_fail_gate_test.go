@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,5 +172,208 @@ func TestVerifyFailedGateAgentAssistanceAdvisory(t *testing.T) {
 	// Verdict untouched — assistance is advisory.
 	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaGATE"); stored == nil || stored.Verdict != "NEEDS-HUMAN" {
 		t.Fatalf("assistance must not change verdict, got %+v", stored)
+	}
+}
+
+func TestVerifyFailedGateEnterDefaultsToAgentAssistance(t *testing.T) {
+	action, err := promptVerifyFailedGateAction(
+		&bytes.Buffer{}, strings.NewReader("\n"), nil, nil, "/rt",
+		newPromptReader(strings.NewReader("\n")), "demo", &Manifest{}, "findings", nil,
+	)
+	if err != nil {
+		t.Fatalf("promptVerifyFailedGateAction: %v", err)
+	}
+	if action != verifyFailedGateAssist {
+		t.Fatalf("empty selection = %v, want Agent assistance", action)
+	}
+}
+
+func standaloneVerifyGateReader(t *testing.T, d *Deps, response string) io.Reader {
+	t.Helper()
+	return &checkingPromptReader{
+		t:        t,
+		response: response,
+		check: func(t *testing.T) {
+			claim, err := ReadCheckoutClaim(d, "/rt")
+			if err != nil {
+				t.Fatalf("ReadCheckoutClaim at gate: %v", err)
+			}
+			if claim != nil {
+				t.Fatalf("Verifier checkout claim still active at gate: %+v", claim)
+			}
+			hold, err := GetCheckoutGateHold(d, "/rt")
+			if err != nil {
+				t.Fatalf("GetCheckoutGateHold at gate: %v", err)
+			}
+			if hold == nil || hold.SetID != "demo" || hold.Claim {
+				t.Fatalf("gate hold = %+v, want demo's non-claiming hold", hold)
+			}
+		},
+	}
+}
+
+func assertStandaloneVerifyGateReleased(t *testing.T, d *Deps) {
+	t.Helper()
+	hold, err := GetCheckoutGateHold(d, "/rt")
+	if err != nil {
+		t.Fatalf("GetCheckoutGateHold after gate: %v", err)
+	}
+	if hold != nil {
+		t.Fatalf("gate hold leaked after gate closed: %+v", hold)
+	}
+}
+
+func TestStandaloneVerifyGateAcceptsVerdict(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaGATE\n", "", ""))
+	var out bytes.Buffer
+	_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Output: &out,
+		confirmIn: standaloneVerifyGateReader(t, d, "1\nreviewed by hand\n"),
+		runVerifier: func(string) (string, error) {
+			return "VERDICT: FIXABLE\nFINDINGS: retry is unstable\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaGATE")
+	if stored == nil || stored.Verdict != "PASS" || !stored.HumanAuthored || stored.Note != "reviewed by hand" {
+		t.Fatalf("stored verdict = %+v, want noted human-authored PASS", stored)
+	}
+	if !strings.Contains(out.String(), "━━ Accepted verify verdict for demo") || strings.Contains(out.String(), "━━ Disposition for demo") {
+		t.Fatalf("Accept output did not match the flag disposition block:\n%s", out.String())
+	}
+	assertStandaloneVerifyGateReleased(t, d)
+}
+
+func TestStandaloneVerifyGateSpawnsRemediation(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaGATE\n", "", ""))
+	var out bytes.Buffer
+	_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Output: &out,
+		confirmIn: standaloneVerifyGateReader(t, d, "2\ncap retries at three\n"),
+		runVerifier: func(string) (string, error) {
+			return "VERDICT: NEEDS-HUMAN\nFINDINGS: retry policy is unspecified\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(defPath, "demo", "02-remediation.md"))
+	if err != nil {
+		t.Fatalf("read remediation task: %v", err)
+	}
+	if !strings.Contains(string(body), "retry policy is unspecified") || !strings.Contains(string(body), "cap retries at three") {
+		t.Fatalf("remediation task lacks verdict or note:\n%s", body)
+	}
+	if !strings.Contains(out.String(), "━━ Spawned remediation task for demo") || strings.Contains(out.String(), "━━ Disposition for demo") {
+		t.Fatalf("Remediate output did not match the flag disposition block:\n%s", out.String())
+	}
+	assertStandaloneVerifyGateReleased(t, d)
+}
+
+func TestStandaloneVerifyGateExitKeepsCachedVerdict(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaGATE\n", "", ""))
+	var out bytes.Buffer
+	_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Output: &out,
+		confirmIn: standaloneVerifyGateReader(t, d, "0\n"),
+		runVerifier: func(string) (string, error) {
+			return "VERDICT: FIXABLE\nFINDINGS: retry is unstable\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaGATE"); stored == nil || stored.Verdict != "FIXABLE" {
+		t.Fatalf("exit changed cached verdict: %+v", stored)
+	}
+	if !strings.Contains(out.String(), "Verify-failed:") || !strings.Contains(out.String(), "━━ Disposition for demo") {
+		t.Fatalf("exit did not print the gate and disposition tail:\n%s", out.String())
+	}
+	assertStandaloneVerifyGateReleased(t, d)
+}
+
+func TestStandaloneVerifySkipsGateHeadless(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaHEADLESS\n", "", ""))
+	var out bytes.Buffer
+	_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Output: &out,
+		confirmIn: NonInteractiveReader{},
+		runVerifier: func(string) (string, error) {
+			return "VERDICT: NEEDS-HUMAN\nFINDINGS: needs a decision\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if strings.Contains(out.String(), "Verify-failed:") || !strings.Contains(out.String(), "━━ Disposition for demo") {
+		t.Fatalf("headless output opened a gate or omitted the tail:\n%s", out.String())
+	}
+	assertStandaloneVerifyGateReleased(t, d)
+}
+
+func TestStandaloneVerifySkipsGateForHumanCompletion(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaHUMAN\n", "", ""))
+	m := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+	m.HumanCompleted = true
+	if err := WriteManifestAtomic(d, m); err != nil {
+		t.Fatalf("write Human completion: %v", err)
+	}
+	var out bytes.Buffer
+	_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Output: &out,
+		confirmIn: strings.NewReader("1\nshould not be read\n"),
+		runVerifier: func(string) (string, error) {
+			return "VERDICT: FIXABLE\nFINDINGS: advisory only\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("verifyResolvedSet: %v", err)
+	}
+	if strings.Contains(out.String(), "Verify-failed:") || !strings.Contains(out.String(), "This Human completion stays complete") {
+		t.Fatalf("Human completion output opened a gate or omitted its tail:\n%s", out.String())
+	}
+	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaHUMAN"); stored == nil || stored.Verdict != "FIXABLE" {
+		t.Fatalf("Human completion verdict = %+v, want cached FIXABLE mark", stored)
+	}
+	assertStandaloneVerifyGateReleased(t, d)
+}
+
+func TestStandaloneVerifyExplicitDispositionsSkipGate(t *testing.T) {
+	tests := []struct {
+		name      string
+		accept    bool
+		remediate bool
+		want      string
+	}{
+		{name: "accept", accept: true, want: "━━ Accepted verify verdict for demo"},
+		{name: "remediate", remediate: true, want: "━━ Spawned remediation task for demo"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d, defPath := setupVerifyFixture(t, stubGit("shaFLAG\n", "", ""))
+			seedVerdict(t, d, store.VerifyVerdict{
+				Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaFLAG", Verdict: "NEEDS-HUMAN", Findings: "needs a decision",
+			})
+			in := &checkingPromptReader{
+				t: t,
+				check: func(t *testing.T) {
+					t.Fatal("an explicit disposition must not read gate input")
+				},
+				response: "0\n",
+			}
+			var out bytes.Buffer
+			_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+				Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Output: &out,
+				Accept: tc.accept, AcceptNote: "reviewed", Remediate: tc.remediate, RemediateNote: "fix it", confirmIn: in,
+			})
+			if err != nil {
+				t.Fatalf("verifyResolvedSet: %v", err)
+			}
+			if strings.Contains(out.String(), "Verify-failed:") || !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("explicit disposition opened a gate or omitted its output block:\n%s", out.String())
+			}
+		})
 	}
 }
