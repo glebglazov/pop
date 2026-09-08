@@ -140,8 +140,10 @@ func phaseOrder(phase string) int {
 		return 2
 	case "refine":
 		return 3
-	default:
+	case spendPhaseEval:
 		return 4
+	default:
+		return 5
 	}
 }
 
@@ -278,7 +280,11 @@ var attemptStreamNamePattern = regexp.MustCompile(`^attempt-(\d+)\.jsonl\.gz$`)
 // written best-effort; if the meta write fails the events file is removed so
 // an orphan payload never lacks an index.
 func writeCapturedRun(d *Deps, taskSetDir, phase, taskSetID, taskID, taskFile string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, outcome, reason string, exitCode int, workSHA, verdict string) (string, string, error) {
-	dir := capturedRunsDir(taskSetDir)
+	return writeCapturedRunInDir(d, capturedRunsDir(taskSetDir), phase, taskSetID, taskID, taskFile, rec, agent, requestedAgent, model, attempt, outcome, reason, exitCode, workSHA, verdict)
+}
+
+// writeCapturedRunInDir also serves callers that have no Task-set root.
+func writeCapturedRunInDir(d *Deps, dir, phase, taskSetID, taskID, taskFile string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, outcome, reason string, exitCode int, workSHA, verdict string) (string, string, error) {
 	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
 	}
