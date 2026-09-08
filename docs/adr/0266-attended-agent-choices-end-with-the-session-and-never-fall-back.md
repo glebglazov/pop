@@ -4,6 +4,11 @@ status: accepted
 
 # Attended agent choices end with the session and never fall back
 
+> **Amended by [the dashboard's own run choice](0269-the-work-dashboard-chooses-its-attended-agent-for-the-run.md):**
+> A session-lived dashboard chooser returns on `tab` in the Run menu. Decision
+> 5's removal of `alt+a` and of the persistence behaviour stands; only its
+> prohibition on any replacement chooser is lifted.
+
 An Assist session opened by the dashboard carries an agent flag. A Tab choice
 was saved globally but could not replace that flag. The human wants the choice
 to control this conversation without changing the next run or another pane.
