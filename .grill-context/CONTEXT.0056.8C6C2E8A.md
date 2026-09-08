@@ -90,3 +90,26 @@ branch: master (grill: cost-versus-quality eval)
   re-run.
   avoid: result file, log, run output
   under: Eval
+
++ Case preparation
+  The harness step that turns a historical Task set into a **Case**: it
+  concatenates the set's task files into the spec, strips the human sign-off
+  tasks, derives the parent commit and the **Reference diff** from provenance
+  trailers, and drafts the **Acceptance list** for the human to approve. The
+  human runs it and approves; nothing about a Case is generated at Trial time.
+  avoid: case extraction, import, seeding
+  under: Eval
+
++ Trial ceiling
+  The wall-clock bound every **Trial** shares regardless of **Arm**. A Trial
+  that reaches it is recorded as timed out and scores zero; it is a result, not
+  an **Invalid Trial**.
+  avoid: timeout, deadline, budget
+  under: Eval
+
++ Invalid Trial
+  A **Trial** that ended for a reason outside the arm's control, such as an
+  agent quota pause or a crash. It is recorded, rerun once, and never counted
+  in a rollup, so an outage can never read as a cheap arm.
+  avoid: failed trial, error, retry
+  under: Eval
