@@ -6,21 +6,19 @@ import (
 	"github.com/glebglazov/pop/config"
 )
 
-// runPlan is the resolved-config bundle shared by both drain entry points
-// (RunTaskSetWith and RunTaskWith). newRunPlan resolves everything both paths
-// compute at the very front of their flow — agent presets (base list + first),
-// agent output mode, dirty-runtime strategy, commit-config overrides, agent
-// quota retry-after, and the effort validation — killing the near-verbatim
-// setup clone the two entry points used to carry inline.
+// runPlan is the resolved-config bundle shared by both Implement entry points
+// (RunTaskSetWith and RunTaskWith). The implementing agent list and first preset,
+// agent output mode, dirty-runtime strategy, commit-config overrides, quota
+// retry-after, and effort validation are frozen when newRunPlan runs. A whole-set
+// Drain re-reads only cfg each turn, so phase switches, Refiner and Verifier
+// settings, gate rendering, and the next task's max-tries and retry delays can
+// change without letting a malformed commit rule appear after commits begin.
+// RunTaskWith has no Drain turn and keeps the snapshot it loaded at start.
 //
-// max-tries and attempt retry delays stay lazy (resolved via the methods below,
-// not stored on the struct) because the two entry points resolve them at
-// different points in their flow — RunTaskSetWith after BeginDrain, RunTaskWith
-// after the pre-run confirmation. Moving that resolution into the eager
-// constructor would change *when* a malformed config fails relative to drain
-// creation, which the decomposition must not do (pure refactor). The default
-// attempt timeout is likewise a per-call resolution (resolveAttemptTimeout),
-// since it depends on the caller's Timeout option, not on config.
+// The cfg boundary belongs here because every live reader already reads through
+// the plan, while every frozen value is stored beside it. The default attempt
+// timeout remains a per-call resolution (resolveAttemptTimeout), since it
+// depends on the caller's Timeout option, not on config.
 type runPlan struct {
 	cfg                  *config.Config
 	baseAgentPresets     []string
@@ -29,6 +27,17 @@ type runPlan struct {
 	strategy             DirtyRuntimeStrategy
 	commitOverrides      []string
 	agentQuotaRetryAfter time.Duration
+}
+
+// refresh re-reads the merged configuration for one Drain turn. A failed read
+// keeps the previous snapshot, matching the gate menu's reload contract.
+func (p *runPlan) refresh(loadConfig func(string) (*config.Config, error)) error {
+	cfg, err := loadConfigIfPresent(loadConfig)
+	if err != nil {
+		return err
+	}
+	p.cfg = cfg
+	return nil
 }
 
 // runPlanInput carries the per-call agent/dirty options the constructor needs.
@@ -92,9 +101,9 @@ func newRunPlan(loadConfig func(string) (*config.Config, error), in runPlanInput
 	}, nil
 }
 
-// maxTries resolves the per-task attempt ceiling from config and the caller's
-// --max-tries flag. Lazy: called at each entry point's own resolution point (see
-// runPlan doc) so a malformed config still fails there, not earlier.
+// maxTries resolves the per-task attempt ceiling from the current config and the
+// caller's --max-tries flag. Whole-set drains call it for the selected task;
+// RunTaskWith calls it once after its pre-run confirmation.
 func (p *runPlan) maxTries(explicit bool, flagValue int) (int, error) {
 	return resolveImplementMaxTries(p.cfg, explicit, flagValue)
 }

@@ -62,9 +62,10 @@ type implementRun struct {
 	// gate parks that re-enter the loop.
 	dirtyStrategyApplied bool
 
-	maxTries    int
-	retryDelays []time.Duration
-	timeout     time.Duration
+	timeout time.Duration
+	// configReadFailed suppresses repeated notices while consecutive Drain turns
+	// hold the last loadable configuration.
+	configReadFailed bool
 	// turnCap is the repository's bound on the Turns one implementation attempt
 	// may spend, resolved once per run because it describes the repository the run
 	// drains rather than any one task (ADR-0190/ADR-0191). Zero means unbounded.
@@ -162,24 +163,24 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	return &implementRun{
-		d:                d,
-		loadConfig:       loadConfig,
-		opts:             opts,
-		plan:             plan,
-		resolved:         resolved,
-		runtimePath:      runtimePath,
-		statePath:        statePath,
-		taskSetID:        taskSetID,
-		hitlFallback:     hitlFallback,
-		confirmOut:       confirmOut,
-		out:              out,
-		refresh:          refresh,
-		drain:            drain,
-		admission:        admission,
-		admissionWaited:  waited,
-		turnCap:          resolveRepoTurnCap(d, plan.cfg, runtimePath),
+		d:                        d,
+		loadConfig:               loadConfig,
+		opts:                     opts,
+		plan:                     plan,
+		resolved:                 resolved,
+		runtimePath:              runtimePath,
+		statePath:                statePath,
+		taskSetID:                taskSetID,
+		hitlFallback:             hitlFallback,
+		confirmOut:               confirmOut,
+		out:                      out,
+		refresh:                  refresh,
+		drain:                    drain,
+		admission:                admission,
+		admissionWaited:          waited,
+		turnCap:                  resolveRepoTurnCap(d, plan.cfg, runtimePath),
 		implementationConvention: implementImplementationConvention(plan.cfg, opts.ImplementationConvention, runtimePath),
-		agentProbeMemo:   newAgentAvailabilityProbeMemo(),
+		agentProbeMemo:           newAgentAvailabilityProbeMemo(),
 	}, nil
 }
 
@@ -220,8 +221,8 @@ func (r *implementRun) finalize(errp *error) {
 }
 
 // setup runs the remaining preparation after the opening BeginDrain: checkout
-// binding (ADR-0036), the dirty-runtime check, the initial render, and the lazy
-// max-tries / retry-delay / attempt-timeout resolution. It initializes the result
+// binding (ADR-0036), the dirty-runtime check, the initial render, and attempt
+// timeout resolution. It initializes the result
 // as its last step, so any failure returns before result exists (leaving the
 // deferred finalize to read a nil result ⇒ a plain finished terminal). It runs
 // under RunTaskSetWith's deferred finalize, so a failure here still finalizes the
@@ -288,20 +289,28 @@ func (r *implementRun) setup() error {
 		r.sharedPromptReader = ensurePromptReader(r.sharedPromptReader, opts.ConfirmIn, opts.Yes)
 	}
 
-	maxTries, err := r.plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)
-	if err != nil {
-		return exitErr(ExitSetup, "%v", err)
-	}
-	retryDelays, err := r.plan.retryDelays()
-	if err != nil {
-		return exitErr(ExitSetup, "%v", err)
-	}
-	r.maxTries = maxTries
-	r.retryDelays = retryDelays
 	r.timeout = resolveAttemptTimeout(opts.Timeout)
 
 	r.result = &RunTaskSetResult{TaskSetID: r.taskSetID, RuntimePath: r.runtimePath, ProjectPath: r.resolved.ProjectPath}
 	return nil
+}
+
+// refreshConfig starts a Drain turn with the newest loadable configuration.
+// It reports only the transition into and out of a failed-read run; every failed
+// turn in between silently keeps the last snapshot.
+func (r *implementRun) refreshConfig() {
+	err := r.plan.refresh(r.loadConfig)
+	if err != nil {
+		if !r.configReadFailed {
+			outputFor(r.out).line(ansiYellow, "Configuration re-read failed; keeping the previous configuration: %v", err)
+		}
+		r.configReadFailed = true
+		return
+	}
+	if r.configReadFailed {
+		outputFor(r.out).line(ansiGreen, "Configuration re-read recovered")
+	}
+	r.configReadFailed = false
 }
 
 // settleAfterAdmissionWait re-derives the run's target after it came out of the

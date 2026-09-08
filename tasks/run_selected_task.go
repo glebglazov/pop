@@ -63,10 +63,17 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 	taskSetID := r.taskSetID
 	confirmOut := r.confirmOut
 	out := r.out
-	maxTries := r.maxTries
-	retryDelays := r.retryDelays
 	timeout := r.timeout
 	result := r.result
+
+	maxTries, err := r.plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)
+	if err != nil {
+		return runTaskReturn, result, exitErr(ExitSetup, "%v", err)
+	}
+	retryDelays, err := r.plan.retryDelays()
+	if err != nil {
+		return runTaskReturn, result, exitErr(ExitSetup, "%v", err)
+	}
 
 	// An eligible AFK task is about to run: (re-)acquire the Runtime execution
 	// lock for the contiguous run of attempts that starts here (ADR-0067). First

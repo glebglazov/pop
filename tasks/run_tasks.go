@@ -210,6 +210,7 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 	}
 
 	for {
+		r.refreshConfig()
 		currentRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "refresh before task selection: %v", err)
