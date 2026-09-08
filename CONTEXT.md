@@ -1345,7 +1345,7 @@ The memoization of a Task set's manifest load and validation, keyed on the set d
 _Avoid_: manifest cache (it persists, but never authoritatively), set cache, warm cache
 
 **Cache database**:
-The machine-local SQLite database at `$XDG_CACHE_HOME/pop/cache.db` holding every derived answer pop may recompute rather than lose. It is not the **Execution state store**: nothing in it is authoritative, every entry is re-validated against the source it was derived from before it is served, and deleting the file is always a valid repair. That last property is what earns it a home under the cache dir and a name general enough for its second table, and what separates it from the deleted glob cache, which was persistence with nothing to validate against.
+The machine-local SQLite database at `$XDG_CACHE_HOME/pop/cache.db` holding every derived answer pop may recompute rather than lose. It is not the **Execution state store**: nothing in it is authoritative, every entry is re-validated against the source it was derived from before it is served, and deleting the file is always a valid repair — a verb, `pop cache clear`, as well as a file you may remove by hand under a running pop. That last property is what earns it a home under the cache dir and a name general enough for its second table, and what separates it from the deleted glob cache, which was persistence with nothing to validate against.
 _Avoid_: pop.db (that is the state store), warm cache, glob cache
 
 **Derivation stamp**:

@@ -11,7 +11,8 @@ import (
 //
 // It is emphatically not the execution state store. Nothing here is
 // authoritative: every entry is re-validated against its source before it is
-// served, so `rm cache.db` is always a valid repair. Keeping it in its own file
+// served, so `pop cache clear` — or deleting the file by hand — is always a
+// valid repair. Keeping it in its own file
 // is what stops read-path writes contending with authoritative ones on the
 // execution state store's single process-cached connection.
 //

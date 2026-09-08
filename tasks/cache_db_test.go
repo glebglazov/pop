@@ -170,3 +170,49 @@ func TestCacheDBRefusesTheRealCacheDirUnderTest(t *testing.T) {
 		t.Fatal("the real cache database was allowed under go test")
 	}
 }
+
+// unredirectedCacheFS answers the seam the way a test that never redirected its
+// cache home does: with the developer's real cache directory.
+func unredirectedCacheFS(t *testing.T) deps.FileSystem {
+	t.Helper()
+	if prodCacheDirAtStartup == "" {
+		t.Skip("no real cache directory to guard against")
+	}
+	return &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_CACHE_HOME" {
+				return filepath.Dir(prodCacheDirAtStartup)
+			}
+			return ""
+		},
+	}
+}
+
+func TestRemoveCacheDBReportsWhatItRemovedAndRefusesTheRealDirectory(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	d := depsWithCacheHome(t, filepath.Join(root, "xdg"), filepath.Join(root, "home"))
+	path := CacheDBPathWith(d)
+
+	if _, removed, err := RemoveCacheDB(d); err != nil || removed {
+		t.Fatalf("RemoveCacheDB with no database = removed %v, err %v, want (false, nil)", removed, err)
+	}
+	if d.CacheDB() == nil {
+		t.Fatalf("no cache database opened at %s", path)
+	}
+	if got, removed, err := RemoveCacheDB(d); err != nil || !removed || got != path {
+		t.Fatalf("RemoveCacheDB = (%q, %v, %v), want (%q, true, nil)", got, removed, err, path)
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if _, err := os.Stat(path + suffix); !os.IsNotExist(err) {
+			t.Fatalf("stat %s after removal = %v, want the file to be gone", path+suffix, err)
+		}
+	}
+
+	// A test that forgot to redirect its cache home must not take the
+	// developer's own cache database with it.
+	real := &Deps{FS: unredirectedCacheFS(t)}
+	if got, removed, err := RemoveCacheDB(real); err == nil || removed {
+		t.Fatalf("RemoveCacheDB(%q) = removed %v, err %v, want a refusal", got, removed, err)
+	}
+}

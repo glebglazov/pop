@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,7 +19,7 @@ const cacheDBFile = "cache.db"
 // popCacheDirWith returns pop's base cache directory, respecting XDG_CACHE_HOME
 // with the ~/.cache/pop fallback — the cache-side twin of popDataDirWith. It is
 // deliberately outside the data dir: what lives under it is disposable, and
-// deleting it is a valid repair.
+// deleting it is a valid repair (`pop cache clear`).
 func popCacheDirWith(d *Deps) string {
 	if xdgCache := d.FS.Getenv("XDG_CACHE_HOME"); xdgCache != "" {
 		return filepath.Join(xdgCache, "pop")
@@ -42,8 +43,8 @@ func CacheDBPathWith(d *Deps) string {
 // failed records that the open at path did not work, so a run with an
 // unwritable cache directory or a corrupt file pays the failure once instead of
 // on every read. It is cleared when the file at path disappears, which is how a
-// human repairs a corrupt cache: delete it, and the next access builds a fresh
-// one.
+// human repairs a corrupt cache: `pop cache clear` (or deleting the file by
+// hand), and the next access builds a fresh one.
 type cacheDBHolder struct {
 	mu     sync.Mutex
 	path   string
@@ -51,8 +52,8 @@ type cacheDBHolder struct {
 	failed bool
 	// warmed names the content keys this process has already written through
 	// handle. It is allocated with the handle and dropped with it, which is what
-	// makes `rm cache.db` under a running daemon a repair rather than a permanent
-	// cold cache: the fresh database is warmed again from the first tick, because
+	// makes `pop cache clear` under a running daemon a repair rather than a
+	// permanent cold cache: the fresh database is warmed again from the first tick, because
 	// nothing is remembered as written to it.
 	warmed *deps.ContentMemo[struct{}]
 }
@@ -78,9 +79,9 @@ func (d *Deps) cacheDBHolder() *cacheDBHolder {
 // behaviour of having no cache (ADR-0243 decision 4). No caller is ever made to
 // handle a cache problem.
 //
-// The handle is dropped and reopened when the file underneath it has gone: `rm
-// cache.db` is a supported repair on a running pop, and the next access
-// recreates it.
+// The handle is dropped and reopened when the file underneath it has gone: `pop
+// cache clear`, or removing the file by hand, is a supported repair on a running
+// pop, and the next access recreates it.
 //
 // SQLite cannot ride the filesystem seam, so this uses os directly; the path is
 // still derived through the seam-aware popCacheDirWith.
@@ -185,4 +186,30 @@ func realProductionCacheDir() string {
 		return ""
 	}
 	return filepath.Join(home, ".cache", "pop")
+}
+
+// RemoveCacheDB deletes the machine-local Cache database and the WAL sidecars
+// SQLite keeps beside it, returning the path it resolved and whether a database
+// was there to delete. An absent database is not a failure: the caller asked for
+// no cache at that path, and no cache is what it has.
+//
+// The process-cached handle is dropped first, so this process does not keep
+// writing to a deleted inode. A pop in another process needs no cooperation —
+// CacheDB reopens as soon as the file underneath it goes.
+func RemoveCacheDB(d *Deps) (path string, removed bool, err error) {
+	path = CacheDBPathWith(d)
+	if !cacheDBAllowed(path) {
+		return path, false, fmt.Errorf("refusing to remove the developer's real cache database under test: %s", path)
+	}
+	// Whatever the close reports describes a file that is about to be gone.
+	_ = d.CloseCacheDB()
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		switch removeErr := os.Remove(path + suffix); {
+		case removeErr == nil:
+			removed = removed || suffix == ""
+		case !os.IsNotExist(removeErr):
+			return path, removed, fmt.Errorf("remove %s: %w", path+suffix, removeErr)
+		}
+	}
+	return path, removed, nil
 }
