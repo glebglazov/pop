@@ -1,6 +1,6 @@
 # Acceptance list
 
-Status: draft
+Status: approved
 
 1. Pressing `s` inside a Task set's or Map's detail view opens the Status menu over the container the detail is open on, listing the same entries `s` opens over that container's row in the row list.
 2. Pressing `y` inside a detail view opens that container's Copy menu instead of copying anything outright.
