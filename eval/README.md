@@ -36,16 +36,18 @@ directory and do not belong to an Arm.
 
 ## Corpus selection
 
-All five historical Task sets are in the middle spend band used for this Eval,
-about 15M to 55M tokens:
+The five historical Task sets span about 10.2M to 29.3M tokens, as reported by
+`pop tasks spend <set> --json`. Verify-report and drain-rendering are below the
+15M to 55M middle spend band; they provide the refactor and output-convention
+shapes in this corpus.
 
-| Case | Shape | Source Task set |
-|---|---|---|
-| `2026-09-06-detail-keymap` | Multi-file feature | `2026-09-06-detail-keymap` in pop |
-| `2026-08-28-work-lift` | Bug with a reproduction | `2026-08-28-work-lift` in pop |
-| `2026-08-29-verify-report` | Refactor on one report seam | `2026-08-29-verify-report` in pop |
-| `2026-08-21-drain-rendering` | Output-convention change | `2026-08-21-drain-rendering` in pop |
-| `2026-09-05-carbon-hotkeys` | Multi-file feature | `2026-09-05-carbon-hotkeys` in vibe-coding-done-right |
+| Case | Shape | Source Task set | Historical tokens |
+|---|---|---|---:|
+| `2026-09-06-detail-keymap` | Multi-file feature | `2026-09-06-detail-keymap` in pop | 20,723,624 |
+| `2026-08-28-work-lift` | Bug with a reproduction | `2026-08-28-work-lift` in pop | 29,348,958 |
+| `2026-08-29-verify-report` | Refactor on one report seam | `2026-08-29-verify-report` in pop | 13,210,089 |
+| `2026-08-21-drain-rendering` | Output-convention change | `2026-08-21-drain-rendering` in pop | 10,209,180 |
+| `2026-09-05-carbon-hotkeys` | Multi-file feature | `2026-09-05-carbon-hotkeys` in vibe-coding-done-right | 28,425,513 |
 
 The manifest is JSON with this shape:
 
