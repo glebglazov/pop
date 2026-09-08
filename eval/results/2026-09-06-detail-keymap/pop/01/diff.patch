@@ -1,0 +1,1089 @@
+diff --git a/dashboard/dashboard.go b/dashboard/dashboard.go
+index 9b45a720..fe98df25 100644
+--- a/dashboard/dashboard.go
++++ b/dashboard/dashboard.go
+@@ -292,8 +292,16 @@ func (m QueueDashboard) openStatusMenu() (tea.Model, tea.Cmd) {
+ 	if !ok {
+ 		return m, nil
+ 	}
++	return m.openStatusMenuOver(row)
++}
++
++// openStatusMenuOver opens the Status menu over row for whichever surface asked:
++// the row list over its cursored row, a detail view over the container it is open
++// on (ADR-0261 decision 1). The Selection lives on the row list's opener above,
++// so a mark made there can never make this menu plural.
++func (m QueueDashboard) openStatusMenuOver(row DashboardRow) (tea.Model, tea.Cmd) {
+ 	if len(m.kinds.statusActionsFor(row)) == 0 {
+-		m.flash.Set(fmt.Sprintf("a %s has no status to write", detailKindNoun(row.Kind)))
++		m.visibleFlash().Set(fmt.Sprintf("a %s has no status to write", detailKindNoun(row.Kind)))
+ 		return m, nil
+ 	}
+ 	m.err = nil
+@@ -340,8 +348,15 @@ func (m QueueDashboard) openCopyMenu() (tea.Model, tea.Cmd) {
+ 	if !ok {
+ 		return m, nil
+ 	}
++	return m.openCopyMenuOver(row)
++}
++
++// openCopyMenuOver opens the copy menu over row for whichever surface asked. In a
++// detail view it is the only way to copy anything about the container, now that
++// the flat `y` and `p` there have retired (ADR-0261 decision 3).
++func (m QueueDashboard) openCopyMenuOver(row DashboardRow) (tea.Model, tea.Cmd) {
+ 	if len(m.kinds.copyActionsFor(row)) == 0 {
+-		m.flash.Set(fmt.Sprintf("a %s has nothing to copy", detailKindNoun(row.Kind)))
++		m.visibleFlash().Set(fmt.Sprintf("a %s has nothing to copy", detailKindNoun(row.Kind)))
+ 		return m, nil
+ 	}
+ 	m.err = nil
+@@ -365,8 +380,15 @@ func (m QueueDashboard) openMuteMenu() (tea.Model, tea.Cmd) {
+ 	if !ok {
+ 		return m, nil
+ 	}
++	return m.openMuteMenuOver(row)
++}
++
++// openMuteMenuOver opens the Mute menu over row for whichever surface asked: the
++// same windows, and the same `u` on an already-muted container, one level down in
++// its detail view (ADR-0261 decision 1).
++func (m QueueDashboard) openMuteMenuOver(row DashboardRow) (tea.Model, tea.Cmd) {
+ 	if m.kinds.muterFor(row) == nil {
+-		m.flash.Set(fmt.Sprintf("a %s cannot be muted", detailKindNoun(row.Kind)))
++		m.visibleFlash().Set(fmt.Sprintf("a %s cannot be muted", detailKindNoun(row.Kind)))
+ 		return m, nil
+ 	}
+ 	m.err = nil
+@@ -1279,6 +1301,16 @@ func (m *QueueDashboard) flashes() []*ui.Flash {
+ 	return out
+ }
+ 
++// visibleFlash is the flash of the surface the operator is looking at, which is
++// the innermost one open: a message set from a detail view has to land on the
++// hint line that detail is rendering, or it is written where nothing is showing
++// it. flashes() already lists them outermost first, so the surface in view is
++// its last entry.
++func (m *QueueDashboard) visibleFlash() *ui.Flash {
++	open := m.flashes()
++	return open[len(open)-1]
++}
++
+ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 	switch msg := msg.(type) {
+ 	case tea.KeyMsg:
+@@ -1439,17 +1471,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 			if !ok {
+ 				return m, nil
+ 			}
+-			if item, ok := dashboardShortcutItem(m.kinds, row, "I"); ok {
+-				return m.dispatchVerb(item.verb, row)
+-			}
+-			// The Map keeps its unconditional answer: with an empty frontier it offers
+-			// no I item, and the "no frontier tickets" report is a better reply than a
+-			// dead key.
+-			if !mapRow(row) {
+-				return m, nil
+-			}
+-			m.err = nil
+-			return m, m.launchWayfinderSession(row, "")
++			return m.dispatchFlatI(row)
+ 		case "l", "enter":
+ 			if m.refuseSingular("the detail view") {
+ 				return m, nil
+@@ -1709,11 +1731,18 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 		return m, nil
+ 	}
+ 	switch msg.String() {
++	// J/K move the rows the menu is floating over. A menu opened from a detail
++	// view has one container and no rows underneath it, so the pair has nothing
++	// to move there.
+ 	case "J":
+-		m.list.MoveDown()
++		if m.detail == nil {
++			m.list.MoveDown()
++		}
+ 		return m, nil
+ 	case "K":
+-		m.list.MoveUp()
++		if m.detail == nil {
++			m.list.MoveUp()
++		}
+ 		return m, nil
+ 	}
+ 	if m.menu.status != nil {
+@@ -2068,7 +2097,9 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
+ 		m.flash.Set(dashboardHandoffPending)
+ 		return m, m.launchWayfinderAssist(row)
+ 	case work.VerbCopyName:
+-		m.flash.Set(m.copyRowName(row))
++		// The copy menu opens over a detail view too, so the confirmation goes to the
++		// surface in view rather than to the table's line behind it (ADR-0261).
++		m.visibleFlash().Set(m.copyRowName(row))
+ 		return m, nil
+ 	}
+ 	// Every other verb is the kind's own to run: it performs it and the dashboard
+@@ -2081,11 +2112,37 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
+ 	return m, m.performKindVerb(row, verb)
+ }
+ 
++// dispatchFlatI runs row's own `I`: the verb its kind advertises under that key,
++// down the same dispatch a menu entry takes. It is shared so the detail view's
++// `I` is the same verb over the same container as the row list's (ADR-0261
++// decision 4).
++func (m QueueDashboard) dispatchFlatI(row DashboardRow) (tea.Model, tea.Cmd) {
++	if item, ok := dashboardShortcutItem(m.kinds, row, "I"); ok {
++		return m.dispatchVerb(item.verb, row)
++	}
++	// The Map keeps its unconditional answer: with an empty frontier it offers no
++	// I item, and the "no frontier tickets" report is a better reply than a dead
++	// key.
++	if !mapRow(row) {
++		return m, nil
++	}
++	m.err = nil
++	return m, m.launchWayfinderSession(row, "")
++}
++
+ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 	if m.itemMenu != nil {
+ 		m.pendingG = false
+ 		return m.updateItemMenu(msg)
+ 	}
++	if m.menu != nil {
++		// A container menu opened from the detail is driven by the same handler the
++		// row list's menus use, over the same state: `update` reaches the detail
++		// first, so the detail routes the keys on rather than the menu growing a
++		// second driver (ADR-0261 decision 1).
++		m.pendingG = false
++		return m.updateMenu(msg)
++	}
+ 	if m.detail != nil && m.detail.peek != nil {
+ 		if msg.String() == "g" {
+ 			if m.pendingG {
+@@ -2134,19 +2191,6 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 				return m, nil
+ 			}
+ 			m.itemMenu = newItemMenu(item, actions, true)
+-		case "y", "p":
+-			if m.detail.peek.artifactPath != "" {
+-				artifact, ok := m.detail.artifactByPath(m.detail.peek.artifactPath)
+-				if !ok {
+-					return m, nil
+-				}
+-				return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, true)
+-			}
+-			item, ok := m.detail.itemByID(m.detail.peek.itemID)
+-			if !ok {
+-				return m, nil
+-			}
+-			return m.dispatchItemKey(msg.String(), m.detail.row, item, true)
+ 		}
+ 		return m, nil
+ 	}
+@@ -2257,22 +2301,27 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 		}
+ 		m.itemMenu = newItemMenu(item, actions, false)
+ 		return m, nil
+-	case "y", "p":
++	case "s", "y", "m":
++		// The three openers mean over the container what they mean over its row, so
++		// the keyboard learnt one level up answers here (ADR-0261 decision 1). `y` no
++		// longer copies the item's name outright: copying an item is what `r`'s menu
++		// is for, where both copy verbs already sit (decision 3).
+ 		if m.detail == nil {
+ 			return m, nil
+ 		}
+-		if m.detail.artifacts {
+-			artifact, ok := m.detail.artifactList.Selected()
+-			if !ok {
+-				return m, nil
+-			}
+-			return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, false)
++		switch msg.String() {
++		case "s":
++			return m.openStatusMenuOver(m.detail.row)
++		case "y":
++			return m.openCopyMenuOver(m.detail.row)
++		default:
++			return m.openMuteMenuOver(m.detail.row)
+ 		}
+-		item, ok := m.detail.list.Selected()
+-		if !ok {
++	case "I":
++		if m.detail == nil {
+ 			return m, nil
+ 		}
+-		return m.dispatchItemKey(msg.String(), m.detail.row, item, false)
++		return m.dispatchFlatI(m.detail.row)
+ 	}
+ 	return m, nil
+ }
+@@ -2333,28 +2382,6 @@ func (m QueueDashboard) invokeItemMenuItem(idx int) (tea.Model, tea.Cmd) {
+ 	return m.dispatchItemVerb(verb, m.detail.row, item, inPeek)
+ }
+ 
+-// dispatchArtifactKey resolves a direct key through the kind's advertised
+-// actions, so the direct route and the row menu always execute the same verb.
+-func (m QueueDashboard) dispatchArtifactKey(key string, row work.Container, artifact work.Artifact, inPeek bool) (tea.Model, tea.Cmd) {
+-	for _, action := range m.kinds.artifactActionsFor(row, artifact) {
+-		if action.Key == key {
+-			return m.dispatchArtifactVerb(action.Verb, row, artifact, inPeek)
+-		}
+-	}
+-	return m, nil
+-}
+-
+-// dispatchItemKey resolves a direct key through the kind's advertised actions,
+-// so the direct route and the row menu always execute the same verb.
+-func (m QueueDashboard) dispatchItemKey(key string, row work.Container, item work.Item, inPeek bool) (tea.Model, tea.Cmd) {
+-	for _, action := range m.kinds.itemActionsFor(row, item) {
+-		if action.Key == key {
+-			return m.dispatchItemVerb(action.Verb, row, item, inPeek)
+-		}
+-	}
+-	return m, nil
+-}
+-
+ func (m QueueDashboard) dispatchArtifactVerb(verb work.Verb, row work.Container, artifact work.Artifact, inPeek bool) (tea.Model, tea.Cmd) {
+ 	return m, m.performKindArtifactVerb(row, artifact, inPeek, verb)
+ }
+@@ -3273,6 +3300,21 @@ func dashboardTick(page Page) tea.Cmd {
+ 	return tea.Tick(dashboardPollInterval, func(time.Time) tea.Msg { return dashboardTickMsg{page: page} })
+ }
+ 
++// menuNavigationHelp is the tail every container menu's help carries: the
++// highlight keys, then the row-movement pair only where rows are underneath. A
++// menu opened over a detail view has one container and nothing to move, so
++// naming J/K there would advertise a dead key.
++func (m QueueDashboard) menuNavigationHelp(runDesc string) []ui.HelpEntry {
++	entries := []ui.HelpEntry{{Key: "j/k", Desc: "navigate"}}
++	if m.detail == nil {
++		entries = append(entries, ui.HelpEntry{Key: "J/K", Desc: "navigate rows"})
++	}
++	return append(entries,
++		ui.HelpEntry{Key: "enter", Desc: runDesc},
++		ui.HelpEntry{Key: "esc", Desc: "close menu"},
++	)
++}
++
+ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+ 	// Determine current mode and return contextual help entries
+ 	switch {
+@@ -3343,12 +3385,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+ 		for _, action := range items {
+ 			entries = append(entries, ui.HelpEntry{Key: action.Key, Desc: action.Label})
+ 		}
+-		return append(entries,
+-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
+-			ui.HelpEntry{Key: "enter", Desc: "run entry"},
+-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
+-		)
++		return append(entries, m.menuNavigationHelp("run entry")...)
+ 	case m.menu != nil && m.menu.mute != nil:
+ 		// The Mute menu's entries are dates derived from today, so the help lists the
+ 		// windows actually on offer rather than a fixed roster that would be wrong by
+@@ -3358,13 +3395,8 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+ 		for _, entry := range items {
+ 			entries = append(entries, ui.HelpEntry{Key: entry.key, Desc: entry.label})
+ 		}
+-		return append(entries,
+-			ui.HelpEntry{Key: "", Desc: muteMenuFooter()},
+-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
+-			ui.HelpEntry{Key: "enter", Desc: "run entry"},
+-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
+-		)
++		entries = append(entries, ui.HelpEntry{Key: "", Desc: muteMenuFooter()})
++		return append(entries, m.menuNavigationHelp("run entry")...)
+ 	case m.menu != nil && m.menu.status != nil:
+ 		// The Status menu's verbs are the focused row's own kind's, so the help
+ 		// lists the menu that is actually open rather than one kind's vocabulary
+@@ -3374,12 +3406,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+ 		for _, action := range items {
+ 			entries = append(entries, ui.HelpEntry{Key: action.Key, Desc: action.Label})
+ 		}
+-		return append(entries,
+-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
+-			ui.HelpEntry{Key: "enter", Desc: "run action"},
+-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
+-		)
++		return append(entries, m.menuNavigationHelp("run action")...)
+ 	case m.menu != nil:
+ 		// Dashboard Run menu. Its verbs are the focused row's own kind's, so the
+ 		// help lists the menu that is actually open rather than one kind's vocabulary
+@@ -3389,13 +3416,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+ 		for _, item := range items {
+ 			entries = append(entries, ui.HelpEntry{Key: item.key, Desc: item.label})
+ 		}
+-		entries = append(entries,
+-			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+-			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
+-			ui.HelpEntry{Key: "enter", Desc: "run action"},
+-			ui.HelpEntry{Key: "esc", Desc: "close menu"},
+-		)
+-		return entries
++		return append(entries, m.menuNavigationHelp("run action")...)
+ 	case m.filter != nil:
+ 		// Work view preset list (ADR-0197)
+ 		return []ui.HelpEntry{
+@@ -3412,10 +3433,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+ 			{Key: "ctrl+u", Desc: "page up"},
+ 			{Key: "gg", Desc: "top"},
+ 			{Key: "G", Desc: "bottom"},
+-			{Key: "y", Desc: "copy name"},
+-		}
+-		if m.detail.peek.artifactPath != "" {
+-			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
+ 		}
+ 		entries = append(entries, ui.HelpEntry{Key: "h/esc", Desc: "close peek"})
+ 		runDesc := "item run menu"
+@@ -3434,14 +3451,25 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
+ 			{Key: "G", Desc: "last " + strings.TrimSuffix(noun, "s")},
+ 			{Key: "l/enter", Desc: "peek document"},
+ 			{Key: "r", Desc: "item run menu"},
+-			{Key: "y", Desc: "copy name"},
+ 		}
+ 		if m.detail.artifacts {
+ 			entries[0].Desc = "navigate artifacts"
+ 			entries[2].Desc = "first artifact"
+ 			entries[3].Desc = "last artifact"
+ 			entries[5].Desc = "artifact run menu"
+-			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
++		}
++		// The three container menus and the flat verb read the same here as they do
++		// over the row this detail was opened from (ADR-0261 decisions 1 and 4), so
++		// the overlay names them in the row list's words.
++		entries = append(entries,
++			ui.HelpEntry{Key: "s", Desc: "status menu"},
++			ui.HelpEntry{Key: "y", Desc: "copy menu"},
++			ui.HelpEntry{Key: "m", Desc: "mute menu"},
++		)
++		if item, found := dashboardShortcutItem(m.kinds, m.detail.row, "I"); found {
++			entries = append(entries, ui.HelpEntry{Key: "I", Desc: item.label})
++		} else if mapRow(m.detail.row) {
++			entries = append(entries, ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"})
+ 		}
+ 		if m.detail.hasArtifacts() {
+ 			desc := "show artifacts"
+@@ -3923,7 +3951,14 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
+ 	// scrolls them back, and the list can never paint past the pane.
+ 	hints := detailHints(d)
+ 	var block []string
+-	if m.itemMenu != nil && !m.itemMenu.inPeek {
++	switch {
++	case m.menu != nil:
++		// A container menu opened from the detail takes the same reserved region the
++		// item menu does — the two can never be open together, because while one is
++		// open its own driver owns the keyboard (ADR-0261 decision 1).
++		block = dashboardMenuLines(m.menu, m.width, m.liveCache())
++		hints = "j/k move · enter/letter run · esc close"
++	case m.itemMenu != nil && !m.itemMenu.inPeek:
+ 		block = itemMenuLines(m.itemMenu, m.width)
+ 		hints = "j/k move · enter/letter run · esc close"
+ 	}
+@@ -3966,11 +4001,15 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
+ 	return frame, strings.Join(parts, "\n")
+ }
+ 
++// detailHints names the openers the detail answers to, in the order mainHint
++// names them one level up: `r` over the cursored item or artifact, and the
++// container's three menus (ADR-0261 decisions 1 and 2).
+ func detailHints(d *detailView) string {
++	openers := "r run ▸ · s status ▸ · y copy ▸ · m mute ▸"
+ 	if d.artifacts {
+-		return "j/k · gg/G top/bottom · l/enter peek · r run · y copy name · p copy path · v tasks · h/esc back"
++		return "j/k · gg/G top/bottom · l/enter peek · " + openers + " · v tasks · h/esc back"
+ 	}
+-	hint := "j/k · gg/G top/bottom · l/enter peek · r run · y copy name"
++	hint := "j/k · gg/G top/bottom · l/enter peek · " + openers
+ 	if d.hasArtifacts() {
+ 		hint += " · v artifacts"
+ 	}
+diff --git a/dashboard/dashboard_artifact_test.go b/dashboard/dashboard_artifact_test.go
+index edbf16ce..2465846f 100644
+--- a/dashboard/dashboard_artifact_test.go
++++ b/dashboard/dashboard_artifact_test.go
+@@ -197,24 +197,18 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
+ 		return updated.(QueueDashboard)
+ 	}
+ 
+-	// Both artifact verbs run from the row itself.
+-	m = run(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+-	if copied != "refine/"+filepath.Base(path) || !strings.Contains(m.detail.flash.Text(), copied) {
+-		t.Fatalf("row y copied %q with flash %q", copied, m.detail.flash.Text())
+-	}
+-	m = run(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
+-	if copied != path || !strings.Contains(m.detail.flash.Text(), path) {
+-		t.Fatalf("row p copied %q with flash %q", copied, m.detail.flash.Text())
+-	}
+-
+-	// Both entries in the row menu dispatch through the same artifact seam.
+-	for _, key := range []string{"y", "p"} {
++	// Both artifact verbs run from the row's own menu, which is where they live
++	// now that the flat copies have retired (ADR-0261 decision 3).
++	for key, want := range map[string]string{"y": "refine/" + filepath.Base(path), "p": path} {
+ 		updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+ 		m = updated.(QueueDashboard)
+ 		if m.itemMenu == nil || m.itemMenu.artifact == nil {
+ 			t.Fatal("artifact row did not open its own run menu")
+ 		}
+ 		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
++		if copied != want || !strings.Contains(m.detail.flash.Text(), want) {
++			t.Fatalf("row menu %s copied %q with flash %q, want %q", key, copied, m.detail.flash.Text(), want)
++		}
+ 	}
+ 
+ 	// Enter opens the existing Document peek, and its existing movement scrolls it.
+@@ -234,23 +228,17 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
+ 		t.Fatalf("artifact peek scroll = %d, want 1", m.detail.peek.scroll)
+ 	}
+ 
+-	// Direct copy and the peek's menu both report on the peek, not the detail.
++	// The peek's menu reports on the peek, not on the detail underneath it.
+ 	for _, key := range []string{"y", "p"} {
+ 		m.detail.flash.Set("")
+-		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+-		if m.detail.peek.flash.Text() == "" || m.detail.flash.Text() != "" {
+-			t.Fatalf("peek %s flash landed on the wrong surface: peek=%q detail=%q", key, m.detail.peek.flash.Text(), m.detail.flash.Text())
+-		}
+-	}
+-	for _, key := range []string{"y", "p"} {
+ 		updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+ 		m = updated.(QueueDashboard)
+ 		if m.itemMenu == nil || m.itemMenu.artifact == nil || !m.itemMenu.inPeek {
+ 			t.Fatal("artifact peek did not open its artifact run menu")
+ 		}
+ 		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+-		if m.detail.peek.flash.Text() == "" {
+-			t.Fatalf("peek menu %s did not report on the peek", key)
++		if m.detail.peek.flash.Text() == "" || m.detail.flash.Text() != "" {
++			t.Fatalf("peek menu %s flash landed on the wrong surface: peek=%q detail=%q", key, m.detail.peek.flash.Text(), m.detail.flash.Text())
+ 		}
+ 	}
+ }
+diff --git a/dashboard/dashboard_copy_test.go b/dashboard/dashboard_copy_test.go
+index 2fb42ead..1dfb2ef7 100644
+--- a/dashboard/dashboard_copy_test.go
++++ b/dashboard/dashboard_copy_test.go
+@@ -249,9 +249,11 @@ func detailCopyModel(setID string, task tasks.Task) QueueDashboard {
+ 	return m
+ }
+ 
+-// TestQueueDashboardCopyDetailTask covers the `y` verb in the task-set detail
+-// view: the cursored task's <task-set>/<file>.md reference is copied.
+-func TestQueueDashboardCopyDetailTask(t *testing.T) {
++// TestQueueDashboardCopyDetailYOpensTheContainersMenu covers the retirement of
++// the flat copy in the detail view (ADR-0261 decision 3): `y` copies nothing
++// outright, it opens the container's copy menu, and `n` inside it copies the
++// set's own name rather than the cursored task's reference.
++func TestQueueDashboardCopyDetailYOpensTheContainersMenu(t *testing.T) {
+ 	task := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+ 	m := detailCopyModel("my-set", task)
+ 
+@@ -266,11 +268,20 @@ func TestQueueDashboardCopyDetailTask(t *testing.T) {
+ 		t.Fatal("y should not schedule a command")
+ 	}
+ 	got := updated.(QueueDashboard)
+-	if captured != "my-set/01-a.md" {
+-		t.Fatalf("copyFunc captured %q, want my-set/01-a.md", captured)
++	if captured != "" {
++		t.Fatalf("y copied %q outright, want the copy menu instead", captured)
+ 	}
+-	if got.detail.flash.Text() != "copied my-set/01-a.md" {
+-		t.Fatalf("flash = %q, want copied confirmation", got.detail.flash.Text())
++	if got.menu == nil || got.menu.copy == nil {
++		t.Fatal("y in the detail did not open the container's copy menu")
++	}
++
++	updated, _ = got.update(tea.KeyPressMsg{Code: 'n', Text: "n"})
++	got = updated.(QueueDashboard)
++	if captured != "my-set" {
++		t.Fatalf("copyFunc captured %q, want the container's name my-set", captured)
++	}
++	if got.detail.flash.Text() != "copied my-set" {
++		t.Fatalf("flash = %q, want the copied confirmation on the detail", got.detail.flash.Text())
+ 	}
+ }
+ 
+@@ -305,6 +316,9 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
+ 	}
+ }
+ 
++// TestQueueDashboardCopyDetailTaskPath pins where copy-path lives now: `p` is
++// inert on both detail surfaces, and the verb answers only from the item's own
++// run menu (ADR-0261 decision 3).
+ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
+ 	task := tasks.Task{ID: "01-a", File: "/repo/tasks/my-set/01-a.md", Status: "open"}
+ 	m := detailCopyModel("my-set", task)
+@@ -315,24 +329,30 @@ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
+ 	var captured string
+ 	m.copyFunc = func(s string) error { captured = s; return nil }
+ 
+-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+-	if cmd == nil {
+-		t.Fatal("p did not dispatch through the kind command seam")
+-	}
+-	updated, _ = updated.(QueueDashboard).update(cmd())
+-	got := updated.(QueueDashboard)
+-	if captured != task.File {
+-		t.Fatalf("copyFunc captured %q, want %q", captured, task.File)
+-	}
+-	if got.detail.flash.Text() != "copied "+task.File {
+-		t.Fatalf("flash = %q, want copied confirmation", got.detail.flash.Text())
++	for _, surface := range []string{"detail", "peek"} {
++		inert := detailCopyModel("my-set", task)
++		inert.copyFunc = m.copyFunc
++		if surface == "peek" {
++			inert.detail.peek = &documentPeek{itemID: task.ID, text: "body\n"}
++		}
++		updated, cmd := inert.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
++		if cmd != nil {
++			t.Fatalf("p in the %s scheduled a command, want a dead key", surface)
++		}
++		got := updated.(QueueDashboard)
++		if captured != "" {
++			t.Fatalf("p in the %s copied %q, want nothing", surface, captured)
++		}
++		if got.menu != nil || got.itemMenu != nil {
++			t.Fatalf("p in the %s opened a menu", surface)
++		}
+ 	}
+ 
+ 	m = detailCopyModel("my-set", task)
+ 	m.copyFunc = func(s string) error { captured = s; return nil }
+-	updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+-	got = updated.(QueueDashboard)
+-	updated, cmd = got.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
++	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
++	got := updated.(QueueDashboard)
++	updated, cmd := got.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+ 	if cmd == nil {
+ 		t.Fatal("p in task menu did not dispatch through the kind command seam")
+ 	}
+@@ -343,8 +363,10 @@ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
+ 	}
+ }
+ 
+-// TestQueueDashboardCopyPeekTask covers the `y` verb inside the Document peek.
+-func TestQueueDashboardCopyPeekTask(t *testing.T) {
++// TestQueueDashboardCopyPeekTaskCopiesNothing covers the peek half of the
++// retirement: inside a Document peek `y` copies nothing at all, and the item's
++// reference is reached through `r` (ADR-0261 decision 3).
++func TestQueueDashboardCopyPeekTaskCopiesNothing(t *testing.T) {
+ 	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "open"}
+ 	m := detailCopyModel("set-peek", task)
+ 	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
+@@ -354,18 +376,17 @@ func TestQueueDashboardCopyPeekTask(t *testing.T) {
+ 
+ 	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+ 	if cmd != nil {
+-		t.Fatal("y should not schedule a command")
++		t.Fatal("y in the peek should not schedule a command")
+ 	}
+ 	got := updated.(QueueDashboard)
+-	if captured != "set-peek/02-b.md" {
+-		t.Fatalf("copyFunc captured %q, want set-peek/02-b.md", captured)
++	if captured != "" {
++		t.Fatalf("y in the peek copied %q, want nothing", captured)
+ 	}
+-	if got.detail.peek.flash.Text() != "copied set-peek/02-b.md" {
+-		t.Fatalf("peek flash = %q, want copied confirmation", got.detail.peek.flash.Text())
++	if got.detail.peek == nil {
++		t.Fatal("y closed the peek")
+ 	}
+-	view := got.View().Content
+-	if !strings.Contains(view, "copied set-peek/02-b.md") {
+-		t.Fatalf("peek view missing status line:\n%s", view)
++	if got.detail.peek.flash.Text() != "" {
++		t.Fatalf("peek flash = %q, want silence", got.detail.peek.flash.Text())
+ 	}
+ }
+ 
+@@ -393,16 +414,20 @@ func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
+ 	}
+ }
+ 
+-func TestQueueDashboardCopyPeekTaskPath(t *testing.T) {
++// TestQueueDashboardCopyPeekTaskPathViaMenu keeps the payload pinned where the
++// verb still answers: the peek's own item run menu, on the surface it was opened
++// from.
++func TestQueueDashboardCopyPeekTaskPathViaMenu(t *testing.T) {
+ 	task := tasks.Task{ID: "02-b", File: "/repo/tasks/set-peek/02-b.md", Status: "open"}
+ 	m := detailCopyModel("set-peek", task)
+ 	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
+ 
+ 	var captured string
+ 	m.copyFunc = func(s string) error { captured = s; return nil }
+-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
++	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
++	updated, cmd := updated.(QueueDashboard).update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+ 	if cmd == nil {
+-		t.Fatal("p did not dispatch through the kind command seam")
++		t.Fatal("p in the peek menu did not dispatch through the kind command seam")
+ 	}
+ 	updated, _ = updated.(QueueDashboard).update(cmd())
+ 	got := updated.(QueueDashboard)
+@@ -414,9 +439,10 @@ func TestQueueDashboardCopyPeekTaskPath(t *testing.T) {
+ 	}
+ }
+ 
+-// TestQueueDashboardCopyMapDetailTicket covers the `y` verb on a Map detail
+-// ticket list: the bare ticket id is copied.
+-func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
++// TestQueueDashboardCopyMapDetailOpensTheMapsMenu covers the same retirement on
++// the other wired kind: inside a Map's detail `y` opens the Map's copy menu, and
++// its entries are the Map container's rather than a ticket's.
++func TestQueueDashboardCopyMapDetailOpensTheMapsMenu(t *testing.T) {
+ 	m, _ := newMapDetailDashboard(t)
+ 	got := openMapDetail(t, m)
+ 
+@@ -428,17 +454,32 @@ func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
+ 		t.Fatal("y should not schedule a command")
+ 	}
+ 	result := updated.(QueueDashboard)
+-	if captured != "01" {
+-		t.Fatalf("copyFunc captured %q, want bare ticket id 01", captured)
++	if captured != "" {
++		t.Fatalf("y copied %q outright, want the copy menu instead", captured)
+ 	}
+-	if result.detail.flash.Text() != "copied 01" {
+-		t.Fatalf("flash = %q, want copied confirmation", result.detail.flash.Text())
++	if result.menu == nil || result.menu.copy == nil {
++		t.Fatal("y in the Map detail did not open the container's copy menu")
++	}
++	if want := copyMenuKeys(result); !reflect.DeepEqual(want, copyMenuKeys(openMapCopyMenu(t, m))) {
++		t.Fatalf("detail copy menu keys = %v, want the Map row's", want)
+ 	}
+ }
+ 
+-// TestQueueDashboardCopyMapPeekTicket covers the `y` verb inside a Map ticket
+-// text peek: the bare ticket id is copied.
+-func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
++// openMapCopyMenu presses `y` on the Map row itself, for the comparison the
++// detail's menu has to match.
++func openMapCopyMenu(t *testing.T, m QueueDashboard) QueueDashboard {
++	t.Helper()
++	updated, _ := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
++	got := updated.(QueueDashboard)
++	if got.menu == nil || got.menu.copy == nil {
++		t.Fatal("y on the Map row did not open its copy menu")
++	}
++	return got
++}
++
++// TestQueueDashboardCopyMapPeekTicketViaMenu pins the ticket id where it is
++// still reachable: `r` inside the peek, the menu both copy verbs already sat in.
++func TestQueueDashboardCopyMapPeekTicketViaMenu(t *testing.T) {
+ 	m, _ := newMapDetailDashboard(t)
+ 	got := openMapDetail(t, m)
+ 	got.detail.peek = &documentPeek{itemID: "01", text: "ticket body\n"}
+@@ -446,10 +487,16 @@ func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
+ 	var captured string
+ 	got.copyFunc = func(s string) error { captured = s; return nil }
+ 
+-	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
++	flat, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+ 	if cmd != nil {
+-		t.Fatal("y should not schedule a command")
++		t.Fatal("y in the peek should not schedule a command")
+ 	}
++	if captured != "" {
++		t.Fatalf("y in the peek copied %q, want nothing", captured)
++	}
++
++	updated, _ := flat.(QueueDashboard).update(tea.KeyPressMsg{Code: 'r', Text: "r"})
++	updated, _ = updated.(QueueDashboard).update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+ 	result := updated.(QueueDashboard)
+ 	if captured != "01" {
+ 		t.Fatalf("copyFunc captured %q, want bare ticket id 01", captured)
+diff --git a/dashboard/dashboard_detail_generic_test.go b/dashboard/dashboard_detail_generic_test.go
+index 2e1cd15b..efe60426 100644
+--- a/dashboard/dashboard_detail_generic_test.go
++++ b/dashboard/dashboard_detail_generic_test.go
+@@ -2,6 +2,7 @@ package dashboard
+ 
+ import (
+ 	"fmt"
++	"reflect"
+ 	"strings"
+ 	"testing"
+ 
+@@ -279,7 +280,9 @@ func TestDocumentPeekItemMenuIsBottomChrome(t *testing.T) {
+ }
+ 
+ // TestItemCopyNamePayloadComesFromTheKind pins that the clipboard reference is
+-// the kind's answer rather than a shape the dashboard assumes.
++// the kind's answer rather than a shape the dashboard assumes. It is reached
++// through the item's own run menu, the only place an item copy answers now
++// (ADR-0261 decision 3).
+ func TestItemCopyNamePayloadComesFromTheKind(t *testing.T) {
+ 	m := genericDetailDashboard(&itemVerbKind{})
+ 	updated, _ := m.update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+@@ -287,9 +290,10 @@ func TestItemCopyNamePayloadComesFromTheKind(t *testing.T) {
+ 	var captured string
+ 	got.copyFunc = func(s string) error { captured = s; return nil }
+ 
+-	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
++	updated, _ = got.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
++	updated, cmd := updated.(QueueDashboard).update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+ 	if cmd != nil {
+-		t.Fatal("y should not schedule a command")
++		t.Fatal("y in the item menu should not schedule a command")
+ 	}
+ 	if captured != "thing#01" {
+ 		t.Fatalf("copied %q, want the kind's own reference thing#01", captured)
+@@ -359,3 +363,179 @@ func TestDetailFollowsTheRebuiltContainer(t *testing.T) {
+ 		t.Fatalf("rebuilt status not rendered:\n%s", got.View().Content)
+ 	}
+ }
++
++// The detail view answers to the row list's container openers (ADR-0261). These
++// tests drive them from the same keypresses an operator makes, one level down.
++
++// containerMenuEntries is the open container menu's entries as "key label",
++// whichever of the three is open. The keys and their labels are what an
++// operator's fingers depend on, so that is what a menu is pinned on.
++func containerMenuEntries(t *testing.T, m QueueDashboard) []string {
++	t.Helper()
++	var entries []string
++	switch {
++	case m.menu == nil:
++		t.Fatal("no container menu is open")
++	case m.menu.status != nil:
++		for _, action := range m.menu.status.list.Items() {
++			entries = append(entries, action.Key+" "+action.Label)
++		}
++	case m.menu.copy != nil:
++		for _, action := range m.menu.copy.list.Items() {
++			entries = append(entries, action.Key+" "+action.Label)
++		}
++	case m.menu.mute != nil:
++		for _, entry := range m.menu.mute.list.Items() {
++			entries = append(entries, entry.key+" "+entry.label)
++		}
++	default:
++		t.Fatal("the open menu is the run menu, not a container menu")
++	}
++	return entries
++}
++
++// TestDetailContainerOpenersMatchTheRowList pins decision 1 as the equality it
++// is: `s`, `y` and `m` inside a detail open the same menu over the same
++// container the row above opens, and a kind that offers nothing refuses with the
++// same words — on the detail's own hint line, where the reader is looking.
++func TestDetailContainerOpenersMatchTheRowList(t *testing.T) {
++	for _, tc := range []struct {
++		name  string
++		row   DashboardRow
++		kinds func() workKinds
++	}{
++		{
++			name: "task set",
++			row: DashboardRow{
++				Project: "pop", CursorKey: "pop\x00my-set", ID: "my-set",
++				RawStatus: tasks.StatusReady, DefPath: "/repo/tasks", StatePath: "/repo/state.json",
++			},
++		},
++		{
++			name:  "routine",
++			row:   DashboardRow{Project: "pop", CursorKey: "pop\x00nightly", Kind: ref.KindRoutine, ID: "nightly"},
++			kinds: testRoutineKinds,
++		},
++	} {
++		for _, key := range []rune{'s', 'y', 'm'} {
++			t.Run(fmt.Sprintf("%s/%c", tc.name, key), func(t *testing.T) {
++				m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{tc.row}})
++				m.width, m.height = 120, 24
++				if tc.kinds != nil {
++					m.kinds = tc.kinds()
++				}
++				press := tea.KeyPressMsg{Code: key, Text: string(key)}
++
++				above, _ := m.Update(press)
++				fromRow := above.(QueueDashboard)
++
++				opened, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
++				below, _ := opened.(QueueDashboard).Update(press)
++				fromDetail := below.(QueueDashboard)
++				if fromDetail.detail == nil {
++					t.Fatalf("%c closed the detail view", key)
++				}
++
++				if fromRow.menu == nil {
++					if fromDetail.menu != nil {
++						t.Fatalf("%c opened a menu the row list refuses to open", key)
++					}
++					if got, want := fromDetail.detail.flash.Text(), fromRow.flash.Text(); got != want {
++						t.Fatalf("detail refusal = %q, want the row list's %q", got, want)
++					}
++					if fromDetail.flash.Text() != "" {
++						t.Fatalf("refusal also landed on the table's line, behind the detail: %q", fromDetail.flash.Text())
++					}
++					return
++				}
++				if fromDetail.menu == nil {
++					t.Fatalf("%c in the detail opened no menu", key)
++				}
++				if fromDetail.menu.row.ID != tc.row.ID {
++					t.Fatalf("menu opened over %q, want the detail's container %q", fromDetail.menu.row.ID, tc.row.ID)
++				}
++				if got, want := containerMenuEntries(t, fromDetail), containerMenuEntries(t, fromRow); !reflect.DeepEqual(got, want) {
++					t.Fatalf("detail menu = %v, want the row list's %v", got, want)
++				}
++
++				closed, _ := fromDetail.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
++				after := closed.(QueueDashboard)
++				if after.menu != nil {
++					t.Fatalf("esc did not close the %c menu", key)
++				}
++				if after.detail == nil {
++					t.Fatalf("esc closed the detail along with the %c menu", key)
++				}
++			})
++		}
++	}
++}
++
++// TestDetailMenuIgnoresARowListSelection pins the boundary the openers keep: a
++// Selection is a mark on the row list, so a menu opened one level down acts on
++// the one container the detail is open over and nothing else (ADR-0254
++// decision 5).
++func TestDetailMenuIgnoresARowListSelection(t *testing.T) {
++	rows := []DashboardRow{
++		{Project: "pop", CursorKey: "pop\x00set-a", ID: "set-a", RawStatus: tasks.StatusReady, DefPath: "/repo/tasks"},
++		{Project: "pop", CursorKey: "pop\x00set-b", ID: "set-b", RawStatus: tasks.StatusReady, DefPath: "/repo/tasks"},
++	}
++	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
++	m.width, m.height = 120, 24
++	marked, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
++	m = marked.(QueueDashboard)
++	if !m.selection.Active() {
++		t.Fatal("tab did not mark a row")
++	}
++	m.detail = m.openDetailView(rows[0])
++
++	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
++	got := updated.(QueueDashboard)
++	if got.menu == nil {
++		t.Fatal("s in the detail opened no status menu")
++	}
++	if got.menu.plural || len(got.menu.targets) != 0 {
++		t.Fatalf("detail menu went plural over %d targets", len(got.menu.targets))
++	}
++	if got.menu.row.ID != rows[0].ID {
++		t.Fatalf("menu opened over %q, want the detail's container %q", got.menu.row.ID, rows[0].ID)
++	}
++}
++
++// TestDetailNamesItsOpeners covers the two places the keyboard is written down:
++// the detail's hint line and the help overlay both name the four openers, so an
++// operator who learnt them on the row list is told they still answer here.
++func TestDetailNamesItsOpeners(t *testing.T) {
++	m := genericDetailDashboard(&itemVerbKind{})
++	updated, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
++	got := updated.(QueueDashboard)
++
++	hint := detailHints(got.detail)
++	for _, want := range []string{"r run ▸", "s status ▸", "y copy ▸", "m mute ▸"} {
++		if !strings.Contains(hint, want) {
++			t.Fatalf("detail hint = %q, want it to name %q", hint, want)
++		}
++	}
++	if strings.Contains(hint, "copy name") || strings.Contains(hint, "copy path") {
++		t.Fatalf("detail hint still advertises a flat copy: %q", hint)
++	}
++
++	var help []string
++	for _, entry := range got.helpEntries() {
++		help = append(help, entry.Key+" "+entry.Desc)
++	}
++	for _, want := range []string{"r item run menu", "s status menu", "y copy menu", "m mute menu"} {
++		if !containsString(help, want) {
++			t.Fatalf("detail help = %v, want an entry %q", help, want)
++		}
++	}
++}
++
++func containsString(haystack []string, want string) bool {
++	for _, got := range haystack {
++		if got == want {
++			return true
++		}
++	}
++	return false
++}
+diff --git a/dashboard/dashboard_flat_i_test.go b/dashboard/dashboard_flat_i_test.go
+index 89f7e78b..92d97b99 100644
+--- a/dashboard/dashboard_flat_i_test.go
++++ b/dashboard/dashboard_flat_i_test.go
+@@ -50,6 +50,23 @@ func TestFlatIDispatchesPerKind(t *testing.T) {
+ 		}
+ 	})
+ 
++	t.Run("a routine detail fires the container's own verb", func(t *testing.T) {
++		// `I` comes down one level unchanged (ADR-0261 decision 4): from inside the
++		// detail it is the container's verb, through the same dispatch.
++		spy := &verbSpyKind{Kind: routine.NewKind(nil)}
++		kinds := func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{spy} }
++		m := openPage(t, &drain.Deps{Kinds: kinds, RoutineKinds: kinds}, PageRoutines)
++
++		got := pressKeys(t, m, "l", "I")
++
++		if fmt.Sprint(spy.performed) != fmt.Sprint([]work.Verb{routine.VerbFire}) {
++			t.Fatalf("I in the detail performed %v, want the kind's own fire verb", spy.performed)
++		}
++		if got.detail == nil {
++			t.Fatal("I closed the detail view")
++		}
++	})
++
+ 	t.Run("a task-set row drains", func(t *testing.T) {
+ 		repo, setID, _ := queuetest.SetupSpawnRepo(t, "flat-i", []queuetest.SpawnTask{
+ 			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+diff --git a/dashboard/dashboard_menu_block_test.go b/dashboard/dashboard_menu_block_test.go
+index 8dc8c907..054decf6 100644
+--- a/dashboard/dashboard_menu_block_test.go
++++ b/dashboard/dashboard_menu_block_test.go
+@@ -7,7 +7,11 @@ import (
+ 
+ 	tea "charm.land/bubbletea/v2"
+ 
++	"github.com/glebglazov/pop/config"
++	"github.com/glebglazov/pop/tasks"
++	"github.com/glebglazov/pop/tasks/drain"
+ 	"github.com/glebglazov/pop/ui"
++	"github.com/glebglazov/pop/work"
+ )
+ 
+ // Where the actions are is a fact about the surface, not about which row is
+@@ -284,3 +288,54 @@ func TestMenuRuleNamesItsTarget(t *testing.T) {
+ 		})
+ 	}
+ }
++
++// A container menu opened from a detail view is the detail's own reserved block:
++// the same arithmetic as the table's menus, over the surface one level down
++// (ADR-0261 decision 1).
++func TestDetailContainerMenuIsTheDetailsBlock(t *testing.T) {
++	row := DashboardRow{
++		Project: "pop", CursorKey: "pop\x00my-set", ID: "my-set",
++		RawStatus: tasks.StatusReady, DefPath: "/repo/tasks",
++	}
++	for i := 0; i < 20; i++ {
++		row.Items = append(row.Items, work.Item{ID: fmtSetID(i), Title: "Item", Type: "AFK", Status: "open"})
++	}
++	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
++	m.width, m.height = 120, 18
++	opened, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
++	m = opened.(QueueDashboard)
++	m.View()
++	beforeRows := len(m.detail.list.VisibleRows())
++
++	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
++	m = updated.(QueueDashboard)
++	if m.menu == nil || m.menu.status == nil {
++		t.Fatal("s in the detail did not open the status menu")
++	}
++	view := m.View().Content
++	lines := strings.Split(view, "\n")
++	if len(lines) != m.height {
++		t.Fatalf("detail = %d lines, want the pane's %d:\n%s", len(lines), m.height, ui.StripANSI(view))
++	}
++	block := blockLines(t, m)
++	ruleAt := dashboardTestLineIndex(strings.Split(ui.StripANSI(view), "\n"), "status · my-set")
++	if ruleAt < 0 {
++		t.Fatalf("no menu rule naming the container on screen:\n%s", ui.StripANSI(view))
++	}
++	if got, want := ruleAt, len(lines)-1-block; got != want {
++		t.Fatalf("menu rule at line %d, want %d so its block ends above the hint line:\n%s", got, want, ui.StripANSI(view))
++	}
++	if got, want := beforeRows-len(m.detail.list.VisibleRows()), block; got != want {
++		t.Fatalf("detail body lost %d rows, want the menu block's %d lines", got, want)
++	}
++
++	closed, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
++	m = closed.(QueueDashboard)
++	if m.detail == nil {
++		t.Fatal("esc closed the detail instead of the menu")
++	}
++	m.View()
++	if got := len(m.detail.list.VisibleRows()); got != beforeRows {
++		t.Fatalf("detail body restored to %d rows, want %d", got, beforeRows)
++	}
++}
+diff --git a/dashboard/dashboard_test.go b/dashboard/dashboard_test.go
+index 782061b1..0ac6fe9e 100644
+--- a/dashboard/dashboard_test.go
++++ b/dashboard/dashboard_test.go
+@@ -1457,32 +1457,32 @@ func dashboardTestLineIndex(lines []string, needle string) int {
+ 	return -1
+ }
+ 
+-func TestDashboardQAndSAreUnbound(t *testing.T) {
++// `q` is bound on neither surface: quitting is `h`/`esc`, and a stray q must not
++// move the cursor or open anything. `s` is no longer in its company — it opens
++// the Status menu at both levels now (ADR-0261 decision 1).
++func TestDashboardQIsUnbound(t *testing.T) {
+ 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
+ 		{Project: "pop", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set"},
+ 	}})
+-	got := m
+-	for _, key := range []string{"q", "s"} {
+-		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
+-		got = updated.(QueueDashboard)
+-		if cmd != nil {
+-			t.Fatalf("%s at top level returned command, want no-op", key)
+-		}
+-		if got.list.Cursor() != 0 || got.detail != nil {
+-			t.Fatalf("%s changed model: cursor=%d detail=%+v", key, got.list.Cursor(), got.detail)
+-		}
++	press := tea.KeyPressMsg{Code: 'q', Text: "q"}
++
++	updated, cmd := m.Update(press)
++	got := updated.(QueueDashboard)
++	if cmd != nil {
++		t.Fatal("q at top level returned command, want no-op")
++	}
++	if got.list.Cursor() != 0 || got.detail != nil {
++		t.Fatalf("q changed model: cursor=%d detail=%+v", got.list.Cursor(), got.detail)
+ 	}
+ 
+ 	got.detail = newDetailView(got.snap.Containers[0])
+-	for _, key := range []string{"q", "s"} {
+-		updated, cmd := got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
+-		got = updated.(QueueDashboard)
+-		if cmd != nil {
+-			t.Fatalf("%s in detail returned command, want no-op", key)
+-		}
+-		if got.detail == nil {
+-			t.Fatalf("%s in detail closed detail view", key)
+-		}
++	updated, cmd = got.Update(press)
++	got = updated.(QueueDashboard)
++	if cmd != nil {
++		t.Fatal("q in detail returned command, want no-op")
++	}
++	if got.detail == nil {
++		t.Fatal("q in detail closed detail view")
+ 	}
+ }
+ 
+diff --git a/dashboard/kind_verbs.go b/dashboard/kind_verbs.go
+index e5f8b79e..1e757140 100644
+--- a/dashboard/kind_verbs.go
++++ b/dashboard/kind_verbs.go
+@@ -182,7 +182,11 @@ func (m *QueueDashboard) reportVerbStatus(msg dashboardKindVerbMsg, status strin
+ 	case (msg.item != nil || msg.artifact != nil) && m.detail != nil:
+ 		m.detail.flash.Set(status)
+ 	default:
+-		m.flash.Set(status)
++		// A container verb's report goes to the surface in view, which is now the
++		// detail view whenever one is open: its openers dispatch container verbs
++		// too, and a confirmation written to the table's line behind it would be
++		// invisible (ADR-0261 decision 1).
++		m.visibleFlash().Set(status)
+ 	}
+ }
+ 

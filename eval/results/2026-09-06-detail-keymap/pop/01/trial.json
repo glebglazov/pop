@@ -1,0 +1,132 @@
+{
+  "grade": {
+    "status": "ungraded",
+    "reason": "Invalid Trial is excluded",
+    "gates": [],
+    "outside_scope": [],
+    "reply": ""
+  },
+  "case": "2026-09-06-detail-keymap",
+  "arm": "pop",
+  "repeat": 1,
+  "attempts": 2,
+  "model": "opus",
+  "started_at": "2026-09-08T15:50:44.377683Z",
+  "ended_at": "2026-09-08T16:15:09.506213Z",
+  "outcome": "invalid",
+  "reason": "pop tasks implement 2026-09-06-detail-keymap exited 1: task 2026-09-06-detail-keymap/01-container-openers-in-the-detail: implementation commit: exit status 128: Author identity unknown\n\n*** Please tell me who you are.\n\nRun\n\n  git config --global user.email \"you@example.com\"\n  git config --global user.name \"Your Name\"\n\nto set your account's default identity.\nOmit --global to set the identity only in this repository.\n\nfatal: unable to auto-detect email address (got 'glebglazov@macbook-tds.(none)')\n",
+  "work_dir": "/Users/glebglazov/private/Dev/personal/pop/eval/work/trial-2544288539",
+  "set_status": "READY",
+  "set_spend": {
+    "task_set_id": "2026-09-06-detail-keymap",
+    "completed_tasks": 0,
+    "implement_input_tokens": 188,
+    "implement_output_tokens": 64230,
+    "implement_cache_read_tokens": 8656040,
+    "implement_cache_write_tokens": 254529,
+    "implement_partial_cost_usd": 8.479999999999997,
+    "implement_run_count": 2,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 0,
+    "verification_output_tokens": 0,
+    "verification_cache_read_tokens": 0,
+    "verification_cache_write_tokens": 0,
+    "verification_run_count": 0,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 0,
+    "refine_output_tokens": 0,
+    "refine_cache_read_tokens": 0,
+    "refine_cache_write_tokens": 0,
+    "refine_run_count": 0,
+    "refine_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "",
+        "title": "",
+        "input_tokens": 54,
+        "output_tokens": 11244,
+        "cache_read_tokens": 2016586,
+        "cache_write_tokens": 103804,
+        "partial_cost_usd": 2.327703,
+        "notional_cost_usd": 2.327703,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5",
+        "model_key_source": "actual",
+        "turns": 27,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 109202,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5": {
+            "input_tokens": 54,
+            "output_tokens": 11244,
+            "cache_read_tokens": 2016586,
+            "cache_write_tokens": 103804
+          }
+        }
+      },
+      {
+        "task_id": "01-container-openers-in-the-detail",
+        "title": "Container menus and the flat verb answer in the detail view",
+        "input_tokens": 134,
+        "output_tokens": 52986,
+        "cache_read_tokens": 6639454,
+        "cache_write_tokens": 150725,
+        "partial_cost_usd": 6.152296999999997,
+        "notional_cost_usd": 6.152296999999997,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5",
+        "model_key_source": "actual",
+        "turns": 67,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 156707,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5": {
+            "input_tokens": 134,
+            "output_tokens": 52986,
+            "cache_read_tokens": 6639454,
+            "cache_write_tokens": 150725
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}

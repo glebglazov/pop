@@ -48,7 +48,8 @@ func TestRunMatrixIsRepeatMajorAndResumes(t *testing.T) {
 		return tasks.WriteAtomic(path, data, 0o644)
 	}
 	cases, arms, repeats := []string{"case-a", "case-b"}, []string{"bare", "pop"}, []int{1, 2}
-	if err := runMatrix(cases, arms, repeats, results, runner, grader); err != nil {
+	var progress bytes.Buffer
+	if err := runMatrix(cases, arms, repeats, results, evalProgress{out: &progress}, runner, grader); err != nil {
 		t.Fatal(err)
 	}
 	wantCalls := []string{
@@ -61,17 +62,48 @@ func TestRunMatrixIsRepeatMajorAndResumes(t *testing.T) {
 	if attempts["1/case-a/bare"] != 2 || len(grades) != 8 || grades[0] != "1/case-a/bare" {
 		t.Fatalf("attempts = %v; grades = %v", attempts, grades)
 	}
+	if !strings.Contains(progress.String(), "Invalid Trial retry attempt=2") || !strings.Contains(progress.String(), "Eval Matrix finished: completed=7 timed_out=0 invalid=1 graded=8") {
+		t.Fatalf("Matrix progress:\n%s", progress.String())
+	}
 	retried, _, err := readTrialRecord(filepath.Join(results, "case-a", "bare", "01", "trial.json"))
 	if err != nil || retried.Attempts != 2 || retried.Outcome != "invalid" {
 		t.Fatalf("retried Trial = %+v, %v", retried, err)
 	}
 	calls, grades = nil, nil
-	if err := runMatrix(cases, arms, repeats, results, runner, grader); err != nil {
+	if err := runMatrix(cases, arms, repeats, results, evalProgress{out: &progress}, runner, grader); err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 0 || len(grades) != 0 {
 		t.Fatalf("resume reran Trials: calls=%v grades=%v", calls, grades)
 	}
+}
+
+func TestRunMatrixGradesSavedPatchWithoutArmInvocation(t *testing.T) {
+	results := t.TempDir()
+	dir := filepath.Join(results, "case-a", "bare", "01")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := trialRecord{Case: "case-a", Arm: "bare", Repeat: 1, Attempts: 1, Outcome: outcomeCompleted}
+	data, _ := json.Marshal(record)
+	writeFile(t, filepath.Join(dir, "trial.json"), string(data))
+	var progress bytes.Buffer
+	err := runMatrix([]string{"case-a"}, []string{"bare"}, []int{1}, results, evalProgress{out: &progress},
+		func(string, string, int) (string, error) {
+			t.Fatal("saved patch invoked the Arm")
+			return "", nil
+		},
+		func(string, string, int) error {
+			record.Grade = &gradeRecord{Status: "graded", Scores: &gradeScores{Items: []itemGrade{{Item: 1, Met: true}}, Quality: 5}}
+			data, _ := json.Marshal(record)
+			return tasks.WriteAtomic(filepath.Join(dir, "trial.json"), data, 0o644)
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertProgressOrder(t, progress.String(),
+		"attempt=1 resumed: saved patch will be graded without another Arm invocation",
+		"finished: outcome=completed grade=graded acceptance=1/1 quality=5/5")
 }
 
 func TestSelectCasesDefaultsToEveryApprovedCase(t *testing.T) {

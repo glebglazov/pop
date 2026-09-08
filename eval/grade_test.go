@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -89,7 +90,8 @@ cat "$FAKE_GRADE_REPLY"
 			t.Setenv("FAKE_GRADE_PROMPT", promptPath)
 			t.Setenv("FAKE_GRADE_REPLY", replyPath)
 			args := []string{"grade", "--cases", filepath.Dir(caseDir), "--arms", arms, "--graders", graders, "--config", config, "--work", filepath.Join(root, "work"), "--results", results, "example", "hidden-arm-name", "1"}
-			if err := run(args); err != nil {
+			var progress bytes.Buffer
+			if err := runGradeCommandWithProgress(args[1:], evalProgress{out: &progress}, true); err != nil {
 				t.Fatal(err)
 			}
 			var got trialRecord
@@ -102,6 +104,7 @@ cat "$FAKE_GRADE_REPLY"
 				t.Fatalf("Arm spend changed: %+v", got.Spend)
 			}
 			if tc.status == "gate_failed" {
+				assertProgressOrder(t, progress.String(), "grading preparation started", "grading preparation finished", "Objective gate started:", "Objective gate finished:", "Grader execution skipped:", "finished: outcome=completed grade=gate_failed acceptance=0 quality=0/5")
 				if g.Gates[1].ExitCode != 7 || g.Scores == nil || g.Scores.Quality != 0 || g.Scores.ListRatio != 0 || g.Grader != nil {
 					t.Fatalf("gate failure = %+v", g)
 				}
@@ -117,11 +120,17 @@ cat "$FAKE_GRADE_REPLY"
 				t.Fatalf("reply = %q", g.Reply)
 			}
 			if tc.status == "ungraded" {
+				if !strings.Contains(progress.String(), "Grader execution finished: outcome=completed grade=ungraded reason=") {
+					t.Fatalf("malformed Grader progress:\n%s", progress.String())
+				}
 				if g.Scores != nil || g.Reason == "" {
 					t.Fatalf("unparseable grade = %+v", g)
 				}
 			} else if g.Scores == nil || g.Scores.Quality != 4 || g.Scores.ListRatio != 0.5 || len(g.Scores.Items) != 2 || !g.Scores.Items[0].Met || g.Scores.Items[1].Met || g.Scores.Items[1].Reason != "Compatibility was removed." || g.Scores.Rationale != "Clear implementation." {
 				t.Fatalf("scores = %+v", g.Scores)
+			}
+			if tc.status == "graded" && !strings.Contains(progress.String(), "finished: outcome=completed grade=graded acceptance=1/2 quality=4/5 result=") {
+				t.Fatalf("graded completion progress:\n%s", progress.String())
 			}
 			prompt := readFile(t, promptPath)
 			for _, text := range []string{"+changed", "1. The file changes.", "> Parent standard: keep public behaviour stable.", "Files outside stated scope: [\"AGENTS.md\" \"binary.dat\" \"outside.txt\"]", "correctness, maintainability, clarity, test adequacy, and unnecessary complexity"} {

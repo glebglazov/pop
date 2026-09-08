@@ -48,7 +48,12 @@ type gradeRecord struct {
 }
 
 func runGradeCommand(args []string) error {
+	return runGradeCommandWithProgress(args, evalProgress{out: os.Stderr}, true)
+}
+
+func runGradeCommandWithProgress(args []string, progress evalProgress, reportCompletion bool) error {
 	flags := flag.NewFlagSet("grade", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
 	cases := flags.String("cases", defaultCasesRoot, "Case directory root")
 	arms := flags.String("arms", defaultArmsRoot, "Arm directory root")
 	graders := flags.String("graders", defaultGradersRoot, "Grader arm directory root")
@@ -107,7 +112,7 @@ func runGradeCommand(args []string) error {
 	record.Grade = grade
 	gradeErr := gradeOneTrial(manifest, acceptance, behaviourCount, &record, gradeOptions{
 		work: *work, configPath: *configPath, graders: *graders, arms: *arms,
-		timeout: *timeout, resultDir: resultDir,
+		timeout: *timeout, resultDir: resultDir, progress: progress,
 	})
 	if gradeErr != nil {
 		grade.Reason = gradeErr.Error()
@@ -120,12 +125,22 @@ func runGradeCommand(args []string) error {
 		return errors.Join(gradeErr, err)
 	}
 	fmt.Println(recordPath)
-	return gradeErr
+	if reportCompletion {
+		progress.line("Trial %s finished: outcome=%s %s result=%s", trialLabel(record.Case, record.Arm, record.Repeat), record.Outcome, gradeSummary(record), resultDir)
+	}
+	if gradeErr != nil {
+		if reportCompletion {
+			return fmt.Errorf("Trial %s phase grading: %w", trialLabel(record.Case, record.Arm, record.Repeat), gradeErr)
+		}
+		return gradeErr
+	}
+	return nil
 }
 
 type gradeOptions struct {
 	work, configPath, graders, arms, resultDir string
 	timeout                                    time.Duration
+	progress                                   evalProgress
 }
 
 func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int, record *trialRecord, opts gradeOptions) error {
@@ -133,11 +148,13 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 
 	if record.Outcome == outcomeInvalid {
 		grade.Reason = "Invalid Trial is excluded"
+		opts.progress.line("Trial %s grading skipped: Invalid Trial is excluded", trialLabel(record.Case, record.Arm, record.Repeat))
 		return nil
 	}
 	if record.Outcome == outcomeTimedOut {
 		grade.Status = "timed_out"
 		grade.Scores = &gradeScores{}
+		opts.progress.line("Trial %s grading skipped: Trial ceiling reached; zero scores recorded", trialLabel(record.Case, record.Arm, record.Repeat))
 		return nil
 	}
 	if record.Outcome != outcomeCompleted {
@@ -160,7 +177,10 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	}
 	defer os.RemoveAll(dir)
 	clone := filepath.Join(dir, "repository")
+	label := trialLabel(record.Case, record.Arm, record.Repeat)
+	opts.progress.line("Trial %s grading preparation started", label)
 	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, clone); err != nil {
+		opts.progress.line("Trial %s grading preparation failed: %v", label, err)
 		return err
 	}
 	if len(patch) > 0 {
@@ -179,8 +199,10 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 			grade.OutsideScope = append(grade.OutsideScope, file)
 		}
 	}
+	opts.progress.line("Trial %s grading preparation finished", label)
 	failed := false
 	for _, command := range manifest.GateCommands {
+		opts.progress.line("Trial %s Objective gate started: %s", label, command)
 		cmd := exec.Command("sh", "-c", command)
 		cmd.Dir = clone
 		output, err := cmd.CombinedOutput()
@@ -193,10 +215,16 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 			failed = true
 		}
 		grade.Gates = append(grade.Gates, gate)
+		if err != nil {
+			opts.progress.line("Trial %s Objective gate finished: failed exit=%d command=%s", label, gate.ExitCode, command)
+		} else {
+			opts.progress.line("Trial %s Objective gate finished: passed exit=%d command=%s", label, gate.ExitCode, command)
+		}
 	}
 	if failed {
 		grade.Status = "gate_failed"
 		grade.Scores = &gradeScores{}
+		opts.progress.line("Trial %s Grader execution skipped: one or more Objective gates failed", label)
 		return nil
 	}
 	var cfg struct {
@@ -256,6 +284,7 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 			fmt.Fprintf(&quoted, "> %s\n", line)
 		}
 	}
+	opts.progress.line("Trial %s Grader execution started", label)
 	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
 		AgentSpec: grader.agentSpec(), Prompt: graderPrompt(string(patch), acceptance, quoted.String(), grade.OutsideScope),
 		RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: filepath.Join(opts.resultDir, "grading"),
@@ -265,18 +294,22 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 		grade.Grader = &capturedRunRecord{Agent: grader.agentSpec(), RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}
 	}
 	if captureErr != nil {
+		opts.progress.line("Trial %s Grader execution failed: %v", label, captureErr)
 		return captureErr
 	}
 	if attempt.Outcome != "completed" {
 		grade.Reason = "Grader outcome: " + attempt.Outcome
+		opts.progress.line("Trial %s Grader execution finished: outcome=%s grade=ungraded", label, attempt.Outcome)
 		return nil
 	}
 	scores, err := parseGraderReply(attempt.Output, behaviourCount)
 	if err != nil {
 		grade.Reason = err.Error()
+		opts.progress.line("Trial %s Grader execution finished: outcome=completed grade=ungraded reason=%s", label, err)
 		return nil
 	}
 	grade.Status, grade.Scores = "graded", scores
+	opts.progress.line("Trial %s Grader execution finished: outcome=completed grade=graded", label)
 	return nil
 }
 

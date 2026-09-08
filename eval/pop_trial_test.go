@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -97,9 +98,19 @@ esac
 				ceiling = "300ms"
 			}
 			results := filepath.Join(root, "results")
-			err := run([]string{"run", "--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling})
+			var progress bytes.Buffer
+			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling}, evalProgress{out: &progress})
 			if err != nil {
 				t.Fatalf("run: %v", err)
+			}
+			if status == "DONE" {
+				assertProgressOrder(t, progress.String(), "Arm=pop repeat=1 attempt=1", "preparation started", "Arm execution started", "Arm execution finished: outcome=completed", "patch saving finished:", "Objective gate started: false", "Grader execution skipped:", "finished: outcome=completed grade=gate_failed")
+			}
+			if status == "TIMEOUT" && !strings.Contains(progress.String(), "grading skipped: Trial ceiling reached; zero scores recorded") {
+				t.Fatalf("Trial ceiling progress:\n%s", progress.String())
+			}
+			if status == "CRASH" {
+				assertProgressOrder(t, progress.String(), "Arm execution finished: outcome=invalid", "Invalid Trial retry attempt=2 reason=pop tasks implement example exited 7", "Arm execution started", "grading skipped: Invalid Trial is excluded", "finished: outcome=invalid grade=ungraded")
 			}
 			result := filepath.Join(results, "example", "pop", fmt.Sprintf("%02d", i+1))
 			var record trialRecord

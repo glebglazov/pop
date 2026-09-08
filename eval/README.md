@@ -127,6 +127,32 @@ The command grades each Trial after its final attempt. `--grade-timeout 1h`,
 `--graders`, and `--config` set the same Grader inputs as the standalone
 `grade` command.
 
+Progress is plain text on stderr, so stdout remains available for saved paths
+and JSON. A one-Trial Matrix reports the observable phases in this shape:
+
+```text
+Eval Matrix: Trials=1 results=/path/to/repository/eval/results
+Trial 1/1 Case=example Arm=bare repeat=1 attempt=1
+Trial Case=example Arm=bare repeat=1 attempt=1 preparation started
+Trial Case=example Arm=bare repeat=1 attempt=1 preparation finished
+Trial Case=example Arm=bare repeat=1 attempt=1 Arm execution started
+Trial Case=example Arm=bare repeat=1 attempt=1 Arm execution finished: outcome=completed
+Trial Case=example Arm=bare repeat=1 attempt=1 patch saving started
+Trial Case=example Arm=bare repeat=1 attempt=1 patch saving finished: path=/path/to/result/diff.patch
+Trial Case=example Arm=bare repeat=1 grading preparation started
+Trial Case=example Arm=bare repeat=1 Objective gate started: go test ./...
+Trial Case=example Arm=bare repeat=1 Objective gate finished: passed exit=0 command=go test ./...
+Trial Case=example Arm=bare repeat=1 Grader execution started
+Trial Case=example Arm=bare repeat=1 Grader execution finished: outcome=completed grade=graded
+Trial 1/1 Case=example Arm=bare repeat=1 finished: outcome=completed grade=graded acceptance=3/3 quality=4/5 result=eval/results/example/bare/01
+Eval Matrix finished: completed=1 timed_out=0 invalid=0 graded=1 gate_failed=0 ungraded=0
+Read the Rollup: go run ./eval rollup --results /path/to/repository/eval/results
+```
+
+Resume output says whether Eval skips a saved, graded Trial or grades a saved
+patch without another Arm invocation. Invalid Trial retries, Trial ceiling
+results, skipped grading, and failed phases also state their reason here.
+
 For a Bare-arm Trial, the command clones the Case repository, checks out the
 parent SHA detached, and makes one captured invocation. The prompt has a fixed
 preamble with the repository URL, completion instruction, no-commit rule, and

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"io"
@@ -124,8 +125,21 @@ esac
 				ceiling = "500ms"
 			}
 			trialArgs := append(append([]string{}, args...), "--repeat", repeat, "--ceiling", ceiling)
-			if err := run(trialArgs); err != nil {
+			var progress bytes.Buffer
+			if err := runTrialCommandWithProgress(trialArgs[1:], evalProgress{out: &progress}); err != nil {
 				t.Fatal(err)
+			}
+			if tc.mode == "success" {
+				assertProgressOrder(t, progress.String(),
+					"Eval Matrix: Trials=1 results=",
+					"Trial 1/1 Case=example Arm=anonymous-arm repeat=1 attempt=1",
+					"preparation started", "preparation finished",
+					"Arm execution started", "Arm execution finished: outcome=completed",
+					"patch saving started", "patch saving finished:",
+					"Objective gate started: false", "Objective gate finished: failed exit=1 command=false",
+					"Grader execution skipped: one or more Objective gates failed",
+					"finished: outcome=completed grade=gate_failed acceptance=0 quality=0/5 result=",
+					"Eval Matrix finished:", "Read the Rollup:")
 			}
 			dir := filepath.Join(results, "example", "anonymous-arm", "0"+repeat)
 			var record trialRecord
@@ -160,13 +174,29 @@ esac
 			if err != nil || len(captures) != 2 {
 				t.Fatalf("capture = %v, %v", captures, err)
 			}
-			if err := run(trialArgs); err != nil {
+			progress.Reset()
+			if err := runTrialCommandWithProgress(trialArgs[1:], evalProgress{out: &progress}); err != nil {
 				t.Fatalf("resume existing repeat: %v", err)
+			}
+			if tc.mode == "success" && !strings.Contains(progress.String(), "skipped: saved Trial already has grade=gate_failed") {
+				t.Fatalf("resume progress:\n%s", progress.String())
 			}
 		})
 	}
 	if got := readFile(t, filepath.Join(repo, "feature.txt")); got != "later\n" {
 		t.Fatalf("source changed: %q", got)
+	}
+}
+
+func assertProgressOrder(t *testing.T, output string, messages ...string) {
+	t.Helper()
+	position := 0
+	for _, message := range messages {
+		next := strings.Index(output[position:], message)
+		if next < 0 {
+			t.Fatalf("progress missing %q after byte %d:\n%s", message, position, output)
+		}
+		position += next + len(message)
 	}
 }
 
