@@ -254,6 +254,7 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	}
 	verdict := Verdict(v.Verdict)
 	printVerdict(opts.Output, opts.SetID, workSHA, verdict, v.Findings, opts.Agents, opts.Effort)
+	printForcedVerifyDisposition(opts.Output, opts.SetID, verdict, m, cfg, opts.Agents, opts.Effort)
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: verdict, Findings: v.Findings}, nil
 }
 
@@ -1449,6 +1450,36 @@ func printVerdict(w io.Writer, setID, workSHA string, verdict Verdict, findings 
 	if verdict != VerdictPass {
 		out.line(ansiDim, "   Re-run: %s", FormatVerifyCommand(setID, cliAgents, cliEffort))
 	}
+}
+
+// printForcedVerifyDisposition explains what the cached verdict will do when
+// this set next drains and names the dispositions available now. It stays
+// separate from printVerdict because the drain and gate Re-verify paths share
+// that renderer but enact or revisit their verdicts immediately.
+func printForcedVerifyDisposition(w io.Writer, setID string, verdict Verdict, m *Manifest, cfg *config.Config, cliAgents []string, cliEffort string) {
+	if w == nil || verdict == VerdictPass {
+		return
+	}
+	out := outputFor(w)
+	verifyCommand := FormatVerifyCommand(setID, cliAgents, cliEffort)
+	out.line(ansiBold, "━━ Disposition for %s", setID)
+	if m.HumanCompleted {
+		out.line(ansiDim, "   This Human completion stays complete; the verdict lands only as its verification mark.")
+		out.line(ansiDim, "   Accept: %s --accept \"<note>\"", verifyCommand)
+	} else {
+		depth, maximum := remediationDepth(m), maxRemediationDepth(cfg)
+		switch {
+		case verdict == VerdictFixable && depth < maximum:
+			out.line(ansiDim, "   The next drain spawns a Remediation task from these findings (depth %d of %d).", depth, maximum)
+		case verdict == VerdictFixable:
+			out.line(ansiDim, "   The next drain parks the set at VERIFY-FAILED; the Remediation depth cap is exhausted (%d of %d).", depth, maximum)
+		default:
+			out.line(ansiDim, "   The next drain parks the set at VERIFY-FAILED.")
+		}
+		out.line(ansiDim, "   Remediate: %s --remediate \"<note>\"", verifyCommand)
+		out.line(ansiDim, "   Accept: %s --accept \"<note>\"", verifyCommand)
+	}
+	out.line(ansiDim, "   Editing a task's acceptance criteria does not clear this verdict; re-run verification or record an Accept before the next drain.")
 }
 
 // printAcceptedVerdict renders the outcome of an Accept (ADR-0103): a

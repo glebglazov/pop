@@ -173,6 +173,101 @@ func TestVerifyResolvedSetRunsPrintsAndPersists(t *testing.T) {
 	}
 }
 
+// TestVerifyResolvedSetPrintsForcedDispositionTail pins the five standalone
+// outcomes. The shared drain and gate renderer is not involved in this tail.
+func TestVerifyResolvedSetPrintsForcedDispositionTail(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		verdict        Verdict
+		findings       string
+		tasks          []Task
+		humanCompleted bool
+		want           []string
+		dontWant       []string
+	}{
+		{
+			name: "fixable under cap", verdict: VerdictFixable, findings: "fix it", tasks: doneAFKSet(),
+			want: []string{
+				"The next drain spawns a Remediation task from these findings (depth 0 of 3).",
+				`Remediate: pop tasks verify demo --remediate "<note>"`,
+				`Accept: pop tasks verify demo --accept "<note>"`,
+			},
+		},
+		{
+			name: "fixable at cap", verdict: VerdictFixable, findings: "still broken", tasks: remediationSet(DefaultMaxRemediationDepth),
+			want: []string{
+				"The next drain parks the set at VERIFY-FAILED; the Remediation depth cap is exhausted (3 of 3).",
+				`Remediate: pop tasks verify demo --remediate "<note>"`,
+				`Accept: pop tasks verify demo --accept "<note>"`,
+			},
+		},
+		{
+			name: "needs human", verdict: VerdictNeedsHuman, findings: "choose a policy", tasks: doneAFKSet(),
+			want: []string{
+				"The next drain parks the set at VERIFY-FAILED.",
+				`Remediate: pop tasks verify demo --remediate "<note>"`,
+				`Accept: pop tasks verify demo --accept "<note>"`,
+			},
+		},
+		{
+			name: "human completion", verdict: VerdictFixable, findings: "advisory", tasks: doneAFKSet(), humanCompleted: true,
+			want: []string{
+				"This Human completion stays complete; the verdict lands only as its verification mark.",
+				`Accept: pop tasks verify demo --accept "<note>"`,
+			},
+			dontWant: []string{"Remediate:", "The next drain"},
+		},
+		{
+			name: "pass", verdict: VerdictPass, tasks: doneAFKSet(),
+			dontWant: []string{"━━ Disposition", "Editing a task's acceptance criteria", "Remediate:", "Accept:"},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d, defPath := setupVerifyFixtureTasks(t, stubGit("sha-tail\n", "", ""), tc.tasks)
+			if tc.humanCompleted {
+				m := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+				m.HumanCompleted = true
+				if err := WriteManifestAtomic(d, m); err != nil {
+					t.Fatalf("write Human completion: %v", err)
+				}
+			}
+
+			var out bytes.Buffer
+			_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+				Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Output: &out,
+				runVerifier: func(string) (string, error) {
+					return fmt.Sprintf("VERDICT: %s\nFINDINGS: %s\n", tc.verdict, tc.findings), nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("verifyResolvedSet: %v", err)
+			}
+			got := out.String()
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("output missing %q:\n%s", want, got)
+				}
+			}
+			for _, dontWant := range tc.dontWant {
+				if strings.Contains(got, dontWant) {
+					t.Fatalf("output contains %q:\n%s", dontWant, got)
+				}
+			}
+			if tc.verdict != VerdictPass {
+				last := "Editing a task's acceptance criteria does not clear this verdict; re-run verification or record an Accept before the next drain."
+				if !strings.HasSuffix(strings.TrimSpace(got), last) {
+					t.Fatalf("non-PASS tail does not end with warning:\n%s", got)
+				}
+			}
+		})
+	}
+}
+
 func TestVerifyResolvedSetForceOverwritesForSHA(t *testing.T) {
 	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("shaX\n", "", ""))
