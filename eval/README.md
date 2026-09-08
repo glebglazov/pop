@@ -131,10 +131,65 @@ binary data, and has no Trial path or Arm label added by the harness.
 The outcomes are `completed`, `timed_out`, and `invalid`. A quota pause or
 agent crash produces an Invalid Trial; its agent outcome and reason remain in
 the record. Each command runs once. Select an unused repeat to rerun an Invalid
-Trial. Objective gates and grading are separate later steps.
+Trial. Objective gates and grading run through the separate `grade` command.
 
 Clones and Captured runs stay under `eval/work/trial-<random>/repository` and
 `capture`. These names do not identify the Arm. A later Grader must receive only
 the parent repository, patch, and Acceptance list, never the Trial record or
 Captured run. `eval/work/` is local work and is ignored by Git; results remain
 available to commit.
+
+## Grade a Trial
+
+```sh
+go run ./eval grade <case> <arm> <repeat>
+```
+
+Grading restores `diff.patch` in a fresh detached clone at the Case parent SHA.
+Every Objective gate runs through `sh -c` in that clone, in manifest order. The
+Trial record's `grade.gates` stores each command, exit code, output, and error.
+Any gate failure sets `grade.status` to `gate_failed`, gives zero list ratio and
+quality, and skips the Grader. Invalid Trials remain ungraded and excluded;
+Trials that reached the Trial ceiling receive zero without a Grader.
+
+Scope entries are repository paths: a file or a directory and its descendants.
+`.` permits the whole tree; an empty scope permits no changed files. Added,
+deleted, and renamed paths are checked. Files outside scope are passed to the
+Grader as a flag and do not fail a gate.
+
+`eval/config.toml` selects `grader_arm`, loaded from `eval/graders/<name>.toml`
+in the same file shape as a Bare arm. The default is Codex with `gpt-5.5`.
+Grading rejects a Grader model used by any file in the Arm directory or by the
+Trial's requested or reported model. Grader files have a separate directory so
+that they are not counted as comparison Arms.
+
+The Grader runs through the capture seam in another fresh clone at the parent
+SHA. Its prompt contains only the Trial diff, approved Acceptance list, quoted
+parent-tree standard documents, scope flag, and quality dimensions. Missing
+`standard_documents` uses the Case preparation defaults; an explicit list
+replaces them, and each named document must exist. No Arm label, Trial record,
+Reference diff, or other Trial is supplied. The Grader is instructed to inspect
+only the parent tree and supplied diff, without inspecting history or other
+refs. This is an input contract, not an agent filesystem sandbox.
+
+The reply has one line per numbered Acceptance-list item, followed by quality:
+
+```text
+ITEM 1 MET: The requested behaviour is present.
+ITEM 2 NOT_MET: Existing output is missing.
+QUALITY 3: The code is clear but leaves compatibility work.
+```
+
+Items must be in order, with nonempty one-line reasons. Quality must be 1–5
+with a nonempty one-line rationale. Extra text, missing items, or invalid scores
+leave `grade.status` as `ungraded`, with no guessed scores. `grade.reply` keeps
+the whole reply in all cases. Successful grading writes `grade.scores`, including
+the per-item decisions, list ratio, quality, and rationale.
+
+`grade.grader` stores the Grader's Captured run ID, outcome, actual model, spend,
+and notional cost separately from Arm spend. Captured runs are stored in the
+Trial result directory under `grading/`. Regrading replaces the grade fields;
+it does not run the Arm again or change its spend. Previous capture files stay.
+`--config`, `--graders`, `--cases`, `--arms`, `--work`, and `--results` select other
+paths. `--timeout` sets the Grader ceiling (one hour by default). Flags precede
+the three positional arguments.

@@ -1,5 +1,6 @@
 /pop
 config.toml
+!/eval/config.toml
 
 # local planning / handoff docs
 /plans/

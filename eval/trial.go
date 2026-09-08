@@ -15,6 +15,7 @@ import (
 )
 
 type trialRecord struct {
+	Grade        *gradeRecord      `json:"grade,omitempty"`
 	Case         string            `json:"case"`
 	Arm          string            `json:"arm"`
 	Repeat       int               `json:"repeat"`
