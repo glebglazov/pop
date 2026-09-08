@@ -604,6 +604,24 @@ func (m QueueDashboard) newDashboardMenu(row DashboardRow) *dashboardMenu {
 	}
 }
 
+// withRefreshedMenuItems re-derives an open Run menu's rows on the cursor it is
+// sitting on, so a change to what its labels say lands without the menu closing
+// under the human. A plural menu re-intersects its marked rows' verbs; a
+// singular one re-reads the row it opened over.
+func (m QueueDashboard) withRefreshedMenuItems() QueueDashboard {
+	if m.menu == nil || m.menu.list == nil {
+		return m
+	}
+	items := m.menuItemsFor(m.menu.row)
+	if m.menu.plural {
+		items = m.selectionMenuItems(m.menu.targets)
+	}
+	cursor := m.menu.list.Cursor()
+	m.menu.list = ui.NewList(items, ui.Opts[dashboardMenuItem]{Wrap: true})
+	m.menu.list.SetCursor(cursor)
+	return m
+}
+
 // dashboardFilterItem is one Work view preset in the filter menu: its digit
 // shortcut (1–9; empty past nine), the display label, and the resolved preset
 // selecting it installs on the session (ADR-0197).

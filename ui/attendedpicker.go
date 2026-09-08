@@ -13,7 +13,8 @@ import (
 // AttendedAgentEntry is one selectable attended entry: the command a pick
 // returns, and the shared one-line render its host built for it.
 type AttendedAgentEntry struct {
-	// Cmd is the entry's complete command — the value the host gives the choice.
+	// Cmd is the entry's complete command — what a pick hands back, and all a
+	// host needs to launch or hold the choice.
 	Cmd string
 	// Label is the entry as the Attended entry render spells it.
 	Label string

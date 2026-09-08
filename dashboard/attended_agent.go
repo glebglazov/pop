@@ -117,15 +117,15 @@ func actionKeyReserved(key string) bool {
 	return false
 }
 
-// The attended chooser as a modal over the rows. The component is the one a gate
-// opens (ADR-0264 decision 3); the difference is only in the hosting — a gate
-// runs it as its own inline program, and here it is a model this page drives,
-// because a dashboard is already a program and a second one would take the
-// terminal out from under it.
+// The attended chooser as a modal over the Run menu it opens from (ADR-0269
+// decision 2). The component is the one a gate opens; the difference is only in
+// the hosting — a gate runs it as its own inline program, and here it is a model
+// this page drives, because a dashboard is already a program and a second one
+// would take the terminal out from under it.
 
 // openAttendedPick opens the chooser over the attended list the merged config
 // resolves to. Nothing about the page changes underneath it: the rows, the
-// cursor and the poll are where they were when it closes.
+// cursor, the open Run menu and the poll are where they were when it closes.
 func (m QueueDashboard) openAttendedPick() (tea.Model, tea.Cmd) {
 	m.attendedPick = ui.NewAttendedAgentPicker(tasks.AttendedPickChoices(m.cfg))
 	return m, nil
@@ -163,21 +163,12 @@ func AttendedSessionChoice(msg tea.Msg) (tasks.AgentGroupEntry, bool) {
 	return picked.entry, ok
 }
 
-// WithAttendedSessionChoice applies the shell-owned choice to this page and
-// rebuilds an open Run menu so its attended rows change at once.
+// WithAttendedSessionChoice applies the shell-owned choice to this page. An open
+// Run menu is refreshed on it, so its attended rows name the picked entry at
+// once rather than at the next open.
 func (m QueueDashboard) WithAttendedSessionChoice(entry tasks.AgentGroupEntry) QueueDashboard {
 	m.attendedChoice = &entry
-	if m.menu == nil || m.menu.list == nil {
-		return m
-	}
-	cursor := m.menu.list.Cursor()
-	if m.menu.plural {
-		m.menu.list = ui.NewList(m.selectionMenuItems(m.menu.targets), ui.Opts[dashboardMenuItem]{Wrap: true})
-	} else {
-		m.menu.list = ui.NewList(m.menuItemsFor(m.menu.row), ui.Opts[dashboardMenuItem]{Wrap: true})
-	}
-	m.menu.list.SetCursor(cursor)
-	return m
+	return m.withRefreshedMenuItems()
 }
 
 // AttendedPickOpen reports whether the chooser owns the keyboard, so the host

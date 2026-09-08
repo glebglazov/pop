@@ -54,7 +54,6 @@ func TestActionKeySpaceReleasesTheRetiredAttendedPickChord(t *testing.T) {
 	if actionKeyReserved("a") {
 		t.Fatal("plain a must stay available to kinds")
 	}
-	_ = work.Action{}
 }
 
 func TestDashboardAttendedMenuRowNamesEntry(t *testing.T) {
@@ -107,8 +106,10 @@ func TestDashboardPersistentAgentBlockNamesTheConfigDashboardKey(t *testing.T) {
 	if !strings.Contains(view, ui.ConfigDashboardKeyLabel) {
 		t.Fatalf("subheader must name the Config dashboard key:\n%s", view)
 	}
-	if strings.Contains(view, tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))+" · A-a") {
-		t.Fatalf("subheader still names the retired chord:\n%s", view)
+	// The subheader renders no launch, so it points at the Config dashboard and
+	// never at the chooser — even where the attended list holds a choice to make.
+	if got := twoEntryDashboard(t).attendedAgentStatusLine(); strings.Contains(got, ui.AttendedPickKeyLabel) {
+		t.Fatalf("subheader = %q, want no chooser key on it", got)
 	}
 }
 
@@ -190,7 +191,8 @@ agents = [{ display_name = "Cursor", cmd = "cursor" }]
 }
 
 // twoEntryDashboard is a page over a config holding a choice: two usable
-// attended entries, which is what makes the chord live (ADR-0264 decision 4).
+// attended entries, which is what makes the chooser live (ADR-0264 decision 4,
+// kept by ADR-0269 decision 5).
 func twoEntryDashboard(t *testing.T) QueueDashboard {
 	t.Helper()
 	cfg := &config.Config{Work: &config.WorkConfig{
@@ -215,8 +217,6 @@ func pressKey(t *testing.T, m QueueDashboard, msg tea.KeyPressMsg) QueueDashboar
 	return updated.(QueueDashboard)
 }
 
-func altA() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt} }
-
 func openAttendedChooser(t *testing.T, m QueueDashboard) QueueDashboard {
 	t.Helper()
 	m = pressKey(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
@@ -235,7 +235,7 @@ func openAttendedChooser(t *testing.T, m QueueDashboard) QueueDashboard {
 
 // The affordance is on the row that names the entry, and only while a choice
 // exists — a list of one has nothing to open.
-func TestDashboardAttendedRowAdvertisesTheChordOnlyWithAChoice(t *testing.T) {
+func TestDashboardAttendedRowAdvertisesTheChooserKeyOnlyWithAChoice(t *testing.T) {
 	m := twoEntryDashboard(t)
 	label := m.enrichAttendedActionLabel(setkind.VerbAssist, "assist")
 	if !strings.Contains(label, ui.AttendedPickKeyLabel+" to change") {
@@ -307,7 +307,10 @@ func TestDashboardMarkingSurvivesTheChooser(t *testing.T) {
 		t.Fatalf("esc wrote something: %v", m.actionErr)
 	}
 
-	m.menu = nil
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.menu != nil {
+		t.Fatal("esc left the Run menu open")
+	}
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if !m.selection.Active() {
 		t.Fatal("tab marked nothing after the chooser")
@@ -318,7 +321,9 @@ func TestDashboardMarkingSurvivesTheChooser(t *testing.T) {
 	}
 }
 
-func TestDashboardSelectionRunMenuOpensAttendedChooser(t *testing.T) {
+// A Selection's plural Run menu offers the chooser on the same terms as one row,
+// and the pick lands on the plural rows themselves (ADR-0269 decision 5).
+func TestDashboardSelectionRunMenuChoosesTheAttendedAgent(t *testing.T) {
 	k := &bulkKind{
 		id:  ref.KindTaskSet,
 		ids: []string{"one", "two"},
@@ -340,6 +345,13 @@ func TestDashboardSelectionRunMenuOpensAttendedChooser(t *testing.T) {
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.attendedPick == nil {
 		t.Fatal("tab on the plural attended row opened no chooser")
+	}
+	m = pressKey(t, m, tea.KeyPressMsg{Code: '2', Text: "2"})
+	if m.attendedPick != nil {
+		t.Fatal("the chooser stayed open after a pick")
+	}
+	if label := m.menu.list.Items()[0].label; !strings.Contains(label, "Cursor") {
+		t.Fatalf("plural attended row = %q, want the picked entry", label)
 	}
 }
 
