@@ -4,7 +4,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboard"
-	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
@@ -50,9 +49,6 @@ type Shell struct {
 	pane   work.PaneFacts
 	width  int
 	height int
-	// attendedChoice lasts only for this shell invocation and is shared by both
-	// Work pages. It never enters config or the store.
-	attendedChoice *tasks.AgentGroupEntry
 
 	// configModal is the Config dashboard when it is open over the page in focus.
 	// While it is set it owns the keyboard: see config_modal.go.
@@ -178,14 +174,6 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s = s.reloadPagesConfig()
 	}
 
-	if entry, ok := dashboard.AttendedSessionChoice(msg); ok {
-		s.attendedChoice = &entry
-		for id, page := range s.pages {
-			s.pages[id] = page.WithAttendedSessionChoice(entry)
-		}
-		return s, nil
-	}
-
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		// While the Config modal is open it owns the keyboard outright (ADR-0202
 		// decision 11): no page toggle, no kind's action verb, nothing. It is the
@@ -198,10 +186,8 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// that includes the two the shell would otherwise take first: the operator
 		// reading the key list gets neither a page switch nor the Config dashboard
 		// on top of what they are reading. The keys fall through to the page, which
-		// swallows them and lets ? or esc close the overlay. The attended chooser a
-		// page opens holds the keyboard the same way, and is owed the suspension
-		// this shell asks of a page for its own modal (ADR-0264 decision 3).
-		pageOwnsKeys := s.page(s.active).HelpOpen() || s.page(s.active).AttendedPickOpen()
+		// swallows them and lets ? or esc close the overlay.
+		pageOwnsKeys := s.page(s.active).HelpOpen()
 		if kpm, ok := keyMsg.(tea.KeyPressMsg); ok && !pageOwnsKeys && ui.IsConfigDashboardKey(kpm) {
 			return s.openConfigModal(), nil
 		}
@@ -267,9 +253,6 @@ func (s Shell) buildActivePage() tea.Cmd {
 		return nil
 	}
 	s.pages[s.active] = dashboard.OpenPage(s.d, s.cfg, s.active, s.pane)
-	if s.attendedChoice != nil {
-		s.pages[s.active] = s.pages[s.active].WithAttendedSessionChoice(*s.attendedChoice)
-	}
 	if s.width == 0 && s.height == 0 {
 		return nil
 	}

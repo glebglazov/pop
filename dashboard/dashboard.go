@@ -604,24 +604,6 @@ func (m QueueDashboard) newDashboardMenu(row DashboardRow) *dashboardMenu {
 	}
 }
 
-// withRefreshedMenuItems re-derives an open Run menu's rows on the cursor it is
-// sitting on, so a change to what its labels say lands without the menu closing
-// under the human. A plural menu re-intersects its marked rows' verbs; a
-// singular one re-reads the row it opened over.
-func (m QueueDashboard) withRefreshedMenuItems() QueueDashboard {
-	if m.menu == nil || m.menu.list == nil {
-		return m
-	}
-	items := m.menuItemsFor(m.menu.row)
-	if m.menu.plural {
-		items = m.selectionMenuItems(m.menu.targets)
-	}
-	cursor := m.menu.list.Cursor()
-	m.menu.list = ui.NewList(items, ui.Opts[dashboardMenuItem]{Wrap: true})
-	m.menu.list.SetCursor(cursor)
-	return m
-}
-
 // dashboardFilterItem is one Work view preset in the filter menu: its digit
 // shortcut (1–9; empty past nine), the display label, and the resolved preset
 // selecting it installs on the session (ADR-0197).
@@ -1093,17 +1075,10 @@ type QueueDashboard struct {
 	bind      *dashboardBindModal
 	drainPick *dashboardDrainModal
 	abandon   *dashboardAbandonModal
-	// attendedPick is the attended-agent chooser when it is open over the rows.
-	// While it is set it owns the keyboard, this page's and its host's alike:
-	// see attended_agent.go.
-	attendedPick *ui.AttendedAgentPicker
-	// attendedChoice is the whole Agent entry picked for this dashboard session.
-	// The shell copies it to both pages; it is never persisted.
-	attendedChoice *tasks.AgentGroupEntry
-	detail         *detailView
-	menu           *dashboardMenu
-	itemMenu       *itemMenu
-	filter         *dashboardFilterMenu
+	detail    *detailView
+	menu      *dashboardMenu
+	itemMenu  *itemMenu
+	filter    *dashboardFilterMenu
 
 	// searchTyping is the Work dashboard search's typing phase: a Text entry mode,
 	// so while it is on the keyboard belongs to searchInput and only Enter, Esc and
@@ -1342,7 +1317,6 @@ func (m QueueDashboard) resizeMainList() {
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return !m.showHelp && !m.searchTyping &&
 		m.bind == nil && m.drainPick == nil && m.abandon == nil && m.bulkPrompt == nil &&
-		m.attendedPick == nil &&
 		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
 }
 
@@ -1501,10 +1475,6 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.bulkPrompt != nil {
 			m.pendingG = false
 			return m.updateBulkPrompt(msg)
-		}
-		if m.attendedPick != nil {
-			m.pendingG = false
-			return m.updateAttendedPick(msg)
 		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
@@ -1927,12 +1897,6 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "k", "up":
 		m.menu.list.MoveUp()
-		return m, nil
-	case "tab":
-		item, ok := m.menu.list.Selected()
-		if ok && attendedActionVerb(item.verb) && tasks.AttendedPickOffered(m.cfg) {
-			return m.openAttendedPick()
-		}
 		return m, nil
 	case "enter":
 		return m.invokeMenuItem(m.menu.list.Cursor())
@@ -3658,14 +3622,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "y", Desc: "confirm unbind"},
 			{Key: "enter/n/esc", Desc: "cancel"},
 		}
-	case m.attendedPick != nil:
-		// The attended chooser, which owns the keyboard until it is answered.
-		return []ui.HelpEntry{
-			{Key: "1-9", Desc: "pick that entry"},
-			{Key: "j/k", Desc: "move highlight"},
-			{Key: "enter", Desc: "pick the highlighted entry"},
-			{Key: "esc", Desc: "leave the agent unchanged"},
-		}
 	case m.bulkPrompt != nil:
 		// A bulk verb's confirmation, which owns the keyboard until it is answered.
 		return []ui.HelpEntry{
@@ -3908,8 +3864,6 @@ func (m QueueDashboard) View() tea.View {
 			title = page + " · drain"
 		} else if m.abandon != nil {
 			title = page + " · unbind"
-		} else if m.attendedPick != nil {
-			title = "Help · " + page + " · attended agent"
 		}
 		content := ui.RenderHelpOverlay(title, m.helpEntries(), m.width, m.height)
 		v := tea.NewView(content)
@@ -3929,8 +3883,6 @@ func (m QueueDashboard) View() tea.View {
 
 	var content string
 	switch {
-	case m.attendedPick != nil:
-		content = m.viewWithModal()
 	case m.menu != nil:
 		content = m.viewWithMenu()
 	case m.filter != nil:
@@ -4241,8 +4193,6 @@ func (m QueueDashboard) viewWithModal() string {
 		renderDashboardDrainModal(&body, m.drainPick, avail, m.width)
 	case m.abandon != nil:
 		renderDashboardAbandonModal(&body, m.abandon, m.width)
-	case m.attendedPick != nil:
-		renderAttendedPickModal(&body, m.attendedPick, avail, m.width)
 	}
 	return body.String()
 }

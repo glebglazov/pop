@@ -24,11 +24,9 @@ type AttendedAgentEntry struct {
 // (ADR-0264). It is the surface behind `tab` on a gate menu's assist row: one
 // level, one list, and a choice handed straight back.
 //
-// It holds no config and reaches no writer. What a pick means is the host's
-// business, so a gate may persist its result while a dashboard keeps it only for
-// its session without either behavior entering this component.
-// It writes nothing to stdout on any path, which is the stricter of its two
-// hosts' vows (ADR-0202 decision 11).
+// It holds no config and reaches no writer. The gate keeps a pick for its
+// attended session without that behavior entering this component.
+// It writes nothing to stdout on any path (ADR-0202 decision 11).
 type AttendedAgentPicker struct {
 	entries  []AttendedAgentEntry
 	cursor   int
