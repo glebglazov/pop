@@ -17,7 +17,7 @@ func attendedEntries() []AttendedAgentEntry {
 func TestAttendedAgentPickerPicksByDigitAndLeavesUnchangedOnEsc(t *testing.T) {
 	p := NewAttendedAgentPicker(attendedEntries())
 	got := StripANSI(p.ViewContent())
-	for _, want := range []string{"Attended agent", "1. Claude Usual · opus", "2. Cursor", "esc leave unchanged"} {
+	for _, want := range []string{"Agent entry", "1. Claude Usual · opus", "2. Cursor", "esc leave unchanged"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("view missing %q:\n%s", want, got)
 		}

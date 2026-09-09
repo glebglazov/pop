@@ -38,6 +38,7 @@ type gateEnv struct {
 	statePath      string
 	taskSetID      string
 	fold           AssistFold
+	reverify       *reverifyGateContext
 	// treeStable lends the checkout to one mutating menu verb — Accept,
 	// Remediate, Fold — for the length of that verb alone. It is set by the
 	// Assist session, which holds nothing itself; a drain's own gates leave it
@@ -101,6 +102,8 @@ const (
 )
 
 func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverifyGateContext) (bool, error) {
+	env.bindVerify(m, rv)
+	rv = env.reverify
 	d := env.d
 	out := env.out
 	in := env.in
@@ -129,12 +132,9 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 	var invocation *AgentAssistanceInvocation
 
 	for {
-		// The gate offers Re-verify only when Agent verification is enabled for
-		// this set (ADR-0086/ADR-0012); the option force-re-runs the Verifier so a
-		// human who edited the work inline can re-check it without a fresh drain.
+		// Manual Verify follows the command participation rules (ADR-0266).
 		showReverify := gateReverifyEnabled(rv, m)
-		// Re-resolved each time round the menu: a Re-verify may land a Remediation
-		// task and a report written since the gate opened is still the one to point at.
+		// Re-read report pointers when the gate returns.
 		refine := resolveGateRefineState(d, env.cfg.Value(), m)
 		explore := ResolveExploreMark(d, m)
 		verify, hasVerify := latestVerifyPointer(d, m)
@@ -149,32 +149,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		case hitlGateReadVerify:
 			pageReportDocument(d, in, runtimePath, out, verify)
 		case hitlGateReverify:
-			repo := ""
-			if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
-				repo = id.CommonDir
-			}
-			if rerr := reverifyAtGate(d, rv, out, repo, runtimePath, taskSetID, m); rerr != nil {
-				fmt.Fprintf(outputFor(out), "Could not re-verify: %v\n", rerr)
-				continue
-			}
-			// Refresh the set and overlay the fresh verdict so the rendered table
-			// reflects the new state/label (PASS → still AWAITING-APPROVAL, a
-			// non-PASS verdict → VERIFY-FAILED), then return to the gate menu.
-			afterRefresh, err := RefreshWith(d, definitionPath, statePath)
-			if err != nil {
-				return true, exitErr(ExitOperational, "refresh after re-verify: %v", err)
-			}
-			ApplyVerifyVerdicts(d, afterRefresh, rv.cfg, runtimePath)
-			fmt.Fprintln(out)
-			Render(out, afterRefresh)
-			afterManifest := afterRefresh.Manifests[taskSetID]
-			if BlockingHITLTask(afterManifest) == nil {
-				return true, nil
-			}
-			m = afterManifest
-			hitl = BlockingHITLTask(m)
-			body = gateTaskBody(d, m, hitl)
-			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
+			return env.verifyAndReturnToMenu(m)
 		case hitlGateComplete:
 			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
 			if err != nil {
@@ -365,10 +340,10 @@ func gateTaskBody(d *Deps, m *Manifest, task *Task) string {
 }
 
 // gateReverifyEnabled reports whether the HITL gate should offer the Re-verify
-// option for the current set: only when a Verifier context is present, Agent
-// verification is enabled in config, and the set has not opted out (ADR-0086).
+// option for the current set. Manual Verify can run on any valid manifest,
+// including a set that has disabled automatic verification (ADR-0266).
 func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
-	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
+	return rv != nil && m != nil && m.Valid
 }
 
 func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, explore ExploreResolution, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
@@ -389,6 +364,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig,
 	}
 	if showReverify {
 		add(hitlGateReverify, "Re-verify (re-run the Verifier against the current work)")
+		items[len(items)-1].Role = "verify"
 	}
 	if refine.HasReport {
 		add(hitlGateReadRefine, "Read the refine report (no agent runs)", gateRefineEntryDetails(refine)...)
@@ -445,6 +421,8 @@ const (
 	failedGateAssist
 	failedGateComplete
 	failedGateShell
+	failedGateVerify
+	failedGateReadVerify
 )
 
 // handleInteractiveFailedGate is the interactive counterpart to
@@ -455,6 +433,7 @@ const (
 // back to the static advice and exit with operational failure (Exit chosen, or
 // the prompt cannot run under --yes / a non-interactive input).
 func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, error) {
+	env.bindVerify(m, nil)
 	d := env.d
 	out := env.out
 	in := env.in
@@ -535,6 +514,10 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
 			}
+		case failedGateReadVerify:
+			env.readVerifyReport(m)
+		case failedGateVerify:
+			return env.verifyAndReturnToMenu(m)
 		case failedGateExit:
 			return false, nil
 		}
@@ -557,6 +540,11 @@ func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfi
 			{Key: "0", Label: "Exit"},
 		},
 	}
+	if cfg != nil && cfg.verify != nil && cfg.verify.manifest.Valid {
+		exit := spec.Items[len(spec.Items)-1]
+		spec.Items = append(spec.Items[:len(spec.Items)-1], ui.GateMenuItem{Key: "5", Label: "Verify (fresh check of the current work)", Role: "verify"})
+		spec.Items = append(appendVerifyReportItem(spec.Items, d, cfg.verify.manifest), exit)
+	}
 	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
 		return failedGateExit, err
@@ -570,6 +558,10 @@ func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfi
 		return failedGateComplete, nil
 	case "4":
 		return failedGateShell, nil
+	case "r":
+		return failedGateReadVerify, nil
+	case "5":
+		return failedGateVerify, nil
 	default:
 		return failedGateExit, nil
 	}
@@ -583,6 +575,8 @@ const (
 	verifyFailedGateRemediate
 	verifyFailedGateAssist
 	verifyFailedGateShell
+	verifyFailedGateVerify
+	verifyFailedGateReadVerify
 )
 
 // handleInteractiveVerifyFailedGate is the interactive counterpart to the
@@ -591,13 +585,14 @@ const (
 // (record a human-authored PASS with a note), Remediate (spawn a Remediation
 // task with a note), open a shell in the checkout, or exit. Accept and Remediate
 // invoke the exact store/spawn behavior behind the `--accept` / `--remediate`
-// CLI flags. Re-verify is deliberately not offered here — re-running the Verifier
-// is a separate force action, not a finding response. Returns (true, nil) when
+// CLI flags. Manual Verify refreshes the gate without a disposition.
+// Returns (true, nil) when
 // the caller should keep draining in-process (Accept flipped the set to verified,
 // Remediate spawned drainable work) and (false, nil) when it should fall back to
 // the static advice and exit (Exit chosen, or the prompt cannot run under --yes /
 // a non-interactive input).
 func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, workSHA, findings string) (bool, error) {
+	env.bindVerify(m, nil)
 	d := env.d
 	out := env.out
 	in := env.in
@@ -693,6 +688,10 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
 			}
 			// No state change, no refresh — loop back to the gate menu unchanged.
+		case verifyFailedGateReadVerify:
+			env.readVerifyReport(m)
+		case verifyFailedGateVerify:
+			return env.verifyAndReturnToMenu(m)
 		case verifyFailedGateExit:
 			return false, nil
 		}
@@ -716,6 +715,11 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gat
 			{Key: "0", Label: "Exit"},
 		},
 	}
+	if cfg != nil && cfg.verify != nil && cfg.verify.manifest.Valid {
+		exit := spec.Items[len(spec.Items)-1]
+		spec.Items = append(spec.Items[:len(spec.Items)-1], ui.GateMenuItem{Key: "5", Label: "Verify (fresh check of the current work)", Role: "verify"})
+		spec.Items = append(appendVerifyReportItem(spec.Items, d, cfg.verify.manifest), exit)
+	}
 	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
 		return verifyFailedGateExit, err
@@ -729,6 +733,10 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gat
 		return verifyFailedGateAssist, nil
 	case "4":
 		return verifyFailedGateShell, nil
+	case "r":
+		return verifyFailedGateReadVerify, nil
+	case "5":
+		return verifyFailedGateVerify, nil
 	default:
 		return verifyFailedGateExit, nil
 	}

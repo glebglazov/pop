@@ -34,6 +34,7 @@ Derived status: {{.Status}}
 - Inspect task bodies and the runtime checkout to advise the human.
 - Edit implementation under the runtime checkout when the human asks.
 - Run `pop conventions get implementation` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
+- The human can select Verify in the host menu for a fresh check. That action returns to the menu without completing tasks or choosing a disposition.
 - Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine` (those start a Drain, the Verifier or a Refiner).
 
 {{template "the-human-decides"}}

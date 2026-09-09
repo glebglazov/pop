@@ -1658,7 +1658,7 @@ func TestRunTaskSetFailedGateInvalidReprompts(t *testing.T) {
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(buf.String(), "Choose 1, 2, 3, 4, or 0.") {
+	if !strings.Contains(buf.String(), "Choose 1, 2, 3, 4, 5, or 0.") {
 		t.Fatalf("invalid input must re-prompt:\n%s", buf.String())
 	}
 }

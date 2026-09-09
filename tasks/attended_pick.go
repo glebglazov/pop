@@ -35,14 +35,22 @@ func AttendedPickOffered(cfg *config.Config) bool {
 // PickAttendedAgent returns the whole entry selected by the chooser. It does
 // not write the Agent override or any other saved state (ADR-0266).
 func PickAttendedAgent(cfg *config.Config, in io.Reader, out io.Writer, warn func(string, ...any)) (*AgentGroupEntry, string) {
-	picked, err := runAttendedPicker(AttendedPickChoices(cfg), in, out, warn)
+	return pickAgentEntry(usableGroupEntries(cfg, "attended"), in, out, warn)
+}
+
+func pickAgentEntry(entries []AgentGroupEntry, in io.Reader, out io.Writer, warn func(string, ...any)) (*AgentGroupEntry, string) {
+	var choices []ui.AttendedAgentEntry
+	for _, entry := range entries {
+		choices = append(choices, ui.AttendedAgentEntry{Cmd: entry.Cmd, Label: FormatAgentEntry(entry)})
+	}
+	picked, err := runAttendedPicker(choices, in, out, warn)
 	if err != nil {
 		return nil, fmt.Sprintf("Agent unchanged — the list would not open: %v", err)
 	}
 	if picked == nil {
 		return nil, ""
 	}
-	for _, entry := range usableGroupEntries(cfg, "attended") {
+	for _, entry := range entries {
 		if entry.Cmd == picked.Cmd && FormatAgentEntry(entry) == picked.Label {
 			chosen := entry
 			return &chosen, ""

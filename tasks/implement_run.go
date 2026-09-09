@@ -416,6 +416,7 @@ func (r *implementRun) newGateEnv() gateEnv {
 		statePath:      r.statePath,
 		taskSetID:      r.taskSetID,
 		cfg:            r.attended,
+		reverify:       &reverifyGateContext{cfg: r.plan.cfg, agents: r.opts.VerifyAgents, effort: r.opts.VerifyEffort, timeout: r.timeout, runVerifier: r.opts.verifyRunner, probeMemo: r.agentProbeMemo, convention: r.opts.VerificationConvention},
 	}
 }
 

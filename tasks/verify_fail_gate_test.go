@@ -157,8 +157,8 @@ func TestVerifyFailedGateAgentAssistanceAdvisory(t *testing.T) {
 			t.Fatalf("gate menu missing %q:\n%s", want, outStr)
 		}
 	}
-	if strings.Contains(outStr, "Re-verify") {
-		t.Fatalf("verify-fail gate must not offer re-verify:\n%s", outStr)
+	if !strings.Contains(outStr, "Verify (fresh check") {
+		t.Fatalf("verify-fail gate must offer manual Verify:\n%s", outStr)
 	}
 	if runner.attendedCalls != 1 || runner.runCalls != 0 {
 		t.Fatalf("runner calls: attended=%d run=%d, want attended only", runner.attendedCalls, runner.runCalls)

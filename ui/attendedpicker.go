@@ -133,7 +133,7 @@ func (p *AttendedAgentPicker) viewHelp() string {
 	if height <= 0 {
 		height = 12
 	}
-	return RenderHelpOverlay("Help · Attended agent", p.helpEntries(), p.width, height)
+	return RenderHelpOverlay("Help · Agent entry", p.helpEntries(), p.width, height)
 }
 
 func (p *AttendedAgentPicker) helpEntries() []HelpEntry {
@@ -150,7 +150,7 @@ func (p *AttendedAgentPicker) helpEntries() []HelpEntry {
 // this one render.
 func (p *AttendedAgentPicker) ViewContent() string {
 	var b strings.Builder
-	b.WriteString(headerStyle().Render("Attended agent"))
+	b.WriteString(headerStyle().Render("Agent entry"))
 	b.WriteString("\n\n")
 	if len(p.entries) == 0 {
 		b.WriteString(hintStyle().Render("  (no usable entries)"))

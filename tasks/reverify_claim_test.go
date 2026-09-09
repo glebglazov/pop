@@ -50,7 +50,7 @@ func TestReverifyAtGateAcquiresAndReleasesClaim(t *testing.T) {
 }
 
 // TestReverifyAtGateRefusedByOtherSetClaim: when another set's claim is live on
-// the checkout while a human sits at the gate, the re-verify's BeginDrain
+// the checkout while a human sits at the gate, the re-verify's Tree-stable acquisition
 // refuses with the claim reason and never touches the checkout (the Verifier is
 // not invoked). The error surfaces to the menu, which prints it and stays usable
 // so the human can retry after the claimant finishes (ADR-0135).

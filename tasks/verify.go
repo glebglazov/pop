@@ -89,6 +89,8 @@ type VerifyOptions struct {
 	// Empty ⇒ resolution falls through to the per-set override, then
 	// [work.verify].agents, then [work.implement].agents.
 	Agents []string
+	// PhaseChoice selects one whole entry for this interactive run only.
+	PhaseChoice *AgentGroupEntry
 	// Effort is the CLI Verifier effort override (`--effort`). Empty ⇒ resolution
 	// falls through to the per-set override, then config, then DefaultVerifyEffort.
 	Effort string
@@ -141,10 +143,11 @@ type verifyCoreOptions struct {
 	// Agents and Effort are the CLI-level Verifier overrides (highest
 	// precedence). Empty ⇒ resolution falls through to the per-set manifest
 	// override, then [work.verify], then [work.implement].agents / DefaultVerifyEffort.
-	Agents  []string
-	Effort  string
-	Timeout time.Duration
-	Output  io.Writer
+	PhaseChoice *AgentGroupEntry
+	Agents      []string
+	Effort      string
+	Timeout     time.Duration
+	Output      io.Writer
 	// Accept records a human-authored PASS (ADR-0103) instead of running the
 	// Verifier; AcceptNote carries the human's rationale onto that PASS row.
 	Accept     bool
@@ -206,6 +209,7 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		RuntimePath:   runtimePath,
 		SetID:         strings.TrimSpace(opts.TaskSetID),
 		Agents:        opts.Agents,
+		PhaseChoice:   opts.PhaseChoice,
 		Effort:        opts.Effort,
 		Timeout:       opts.Timeout,
 		Output:        opts.Output,
@@ -305,6 +309,7 @@ func handleForcedVerifyFailedGate(d *Deps, cfg *config.Config, opts verifyCoreOp
 		statePath:      StatePathFor(opts.DefPath),
 		taskSetID:      opts.SetID,
 		treeStable:     assistTreeStable(d, opts.RuntimePath, opts.SetID),
+		reverify:       &reverifyGateContext{cfg: cfg, agents: opts.Agents, effort: opts.Effort, timeout: opts.Timeout, runVerifier: opts.runVerifier, convention: opts.Convention},
 	}
 	return handleInteractiveVerifyFailedGate(env, opts.Repo, m, workSHA, findings)
 }
@@ -491,6 +496,9 @@ type reverifyGateContext struct {
 	timeout     time.Duration
 	runVerifier func(prompt string) (string, error)
 	probeMemo   *agentAvailabilityProbeMemo
+	choice      *AgentGroupEntry
+	convention  VerificationConvention
+	admission   AdmissionPolicy
 }
 
 // reverifyAtGate force-runs the Verifier against the set's current work SHA
@@ -500,24 +508,30 @@ type reverifyGateContext struct {
 // overwrites the verdict at the current SHA, so a human who made inline changes
 // re-checks the work without kicking off a fresh drain.
 //
-// The Verifier touches the checkout, so — like any execution — the re-verify
-// re-acquires the Runtime execution lock via BeginDrain and releases it on
-// return to the gate menu (ADR-0135). The gate is parked lock-free, so this is
-// the point that must reassert the Checkout claim: if another set claimed the
-// checkout while the human read the menu, BeginDrain refuses with the claim
-// reason and the human can retry after the claimant finishes. Assist sessions
-// and the runtime shell stay lock-free — human-owned side trips are not claims.
+// The manual pass borrows a Tree-stable hold and re-reads the manifest after
+// admission. It leaves no drain history and returns without a disposition.
 func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runtimePath, setID string, m *Manifest) error {
-	handle, err := BeginDrain(d, runtimePath, setID, out)
+	if m == nil || !m.Valid {
+		return exitErr(ExitSetup, "task set %q is malformed", setID)
+	}
+	handle, err := AcquireTreeStable(d, runtimePath, setID, out, rv.admission)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = handle.Finish(store.DrainEnding{State: store.StateFinished}) }()
+	defer func() { _ = handle.Release() }()
+	if m.Path != "" {
+		m = LoadManifest(d, setID, m.Path)
+		if !m.Valid {
+			return exitErr(ExitSetup, "task set %q is malformed", setID)
+		}
+	}
 	opts := verifyCoreOptions{
 		Repo:        repo,
 		RuntimePath: runtimePath,
 		SetID:       setID,
 		Agents:      rv.agents,
+		PhaseChoice: rv.choice,
+		Convention:  rv.convention,
 		Effort:      rv.effort,
 		Timeout:     rv.timeout,
 		Output:      out,
@@ -586,7 +600,11 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 	agent := ""
 	run := opts.runVerifier
 	if run == nil {
-		sel, err := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
+		agents := opts.Agents
+		if opts.PhaseChoice != nil {
+			agents = []string{opts.PhaseChoice.Cmd}
+		}
+		sel, err := resolveVerifier(agents, opts.Effort, m, cfg)
 		if err != nil {
 			return nil, err
 		}

@@ -28,7 +28,8 @@ type AssistOptions struct {
 	// binding.Fold itself — tasks/binding imports tasks — so the cmd layer
 	// injects it, keeping the refusal error in this process where the menu can
 	// print it. A nil seam hides the fold action.
-	Fold AssistFold
+	Fold                   AssistFold
+	VerificationConvention VerificationConvention
 }
 
 // AssistFold folds a set's branch onto Trunk and releases its checkout,
@@ -41,7 +42,7 @@ func AssistTaskSet(opts AssistOptions) error {
 }
 
 // AssistTaskSetWith opens a human-in-the-loop Assist session on an arbitrary Task
-// set at its current derived status, without draining or re-running the Verifier.
+// set at its current derived status, without starting a phase.
 // It presents the gate menu that status calls for (or a generic assistance menu),
 // re-derives after status-changing dispositions, and exits on `0`.
 //
@@ -49,7 +50,7 @@ func AssistTaskSet(opts AssistOptions) error {
 // claim, so it opens on a set another drain is running, on a set parked at a
 // gate, on an archived set and on a set whose manifest will not parse — a broken
 // manifest is precisely what a human opens Assist to look at. Exclusivity lives
-// on the verbs inside the menu instead: Accept, Remediate and Fold each take the
+// on the verbs inside the menu instead: Verify, Accept, Remediate and Fold take the
 // Checkout claim for the length of their own act (see gateEnv.holdTreeStill).
 //
 // What is left to refuse is only what cannot work at all: no interactive
@@ -99,6 +100,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		taskSetID:      setID,
 		cfg:            NewAttendedSession(cfg, agentOverride),
 		fold:           opts.Fold,
+		reverify:       &reverifyGateContext{cfg: cfg, convention: opts.VerificationConvention},
 		treeStable:     assistTreeStable(d, target.runtimePath, setID),
 	}
 
@@ -120,8 +122,8 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 				// Status says HITL but no open HITL task — fall through to generic.
 				handled, gateErr = handleGenericAssistMenu(env, m, status, findings)
 			} else {
-				// No re-verify: Assist never invokes the Verifier.
-				handled, gateErr = handleInteractiveHITLGate(env, m, hitl, nil)
+				// Opening the gate runs no phase; Verify is an explicit action.
+				handled, gateErr = handleInteractiveHITLGate(env, m, hitl, env.reverify)
 			}
 		case StatusVerifyFailed:
 			handled, gateErr = handleInteractiveVerifyFailedGate(env, target.repo, m, workSHA, findings)
@@ -319,12 +321,15 @@ const (
 	genericAssistAgent
 	genericAssistShell
 	genericAssistFold
+	genericAssistVerify
+	genericAssistReadVerify
 )
 
 // handleGenericAssistMenu is the Assist session menu for Ready / Done / Deferred
 // (and other non-gate statuses): agent assistance, a shell in the checkout, or
-// exit. No drain entry and no re-verify entry.
+// exit. Verify runs only when the human selects it.
 func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, findings string) (bool, error) {
+	env.bindVerify(m, nil)
 	d := env.d
 	out := env.out
 	in := env.in
@@ -394,6 +399,10 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 				continue
 			}
 			return false, nil
+		case genericAssistReadVerify:
+			env.readVerifyReport(m)
+		case genericAssistVerify:
+			return env.verifyAndReturnToMenu(m)
 		case genericAssistExit:
 			return false, nil
 		}
@@ -408,6 +417,10 @@ func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader
 	if offerFold {
 		items = append(items, ui.GateMenuItem{Key: "3", Label: "Fold branch back into Trunk and release checkout"})
 	}
+	if cfg != nil && cfg.verify != nil && cfg.verify.manifest.Valid {
+		items = appendVerifyReportItem(items, d, cfg.verify.manifest)
+		items = append(items, ui.GateMenuItem{Key: "v", Label: "Verify (fresh check of the current work)", Role: "verify"})
+	}
 	items = append(items, ui.GateMenuItem{Key: "0", Label: "Exit"})
 
 	spec := ui.GateMenuSpec{
@@ -420,6 +433,10 @@ func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader
 		return genericAssistExit, err
 	}
 	switch choice {
+	case "r":
+		return genericAssistReadVerify, nil
+	case "v":
+		return genericAssistVerify, nil
 	case "1":
 		return genericAssistAgent, nil
 	case "2":

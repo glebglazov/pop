@@ -568,9 +568,11 @@ func TestFormatVerifyCommand(t *testing.T) {
 // output per attempt. It lets tests exercise multi-agent verifier fall-through
 // without spawning real agents.
 type scriptedVerifyRunner struct {
-	calls   int
-	scripts []string // raw output to emit for each Start call
-	names   []string
+	calls    int
+	scripts  []string // raw output to emit for each Start call
+	names    []string
+	args     [][]string
+	exitCode int
 }
 
 func (r *scriptedVerifyRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
@@ -584,6 +586,7 @@ func (r *scriptedVerifyRunner) Run(ctx context.Context, dir string, stdout, stde
 func (r *scriptedVerifyRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	r.calls++
 	r.names = append(r.names, name)
+	r.args = append(r.args, append([]string(nil), args...))
 	script := ""
 	if r.calls <= len(r.scripts) {
 		script = r.scripts[r.calls-1]
@@ -595,7 +598,7 @@ func (r *scriptedVerifyRunner) Start(ctx context.Context, dir string, stdout, st
 		fmt.Fprintln(stdout, line)
 	}
 	proc := &ManagedProcess{done: make(chan waitResult, 1)}
-	proc.done <- waitResult{exitCode: 0}
+	proc.done <- waitResult{exitCode: r.exitCode}
 	return proc, nil
 }
 

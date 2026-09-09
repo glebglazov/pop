@@ -560,7 +560,7 @@ func TestRunTaskSetHITLGateOffersReverify(t *testing.T) {
 
 // TestRunTaskSetHITLGateReverifyRefreshesLabel: when a forced re-verify at the
 // gate comes back non-PASS, the set's rendered state refreshes to VERIFY-FAILED
-// and control returns to the gate menu (still offering Re-verify), so a human
+// and control returns to the Verify-fail gate, so a human
 // can keep iterating without a fresh drain (ADR-0012).
 func TestRunTaskSetHITLGateReverifyRefreshesLabel(t *testing.T) {
 	t.Parallel()
@@ -598,8 +598,8 @@ func TestRunTaskSetHITLGateReverifyRefreshesLabel(t *testing.T) {
 	if !strings.Contains(out, "VERIFY-FAILED") {
 		t.Fatalf("re-verify NEEDS-HUMAN verdict must refresh the label to VERIFY-FAILED:\n%s", out)
 	}
-	// The gate re-displayed after the re-verify (two Human-blocked: prompts).
-	if strings.Count(out, "Human-blocked:") < 2 {
+	// The new verdict returns to the Verify-fail gate without a disposition.
+	if !strings.Contains(out, "Verify-failed:") {
 		t.Fatalf("gate must re-display after re-verify:\n%s", out)
 	}
 	if calls != 2 {
@@ -607,10 +607,8 @@ func TestRunTaskSetHITLGateReverifyRefreshesLabel(t *testing.T) {
 	}
 }
 
-// TestRunTaskSetHITLGateHidesReverifyWhenDisabled: with verification off, the
-// HITL gate menu omits the Re-verify option entirely — the force-verify path is
-// gated by the same config opt-in as the rest of the feature (ADR-0086).
-func TestRunTaskSetHITLGateHidesReverifyWhenDisabled(t *testing.T) {
+// Manual Verify remains available when automatic verification is disabled.
+func TestRunTaskSetHITLGateOffersManualVerifyWhenAutomaticVerifyIsDisabled(t *testing.T) {
 	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -626,8 +624,8 @@ func TestRunTaskSetHITLGateHidesReverifyWhenDisabled(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 
 	out := buf.String()
-	if strings.Contains(out, "Re-verify") {
-		t.Fatalf("HITL gate must not offer Re-verify when verification is disabled:\n%s", out)
+	if !strings.Contains(out, "Re-verify") {
+		t.Fatalf("HITL gate must offer manual Verify when automatic verification is disabled:\n%s", out)
 	}
 }
 

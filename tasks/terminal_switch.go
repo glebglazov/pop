@@ -136,6 +136,7 @@ func (r *implementRun) hitlGate(m *Manifest, hitl *Task) (bool, error) {
 	r.parkAtGate(m, hitl, false)
 	rv := &reverifyGateContext{
 		cfg:         r.plan.cfg,
+		convention:  r.opts.VerificationConvention,
 		agents:      r.opts.VerifyAgents,
 		effort:      r.opts.VerifyEffort,
 		timeout:     r.timeout,

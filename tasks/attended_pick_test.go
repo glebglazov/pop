@@ -86,7 +86,7 @@ func gateKeyDriver(t *testing.T, rounds ...[]tea.KeyPressMsg) (func(ui.GateMenuS
 		}
 		round++
 		fmt.Fprint(out, ui.StripANSI(m.ViewContent()))
-		return ui.GateMenuResult{Key: m.Chosen(), PickAttended: m.PickedAttended()}, nil
+		return ui.GateMenuResult{Key: m.Chosen(), PickAttended: m.PickedAttended(), PickAction: m.PickedAction()}, nil
 	}, &seen
 }
 

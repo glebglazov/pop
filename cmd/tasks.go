@@ -1255,13 +1255,14 @@ func runTaskAssistWith(d *tasks.Deps, w io.Writer, stdin io.Reader, taskSetID st
 		return fmt.Errorf("tasks assist: %w", err)
 	}
 	if err := tasks.AssistTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.AssistOptions{
-		ResolveInput: resolveInput,
-		TaskSetID:    taskSetID,
-		AgentPreset:  selectedTaskAgentPreset(),
-		AgentCmd:     taskAgentCmd,
-		Output:       w,
-		Input:        stdin,
-		Fold:         assistFold(d),
+		ResolveInput:           resolveInput,
+		TaskSetID:              taskSetID,
+		AgentPreset:            selectedTaskAgentPreset(),
+		AgentCmd:               taskAgentCmd,
+		Output:                 w,
+		Input:                  stdin,
+		Fold:                   assistFold(d),
+		VerificationConvention: verificationConvention(d),
 	}); err != nil {
 		return fmt.Errorf("tasks assist: %w", err)
 	}

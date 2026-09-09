@@ -76,11 +76,16 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 	if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
 		repo = id.CommonDir
 	}
+	var phaseChoice *AgentGroupEntry
+	if r.attended != nil {
+		phaseChoice = r.attended.verifyChoice
+	}
 	effective, verdict, verr := drainVerifyPhase(d, cfg, verifyCoreOptions{
 		Repo:        repo,
 		RuntimePath: runtimePath,
 		SetID:       taskSetID,
 		Agents:      opts.VerifyAgents,
+		PhaseChoice: phaseChoice,
 		Effort:      opts.VerifyEffort,
 		Timeout:     timeout,
 		Output:      out,

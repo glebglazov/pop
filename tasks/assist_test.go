@@ -105,8 +105,8 @@ func TestAssistSessionVerifyFailedMenuRouting(t *testing.T) {
 			t.Fatalf("assist output missing %q:\n%s", want, outStr)
 		}
 	}
-	if strings.Contains(outStr, "Re-verify") {
-		t.Fatalf("assist verify-fail menu must not offer re-verify:\n%s", outStr)
+	if !strings.Contains(outStr, "Verify (fresh check") {
+		t.Fatalf("assist verify-fail menu must offer manual Verify:\n%s", outStr)
 	}
 	// Cached verdict untouched — Exit, and no Verifier run.
 	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaASSIST"); stored == nil || stored.Verdict != "NEEDS-HUMAN" {

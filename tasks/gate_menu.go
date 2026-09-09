@@ -17,9 +17,11 @@ var runGateMenu = ui.RunGateMenu
 // AttendedSession owns the attended choice for one interactive run. The menu
 // and every later launch in that run share this value; no state is saved.
 type AttendedSession struct {
-	cfg      *config.Config
-	override string
-	choice   *AgentGroupEntry
+	cfg          *config.Config
+	override     string
+	choice       *AgentGroupEntry
+	verifyChoice *AgentGroupEntry
+	verify       *verifyGateSession
 }
 
 type gateConfig = AttendedSession
@@ -90,6 +92,9 @@ func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.G
 	for {
 		spec.AttendedLabel = FormatAgentEntry(cfg.EffectiveEntry())
 		spec.AttendedPickable = AttendedPickOffered(cfg.Value())
+		if cfg != nil && cfg.verify != nil {
+			cfg.verify.decorate(&spec, cfg.verifyChoice)
+		}
 		res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
 			Interrupt:  interrupt,
 			LineReader: reader,
@@ -100,6 +105,23 @@ func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.G
 		}
 		if res.ForceQuit {
 			return "", true, nil
+		}
+		if res.PickAction != "" {
+			spec.FocusKey = res.PickAction
+		}
+		if res.PickAction != "" && cfg != nil && cfg.verify != nil {
+			for _, item := range spec.Items {
+				if item.Key == res.PickAction && item.Role == "verify" {
+					choice, notice := pickAgentEntry(cfg.verify.entries(), in, out, promptWarner(out))
+					spec.Notice = notice
+					if choice != nil {
+						cfg.verifyChoice = choice
+					}
+				}
+			}
+			if !res.PickAttended {
+				continue
+			}
 		}
 		if !res.PickAttended {
 			return res.Key, false, nil

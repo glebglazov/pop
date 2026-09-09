@@ -43,6 +43,10 @@ type GateMenuItem struct {
 	// Assists marks the item whose launch uses the attended entry. When set,
 	// ViewContent appends Spec.AttendedLabel (ADR-0196 decision 9).
 	Assists bool
+	// Role identifies a phase action. Its host resolves the entry and picker.
+	Role          string
+	AgentLabel    string
+	AgentPickable bool
 }
 
 // GateMenuSpec describes one inline gate menu frame.
@@ -53,6 +57,7 @@ type GateMenuSpec struct {
 	// waiter count, remediation review). Each string is one rendered line.
 	Preamble []string
 	Items    []GateMenuItem
+	FocusKey string
 	// Footnote is an optional dim line under the choices (e.g. force-quit hint).
 	Footnote string
 	// AttendedLabel is the shared one-line render of the attended entry the
@@ -63,9 +68,7 @@ type GateMenuSpec struct {
 	// menu answers that key with a pick request (ADR-0264 decisions 3 and 4).
 	// False renders exactly as a row with nothing to choose between.
 	AttendedPickable bool
-	// Notice is a line above the choices saying what the last keystroke did or
-	// refused to do — the override layer's refusal of an attended pick is the
-	// one that reaches here. It belongs in the frame rather than on stdout,
+	// Notice reports a picker refusal. It belongs in the frame rather than on stdout,
 	// which the menu is drawn over.
 	Notice string
 }
@@ -75,10 +78,11 @@ type GateMenuResult struct {
 	// Key is the selected item's Key. Empty when ForceQuit is set.
 	Key string
 	// PickAttended is set when the human asked for the attended-agent list
-	// instead of choosing an item. The host opens it, writes what it returns and
-	// runs the menu again: the menu neither picks nor writes (ADR-0264
-	// decision 6).
+	// instead of choosing an item. The host opens the picker and retains the
+	// choice for this run. The menu neither picks nor writes (ADR-0266).
 	PickAttended bool
+	// PickAction is the highlighted action whose entry the host must choose.
+	PickAction string
 	// ForceQuit is set when a second interrupt arrived while the menu was up
 	// (interrupt gate) or the tea program was killed by that signal.
 	ForceQuit bool
@@ -115,6 +119,7 @@ type GateMenu struct {
 	// pickAttended records that tab closed the menu asking for the chooser,
 	// which is a different exit from choosing an item.
 	pickAttended bool
+	pickAction   string
 	quit         bool
 }
 
@@ -124,6 +129,12 @@ func NewGateMenu(spec GateMenuSpec) *GateMenu {
 	cursor := 0
 	for i, it := range spec.Items {
 		if it.Default {
+			cursor = i
+			break
+		}
+	}
+	for i, it := range spec.Items {
+		if it.Key == spec.FocusKey {
 			cursor = i
 			break
 		}
@@ -138,6 +149,8 @@ func (m *GateMenu) Chosen() string { return m.chosen }
 // list rather than choosing an item — the half of a run's outcome a host acts on
 // by opening the chooser.
 func (m *GateMenu) PickedAttended() bool { return m.pickAttended }
+
+func (m *GateMenu) PickedAction() string { return m.pickAction }
 
 // Init implements tea.Model.
 func (m *GateMenu) Init() tea.Cmd { return nil }
@@ -169,8 +182,10 @@ func (m *GateMenu) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key.Matches(msg, gateMenuKeys.Submit):
 		return m.selectIndex(m.cursor)
-	case m.spec.AttendedPickable && key.Matches(msg, gateMenuKeys.PickAttended):
-		m.pickAttended = true
+	case m.currentPickable() && key.Matches(msg, gateMenuKeys.PickAttended):
+		it := m.spec.Items[m.cursor]
+		m.pickAction = it.Key
+		m.pickAttended = it.Assists
 		m.quit = true
 		return tea.Quit
 	case key.Matches(msg, gateMenuKeys.Cancel):
@@ -207,6 +222,14 @@ func (m *GateMenu) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.selectIndex(idx)
 	}
 	return nil
+}
+
+func (m *GateMenu) currentPickable() bool {
+	if len(m.spec.Items) == 0 {
+		return false
+	}
+	it := m.spec.Items[m.cursor]
+	return it.AgentPickable || (it.Assists && m.spec.AttendedPickable)
 }
 
 func (m *GateMenu) moveCursor(delta int) {
@@ -280,8 +303,8 @@ func (m *GateMenu) helpEntries() []HelpEntry {
 		{"Esc", "Exit (option 0)"},
 		{"C-h", "Toggle this help"},
 	}
-	if m.spec.AttendedPickable {
-		entries = append(entries, HelpEntry{AttendedPickKeyLabel, "Choose the attended agent"})
+	if m.currentPickable() {
+		entries = append(entries, HelpEntry{AttendedPickKeyLabel, "Choose the agent for this action"})
 	}
 	return entries
 }
@@ -334,6 +357,12 @@ func (m *GateMenu) ViewChoices() string {
 				// exists: a list of one has nothing to open (ADR-0264 decision 4).
 				itemLabel += " · " + AttendedPickKeyLabel + " to change"
 			}
+		}
+		if it.AgentLabel != "" {
+			itemLabel += " · " + it.AgentLabel
+		}
+		if it.AgentPickable {
+			itemLabel += " · " + AttendedPickKeyLabel + " to change"
 		}
 		label := fmt.Sprintf("%s. %s", it.Key, itemLabel)
 		if i == m.cursor {
@@ -500,13 +529,16 @@ func runGateMenuInteractive(m *GateMenu, in io.Reader, out io.Writer, interrupt 
 	if !ok || fm == nil {
 		return GateMenuResult{}, fmt.Errorf("gate menu: unexpected model type %T", final)
 	}
-	return GateMenuResult{Key: fm.chosen, PickAttended: fm.pickAttended}, nil
+	return GateMenuResult{Key: fm.chosen, PickAttended: fm.pickAttended, PickAction: fm.pickAction}, nil
 }
 
 func runGateMenuLine(m *GateMenu, in io.Reader, out io.Writer, cfg GateMenuRunConfig) (GateMenuResult, error) {
 	// A line reader has no chooser to open, so the row it prints must not
 	// advertise one (ADR-0264 decision 7).
 	m.spec.AttendedPickable = false
+	for i := range m.spec.Items {
+		m.spec.Items[i].AgentPickable = false
+	}
 	fmt.Fprintln(out)
 	fmt.Fprint(out, m.ViewContent())
 
