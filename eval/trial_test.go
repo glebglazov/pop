@@ -77,6 +77,7 @@ case "$FAKE_TRIAL_MODE" in
  timeout) sleep 30 ;;
  crash) exit 7 ;;
  quota) cat "$FAKE_TRIAL_QUOTA"; exit 1 ;;
+	 lost) printf '%s\n' '{"type":"result","subtype":"success","result":"done","usage":{"input_tokens":123,"output_tokens":45}}'; rm -rf "$PWD" ;;
  *) printf '%s\n' '{"type":"result","subtype":"success","result":"done","usage":{"input_tokens":123,"output_tokens":45}}' ;;
 esac
 `
@@ -116,7 +117,7 @@ esac
 
 	var previousWork string
 	for i, tc := range []struct{ mode, outcome, agentOutcome string }{
-		{"success", "completed", "completed"}, {"timeout", "timed_out", "timed_out"}, {"quota", "invalid", "quota_paused"}, {"crash", "invalid", "failed"},
+		{"success", "completed", "completed"}, {"timeout", "timed_out", "timed_out"}, {"quota", "invalid", "quota_paused"}, {"crash", "invalid", "failed"}, {"lost", "lost", "completed"},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			t.Setenv("FAKE_TRIAL_MODE", tc.mode)
@@ -170,9 +171,15 @@ esac
 				t.Fatalf("captured prompt = %q", got)
 			}
 			patch := readFile(t, filepath.Join(dir, "diff.patch"))
-			for _, text := range []string{"-parent", "+changed", "+new", "GIT binary patch"} {
-				if !strings.Contains(patch, text) {
-					t.Fatalf("patch missing %q: %s", text, patch)
+			if tc.outcome == outcomeLost {
+				if patch != "" || record.Reason == "" || record.RunID == "" || !record.Spend.Tokens.HasInput || record.Spend.Tokens.Input != 123 || record.Grade == nil || record.Grade.Reason != "Lost Trial is excluded" {
+					t.Fatalf("Lost Trial evidence = record=%+v patch=%q", record, patch)
+				}
+			} else {
+				for _, text := range []string{"-parent", "+changed", "+new", "GIT binary patch"} {
+					if !strings.Contains(patch, text) {
+						t.Fatalf("patch missing %q: %s", text, patch)
+					}
 				}
 			}
 			if strings.Contains(patch, "anonymous-arm") || strings.Contains(patch, record.WorkDir) {
@@ -203,13 +210,13 @@ esac
 	}
 	t.Run("keep work", func(t *testing.T) {
 		t.Setenv("FAKE_TRIAL_MODE", "success")
-		trialArgs := append(append([]string{}, args...), "--repeat", "5", "--keep-work")
+		trialArgs := append(append([]string{}, args...), "--repeat", "6", "--keep-work")
 		var progress bytes.Buffer
 		if err := runTrialCommandWithProgress(trialArgs[1:], evalProgress{out: &progress}); err != nil {
 			t.Fatal(err)
 		}
 		var record trialRecord
-		decodeJSONFile(t, filepath.Join(results, "example", "anonymous-arm", "05", "trial.json"), &record)
+		decodeJSONFile(t, filepath.Join(results, "example", "anonymous-arm", "06", "trial.json"), &record)
 		clone := filepath.Join(record.WorkDir, "repository")
 		if head := runGit(t, clone, "rev-parse", "HEAD"); head != parent {
 			t.Fatalf("HEAD = %s", head)

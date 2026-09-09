@@ -154,6 +154,11 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 		opts.progress.line("Trial %s grading skipped: Invalid Trial is excluded", label)
 		return nil
 	}
+	if record.Outcome == outcomeLost {
+		grade.Reason = "Lost Trial is excluded"
+		opts.progress.line("Trial %s grading skipped: Lost Trial is excluded", label)
+		return nil
+	}
 	if record.Outcome == outcomeTimedOut {
 		grade.Status = "timed_out"
 		grade.Scores = &gradeScores{}

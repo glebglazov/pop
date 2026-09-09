@@ -125,7 +125,8 @@ Trials run in repeat-major order: every selected Case and Arm runs for one
 repeat before the next repeat starts. An existing `trial.json` is skipped, so
 the same command resumes a stopped Matrix. An Invalid Trial runs one more time
 in the same result location. A second invalid outcome stays recorded and does
-not stop the rest of the Matrix.
+not stop the rest of the Matrix. Add `--redo` to run each selected saved Trial
+again, whatever its saved outcome or attempt count, and replace its record.
 
 The command grades each Trial after its final attempt. `--grade-timeout 1h`,
 `--graders`, and `--config` set the same Grader inputs as the standalone
@@ -152,7 +153,7 @@ Trial Case=example Arm=bare repeat=1 Objective gate finished: passed exit=0 comm
 Trial Case=example Arm=bare repeat=1 Grader execution started
 Trial Case=example Arm=bare repeat=1 Grader execution finished: outcome=completed grade=graded
 Trial 1/1 Case=example Arm=bare repeat=1 finished: outcome=completed grade=graded acceptance=3/3 quality=4/5 result=eval/results/example/bare/01
-Eval Matrix finished: completed=1 timed_out=0 invalid=0 graded=1 gate_failed=0 ungraded=0
+Eval Matrix finished: completed=1 timed_out=0 invalid=0 lost=0 graded=1 gate_failed=0 ungraded=0
 Read the Rollup: go run ./eval rollup --results /path/to/repository/eval/results
 ```
 
@@ -172,7 +173,8 @@ logs; raw agent transcripts remain in their captured files.
 
 Resume output says whether Eval skips a saved, graded Trial or grades a saved
 patch without another Arm invocation. Invalid Trial retries, Trial ceiling
-results, skipped grading, and failed phases also state their reason here.
+results, Lost Trials, `--redo`, skipped grading, and failed phases also state
+their reason here.
 
 For a Bare-arm Trial, the command clones the Case repository, checks out the
 parent SHA detached, and makes one captured invocation. The prompt has a fixed
@@ -185,7 +187,8 @@ in each clone. Trials therefore do not depend on or inherit the machine's Git
 identity, signing configuration, or signing key.
 
 Use another `--repeat` flag to select another repeat number.
-`--ceiling 4h` sets the agent's Trial ceiling (four hours by default).
+`--ceiling 4h` sets the agent's Trial ceiling (four hours by default). `--redo`
+re-runs every selected saved Trial and replaces its record.
 `--cases`, `--arms`, `--work`, and `--results` change the directory roots.
 By default, the harness deletes a Trial's work directory after it saves the
 record, patch, Captured runs, and reports, before grading starts. This cleanup
@@ -228,10 +231,13 @@ directory. Unknown spend figures retain the capture seam's presence flags.
 The patch compares the final tree with the parent, includes new files and
 binary data, and has no Trial path or Arm label added by the harness.
 
-The outcomes are `completed`, `timed_out`, and `invalid`. A quota pause or
-agent crash produces an Invalid Trial; its agent outcome and reason remain in
-the record. The Matrix retries it once. The standalone `grade` command remains
-available to grade a stored Trial again without running its Arm again.
+The four outcomes are `completed`, `timed_out`, `invalid`, and `lost`. A quota
+pause or agent crash produces an Invalid Trial; its agent outcome and reason
+remain in the record. The Matrix retries it once. A Trial is Lost when its Arm
+completed but the harness could not read the final tree. Its record keeps the
+Arm's Captured run ID, spend, and tree-read reason. A Lost Trial is not retried
+or graded. The standalone `grade` command remains available to grade a stored
+Trial again without running its Arm again.
 
 A Trial clone stays under the Eval work root in
 `trial-<random>/repository` until its saved outputs are complete. Captured runs
@@ -318,8 +324,9 @@ The Rollup reads every `trial.json` below `eval/results` and prints one row per
 Case and Arm. Each spend and work-shape cell is `median/spread`; spread is the
 maximum minus the minimum. The cells cover total tokens, notional cost, turns,
 peak input, and wall-clock seconds. The row also shows median Acceptance-list
-ratio and quality score, plus gate-failure, Trial-ceiling, Invalid, and
-ungraded counts. Invalid Trials do not contribute figures. An absent figure is
-`—`; the final column counts token-, rate-, turn-, peak-, and wall-clock-blind
-Trials. `--json` emits these same rows and uses `null` for absent medians and
-spreads. Use `--results` to read another Trial record root.
+ratio and quality score, plus gate-failure, Trial-ceiling, Invalid, Lost, and
+ungraded counts. Invalid Trials do not contribute figures. Lost Trials
+contribute their spend and work-shape figures but no quality figures. An absent
+figure is `—`; the final column counts token-, rate-, turn-, peak-, and
+wall-clock-blind Trials. `--json` emits these same rows and uses `null` for
+absent medians and spreads. Use `--results` to read another Trial record root.

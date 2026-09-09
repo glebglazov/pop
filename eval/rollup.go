@@ -33,6 +33,7 @@ type evalRollupRow struct {
 	GateFailures     int          `json:"gate_failures"`
 	Timeouts         int          `json:"timeouts"`
 	Invalid          int          `json:"invalid"`
+	Lost             int          `json:"lost"`
 	Ungraded         int          `json:"ungraded"`
 }
 
@@ -156,6 +157,9 @@ func (a *rollupAccumulator) add(record trialRecord) error {
 	if record.Outcome == outcomeInvalid {
 		a.row.Invalid++
 	}
+	if record.Outcome == outcomeLost {
+		a.row.Lost++
+	}
 	if record.Outcome == outcomeTimedOut {
 		a.row.Timeouts++
 	}
@@ -183,7 +187,7 @@ func (a *rollupAccumulator) add(record trialRecord) error {
 	} else {
 		addFigure(&a.wall, &a.row.WallClockSeconds, &wall)
 	}
-	if record.Grade != nil && record.Grade.Scores != nil {
+	if record.Outcome != outcomeLost && record.Grade != nil && record.Grade.Scores != nil {
 		a.ratio = append(a.ratio, record.Grade.Scores.ListRatio)
 		a.quality = append(a.quality, float64(record.Grade.Scores.Quality))
 	}
@@ -321,13 +325,13 @@ func medianSorted(values []float64) float64 {
 }
 
 func renderEvalRollup(w io.Writer, rollup evalRollup) {
-	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %7s %4s %4s %4s %4s %s\n",
-		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "quality", "gate", "time", "inv", "ungr", "blind tok/$/turn/peak/wall")
+	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %7s %4s %4s %4s %4s %4s %s\n",
+		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "quality", "gate", "time", "inv", "lost", "ungr", "blind tok/$/turn/peak/wall")
 	for _, row := range rollup.Rows {
-		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %7s %4d %4d %4d %4d %d/%d/%d/%d/%d\n",
+		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %7s %4d %4d %4d %4d %4d %d/%d/%d/%d/%d\n",
 			row.Case, row.Arm, row.Trials,
 			formatMetric(row.TotalTokens, 0), formatMetric(row.NotionalCostUSD, 4), formatMetric(row.Turns, 1), formatMetric(row.PeakInputTokens, 0), formatMetric(row.WallClockSeconds, 1),
-			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.Timeouts, row.Invalid, row.Ungraded,
+			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded,
 			row.TotalTokens.Blind, row.NotionalCostUSD.Blind, row.Turns.Blind, row.PeakInputTokens.Blind, row.WallClockSeconds.Blind)
 	}
 }

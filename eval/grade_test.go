@@ -158,6 +158,15 @@ cat "$FAKE_GRADE_REPLY"
 	}
 }
 
+func TestLostTrialIsExcludedFromGrading(t *testing.T) {
+	record := trialRecord{Case: "case", Arm: "bare", Repeat: 1, Outcome: outcomeLost, Grade: &gradeRecord{Status: "ungraded"}}
+	var progress bytes.Buffer
+	err := gradeOneTrial(caseManifest{}, "", 0, &record, gradeOptions{progress: evalProgress{out: &progress}})
+	if err != nil || record.Grade.Reason != "Lost Trial is excluded" || !strings.Contains(progress.String(), "grading skipped: Lost Trial is excluded") {
+		t.Fatalf("Lost Trial grade = %+v, progress=%q, error=%v", record.Grade, progress.String(), err)
+	}
+}
+
 func TestGraderReplyRejectsIncompleteOrAmbiguousScores(t *testing.T) {
 	for _, reply := range []string{
 		"ITEM 1 MET: yes\nQUALITY 0: bad", "ITEM 1 MET: yes\nQUALITY 6: great",

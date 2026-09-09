@@ -49,7 +49,7 @@ func TestRunMatrixIsRepeatMajorAndResumes(t *testing.T) {
 	}
 	cases, arms, repeats := []string{"case-a", "case-b"}, []string{"bare", "pop"}, []int{1, 2}
 	var progress bytes.Buffer
-	if err := runMatrix(cases, arms, repeats, results, evalProgress{out: &progress}, runner, grader); err != nil {
+	if err := runMatrix(cases, arms, repeats, results, false, evalProgress{out: &progress}, runner, grader); err != nil {
 		t.Fatal(err)
 	}
 	wantCalls := []string{
@@ -62,7 +62,7 @@ func TestRunMatrixIsRepeatMajorAndResumes(t *testing.T) {
 	if attempts["1/case-a/bare"] != 2 || len(grades) != 8 || grades[0] != "1/case-a/bare" {
 		t.Fatalf("attempts = %v; grades = %v", attempts, grades)
 	}
-	if !strings.Contains(progress.String(), "Invalid Trial retry attempt=2") || !strings.Contains(progress.String(), "Eval Matrix finished: completed=7 timed_out=0 invalid=1 graded=8") {
+	if !strings.Contains(progress.String(), "Invalid Trial retry attempt=2") || !strings.Contains(progress.String(), "Eval Matrix finished: completed=7 timed_out=0 invalid=1 lost=0 graded=8") {
 		t.Fatalf("Matrix progress:\n%s", progress.String())
 	}
 	retried, _, err := readTrialRecord(filepath.Join(results, "case-a", "bare", "01", "trial.json"))
@@ -70,11 +70,45 @@ func TestRunMatrixIsRepeatMajorAndResumes(t *testing.T) {
 		t.Fatalf("retried Trial = %+v, %v", retried, err)
 	}
 	calls, grades = nil, nil
-	if err := runMatrix(cases, arms, repeats, results, evalProgress{out: &progress}, runner, grader); err != nil {
+	if err := runMatrix(cases, arms, repeats, results, false, evalProgress{out: &progress}, runner, grader); err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 0 || len(grades) != 0 {
 		t.Fatalf("resume reran Trials: calls=%v grades=%v", calls, grades)
+	}
+}
+
+func TestRunMatrixRedoReplacesSavedTrial(t *testing.T) {
+	results := t.TempDir()
+	dir := filepath.Join(results, "case-a", "bare", "01")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := trialRecord{Case: "case-a", Arm: "bare", Repeat: 1, Attempts: 3, Outcome: outcomeCompleted, Grade: &gradeRecord{Status: "graded"}}
+	data, _ := json.Marshal(record)
+	writeFile(t, filepath.Join(dir, "trial.json"), string(data))
+	runs := 0
+	var progress bytes.Buffer
+	err := runMatrix([]string{"case-a"}, []string{"bare"}, []int{1}, results, true, evalProgress{out: &progress},
+		func(string, string, int) (string, error) {
+			runs++
+			record.Attempts++
+			record.Outcome = outcomeCompleted
+			record.Grade = nil
+			data, _ := json.Marshal(record)
+			return record.Outcome, tasks.WriteAtomic(filepath.Join(dir, "trial.json"), data, 0o644)
+		},
+		func(string, string, int) error {
+			record.Grade = &gradeRecord{Status: "gate_failed", Scores: &gradeScores{}}
+			data, _ := json.Marshal(record)
+			return tasks.WriteAtomic(filepath.Join(dir, "trial.json"), data, 0o644)
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := readTrialRecord(filepath.Join(dir, "trial.json"))
+	if err != nil || runs != 1 || got.Attempts != 4 || got.Grade == nil || got.Grade.Status != "gate_failed" || !strings.Contains(progress.String(), "redo attempt=4 replaces saved outcome=completed") {
+		t.Fatalf("redo: runs=%d record=%+v progress=%s error=%v", runs, got, progress.String(), err)
 	}
 }
 
@@ -88,7 +122,7 @@ func TestRunMatrixGradesSavedPatchWithoutArmInvocation(t *testing.T) {
 	data, _ := json.Marshal(record)
 	writeFile(t, filepath.Join(dir, "trial.json"), string(data))
 	var progress bytes.Buffer
-	err := runMatrix([]string{"case-a"}, []string{"bare"}, []int{1}, results, evalProgress{out: &progress},
+	err := runMatrix([]string{"case-a"}, []string{"bare"}, []int{1}, results, false, evalProgress{out: &progress},
 		func(string, string, int) (string, error) {
 			t.Fatal("saved patch invoked the Arm")
 			return "", nil
@@ -151,6 +185,7 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 		known(2, 300, 3, 6, 150, 30, graded("timed_out", 0, 0), "timed_out"),
 		{Case: "case-a", Arm: "bare", Repeat: 3, Outcome: "completed", StartedAt: start, EndedAt: start.Add(20 * time.Second), Grade: &gradeRecord{Status: "gate_failed", Scores: &gradeScores{}}},
 		{Case: "case-a", Arm: "bare", Repeat: 4, Outcome: "invalid", Grade: &gradeRecord{Status: "ungraded"}},
+		known(5, 500, 5, 10, 250, 50, graded("graded", 1, 5), "lost"),
 		{Case: "case-b", Arm: "pop", Repeat: 1, Outcome: "completed", StartedAt: start, EndedAt: start.Add(time.Second)},
 	}
 	for _, record := range records {
@@ -169,12 +204,12 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 		t.Fatalf("rows = %+v", rollup.Rows)
 	}
 	row := rollup.Rows[0]
-	assertMetric(t, "tokens", row.TotalTokens, 200, 200, 1)
-	assertMetric(t, "cost", row.NotionalCostUSD, 2, 2, 1)
-	assertMetric(t, "turns", row.Turns, 4, 4, 1)
-	assertMetric(t, "peak", row.PeakInputTokens, 100, 100, 1)
-	assertMetric(t, "wall", row.WallClockSeconds, 20, 20, 0)
-	if row.Trials != 4 || row.Counted != 3 || row.GateFailures != 1 || row.Timeouts != 1 || row.Invalid != 1 || row.Ungraded != 1 || row.AcceptanceRatio == nil || *row.AcceptanceRatio != 0 || row.QualityScore == nil || *row.QualityScore != 0 {
+	assertMetric(t, "tokens", row.TotalTokens, 300, 400, 1)
+	assertMetric(t, "cost", row.NotionalCostUSD, 3, 4, 1)
+	assertMetric(t, "turns", row.Turns, 6, 8, 1)
+	assertMetric(t, "peak", row.PeakInputTokens, 150, 200, 1)
+	assertMetric(t, "wall", row.WallClockSeconds, 25, 40, 0)
+	if row.Trials != 5 || row.Counted != 4 || row.GateFailures != 1 || row.Timeouts != 1 || row.Invalid != 1 || row.Lost != 1 || row.Ungraded != 1 || row.AcceptanceRatio == nil || *row.AcceptanceRatio != 0 || row.QualityScore == nil || *row.QualityScore != 0 {
 		t.Fatalf("row = %+v", row)
 	}
 	blind := rollup.Rows[1]
@@ -183,14 +218,14 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 	}
 	var human strings.Builder
 	renderEvalRollup(&human, rollup)
-	if !strings.Contains(human.String(), "200/200") || !strings.Contains(human.String(), "—") || !strings.Contains(human.String(), "1/1/1/1/0") {
+	if !strings.Contains(human.String(), "300/400") || !strings.Contains(human.String(), "lost") || !strings.Contains(human.String(), "—") || !strings.Contains(human.String(), "1/1/1/1/0") {
 		t.Fatalf("human Rollup:\n%s", human.String())
 	}
 	data, err := json.Marshal(rollup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"median":200`) || !strings.Contains(string(data), `"blind":1`) {
+	if !strings.Contains(string(data), `"median":300`) || !strings.Contains(string(data), `"lost":1`) || !strings.Contains(string(data), `"blind":1`) {
 		t.Fatalf("JSON Rollup: %s", data)
 	}
 	var machine bytes.Buffer
@@ -198,7 +233,7 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded evalRollup
-	if err := json.Unmarshal(machine.Bytes(), &decoded); err != nil || len(decoded.Rows) != len(rollup.Rows) || *decoded.Rows[0].TotalTokens.Median != 200 {
+	if err := json.Unmarshal(machine.Bytes(), &decoded); err != nil || len(decoded.Rows) != len(rollup.Rows) || *decoded.Rows[0].TotalTokens.Median != 300 || decoded.Rows[0].Lost != 1 {
 		t.Fatalf("machine Rollup = %+v, %v", decoded, err)
 	}
 }

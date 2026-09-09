@@ -16,12 +16,13 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// The three outcomes a Trial can end in. A Rollup counts on them, a Grader
+// The four outcomes a Trial can end in. A Rollup counts on them, a Grader
 // gates on them, and both arms have to reach one of them.
 const (
 	outcomeCompleted = "completed"
 	outcomeTimedOut  = "timed_out"
 	outcomeInvalid   = "invalid"
+	outcomeLost      = "lost"
 )
 
 type trialRecord struct {
@@ -67,11 +68,12 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	ceiling := flags.Duration("ceiling", 4*time.Hour, "Trial ceiling")
 	gradeTimeout := flags.Duration("grade-timeout", time.Hour, "Grader ceiling")
 	keepWork := flags.Bool("keep-work", false, "Keep each Trial work directory")
+	redo := flags.Bool("redo", false, "Run selected saved Trials again")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 || *ceiling <= 0 || *gradeTimeout <= 0 {
-		return errors.New("usage: go run ./eval run [--case <name>] [--arm <arm>] [--repeat N] [--ceiling 4h] [--keep-work]")
+		return errors.New("usage: go run ./eval run [--case <name>] [--arm <arm>] [--repeat N] [--ceiling 4h] [--keep-work] [--redo]")
 	}
 	selectedCases, err := selectCases(*cases, caseNames)
 	if err != nil {
@@ -105,7 +107,7 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	}
 	sort.Ints(repeats)
 	trialOpts := trialOptions{cases: *cases, arms: *arms, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
-	return runMatrix(selectedCases, armNames, repeats, *results, progress,
+	return runMatrix(selectedCases, armNames, repeats, *results, *redo, progress,
 		func(name, arm string, repeat int) (string, error) {
 			return runOneTrial(name, arm, repeat, trialOpts)
 		},
@@ -156,7 +158,7 @@ func probeEvalRoot(root string) error {
 	return errors.Join(probe.Close(), os.Remove(name))
 }
 
-func runMatrix(cases, arms []string, repeats []int, results string, progress evalProgress, runTrial func(string, string, int) (string, error), gradeOneTrial func(string, string, int) error) error {
+func runMatrix(cases, arms []string, repeats []int, results string, redo bool, progress evalProgress, runTrial func(string, string, int) (string, error), gradeOneTrial func(string, string, int) error) error {
 	resolvedResults, err := filepath.Abs(results)
 	if err != nil {
 		return fmt.Errorf("resolve results directory: %w", err)
@@ -176,11 +178,15 @@ func runMatrix(cases, arms []string, repeats []int, results string, progress eva
 					return fmt.Errorf("Trial %s phase resume: %w", label, err)
 				}
 				outcome := ""
-				if !exists || (existing.Outcome == outcomeInvalid && existing.Attempts < 2) {
+				if redo || !exists || (existing.Outcome == outcomeInvalid && existing.Attempts < 2) {
 					attempt := 1
 					if exists {
 						attempt = existing.Attempts + 1
-						progress.line("Trial %d/%d %s: Invalid Trial retry attempt=%d reason=%s", position, total, label, attempt, existing.Reason)
+						if redo {
+							progress.line("Trial %d/%d %s: redo attempt=%d replaces saved outcome=%s", position, total, label, attempt, existing.Outcome)
+						} else {
+							progress.line("Trial %d/%d %s: Invalid Trial retry attempt=%d reason=%s", position, total, label, attempt, existing.Reason)
+						}
 					} else {
 						progress.line("Trial %d/%d %s attempt=%d", position, total, label, attempt)
 					}
@@ -190,10 +196,12 @@ func runMatrix(cases, arms []string, repeats []int, results string, progress eva
 						if readErr != nil {
 							return fmt.Errorf("Trial %s phase Invalid Trial retry: %w", label, readErr)
 						}
-						progress.line("Trial %d/%d %s: Invalid Trial retry attempt=%d reason=%s", position, total, label, record.Attempts+1, record.Reason)
-						outcome, err = runTrial(name, arm, repeat)
+						if record.Attempts < 2 {
+							progress.line("Trial %d/%d %s: Invalid Trial retry attempt=%d reason=%s", position, total, label, record.Attempts+1, record.Reason)
+							outcome, err = runTrial(name, arm, repeat)
+						}
 					}
-					if err != nil && outcome != outcomeInvalid {
+					if err != nil && outcome != outcomeInvalid && outcome != outcomeLost {
 						return fmt.Errorf("Trial %s: %w", label, err)
 					}
 				} else if existing.Grade != nil {
@@ -231,7 +239,7 @@ func runMatrix(cases, arms []string, repeats []int, results string, progress eva
 			}
 		}
 	}
-	progress.line("Eval Matrix finished: completed=%d timed_out=%d invalid=%d graded=%d gate_failed=%d ungraded=%d", counts[outcomeCompleted], counts[outcomeTimedOut], counts[outcomeInvalid], grades["graded"], grades["gate_failed"], grades["ungraded"])
+	progress.line("Eval Matrix finished: completed=%d timed_out=%d invalid=%d lost=%d graded=%d gate_failed=%d ungraded=%d", counts[outcomeCompleted], counts[outcomeTimedOut], counts[outcomeInvalid], counts[outcomeLost], grades["graded"], grades["gate_failed"], grades["ungraded"])
 	progress.line("Read the Rollup: go run ./eval rollup --results %s", resolvedResults)
 	return nil
 }
@@ -416,12 +424,16 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 		}
 		var patchErr error
 		patch, patchErr = trialPatch(cloneDir, manifest.ParentCommit)
-		trialErr = errors.Join(trialErr, patchErr)
+		if patchErr != nil && record.Outcome == outcomeCompleted {
+			record.Outcome, record.Reason = outcomeLost, patchErr.Error()
+		} else {
+			trialErr = errors.Join(trialErr, patchErr)
+		}
 	} else {
 		opts.progress.line("Trial %s attempt=%d preparation failed: %v", label, attempts, trialErr)
 	}
 	record.EndedAt = time.Now().UTC()
-	if trialErr != nil {
+	if trialErr != nil && record.Outcome != outcomeLost {
 		record.Outcome, record.Reason = outcomeInvalid, trialErr.Error()
 	}
 	patchPath := filepath.Join(resultDir, "diff.patch")
