@@ -99,6 +99,7 @@ const (
 	hitlGateReverify
 	hitlGateReadRefine
 	hitlGateReadVerify
+	hitlGateRefine
 )
 
 func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverifyGateContext) (bool, error) {
@@ -196,6 +197,8 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
 			}
 			// No state change, no refresh — loop back to the gate menu unchanged.
+		case hitlGateRefine:
+			return env.refineAndReturnToMenu(m)
 		case hitlGateExit:
 			return false, nil
 		}
@@ -368,6 +371,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig,
 	}
 	if refine.HasReport {
 		add(hitlGateReadRefine, "Read the refine report (no agent runs)", gateRefineEntryDetails(refine)...)
+		items[len(items)-1].Role = "refine-report"
 	}
 	if hasVerify {
 		add(hitlGateReadVerify, "Read the verify report (no agent runs)", verify.Path)
@@ -391,6 +395,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig,
 	if err != nil {
 		return hitlGateExit, err
 	}
+	keys["f"] = hitlGateRefine
 	if action, ok := keys[choice]; ok {
 		return action, nil
 	}
@@ -423,6 +428,8 @@ const (
 	failedGateShell
 	failedGateVerify
 	failedGateReadVerify
+	failedGateRefine
+	failedGateReadRefineReport
 )
 
 // handleInteractiveFailedGate is the interactive counterpart to
@@ -518,6 +525,10 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			env.readVerifyReport(m)
 		case failedGateVerify:
 			return env.verifyAndReturnToMenu(m)
+		case failedGateRefine:
+			return env.refineAndReturnToMenu(m)
+		case failedGateReadRefineReport:
+			env.readRefineReport(m)
 		case failedGateExit:
 			return false, nil
 		}
@@ -550,6 +561,10 @@ func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfi
 		return failedGateExit, err
 	}
 	switch choice {
+	case "f":
+		return failedGateRefine, nil
+	case "p":
+		return failedGateReadRefineReport, nil
 	case "1":
 		return failedGateRerun, nil
 	case "2":
@@ -577,6 +592,8 @@ const (
 	verifyFailedGateShell
 	verifyFailedGateVerify
 	verifyFailedGateReadVerify
+	verifyFailedGateRefine
+	verifyFailedGateReadRefineReport
 )
 
 // handleInteractiveVerifyFailedGate is the interactive counterpart to the
@@ -692,6 +709,10 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 			env.readVerifyReport(m)
 		case verifyFailedGateVerify:
 			return env.verifyAndReturnToMenu(m)
+		case verifyFailedGateRefine:
+			return env.refineAndReturnToMenu(m)
+		case verifyFailedGateReadRefineReport:
+			env.readRefineReport(m)
 		case verifyFailedGateExit:
 			return false, nil
 		}
@@ -725,6 +746,10 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gat
 		return verifyFailedGateExit, err
 	}
 	switch choice {
+	case "f":
+		return verifyFailedGateRefine, nil
+	case "p":
+		return verifyFailedGateReadRefineReport, nil
 	case "1":
 		return verifyFailedGateAccept, nil
 	case "2":

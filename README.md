@@ -355,3 +355,13 @@ set -g focus-events on
 ```
 
 The monitor daemon installs a `pane-focus-in` hook that calls `pop pane visit` on every pane switch. Without `focus-events on`, tmux does not fire this hook and visits are not tracked automatically.
+
+`pop tasks assist <set>` opens the menu for the set's current status. Refine and
+Verify are explicit actions beside the applicable finish and report actions.
+Opening the menu runs no phase. Refine uses the manual edit-and-commit licence;
+Verify runs a fresh check. Both refresh the set and return to the menu, including
+on failure. Neither completes a HITL task or chooses a human disposition.
+Tab on Refine, Verify, or assistance selects that row's whole Agent entry for
+this run only. The three choices are independent and are never saved. A phase
+choice takes precedence over phase flags and defaults and uses only that entry;
+without a choice, the phase keeps its configured fallback list.

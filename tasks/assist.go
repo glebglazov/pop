@@ -30,6 +30,9 @@ type AssistOptions struct {
 	// print it. A nil seam hides the fold action.
 	Fold                   AssistFold
 	VerificationConvention VerificationConvention
+	// RefineOptions supplies agents, effort, timeout, convention and overlay.
+	// The Assist session owns the target, streams, choice and admission.
+	RefineOptions RefineOptions
 }
 
 // AssistFold folds a set's branch onto Trunk and releases its checkout,
@@ -50,8 +53,8 @@ func AssistTaskSet(opts AssistOptions) error {
 // claim, so it opens on a set another drain is running, on a set parked at a
 // gate, on an archived set and on a set whose manifest will not parse — a broken
 // manifest is precisely what a human opens Assist to look at. Exclusivity lives
-// on the verbs inside the menu instead: Verify, Accept, Remediate and Fold take the
-// Checkout claim for the length of their own act (see gateEnv.holdTreeStill).
+// on the verbs inside the menu instead: Refine, Verify, Accept, Remediate and
+// Fold take the Checkout claim for the length of their own act.
 //
 // What is left to refuse is only what cannot work at all: no interactive
 // terminal, a set that is not on disk, and no checkout to open a session in.
@@ -104,6 +107,8 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		treeStable:     assistTreeStable(d, target.runtimePath, setID),
 	}
 
+	env.cfg.refine = &refineGateSession{options: opts.RefineOptions, deps: d, repo: target.repo}
+
 	for {
 		m := LoadManifest(d, setID, target.manifestPath)
 		status, findings, workSHA := assistDerivedStatus(d, cfg, m, setID, target.runtimePath, target.repo)
@@ -122,7 +127,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 				// Status says HITL but no open HITL task — fall through to generic.
 				handled, gateErr = handleGenericAssistMenu(env, m, status, findings)
 			} else {
-				// Opening the gate runs no phase; Verify is an explicit action.
+				// Opening the gate runs no phase; Refine and Verify are explicit actions.
 				handled, gateErr = handleInteractiveHITLGate(env, m, hitl, env.reverify)
 			}
 		case StatusVerifyFailed:
@@ -323,11 +328,13 @@ const (
 	genericAssistFold
 	genericAssistVerify
 	genericAssistReadVerify
+	genericAssistRefine
+	genericAssistReadRefine
 )
 
 // handleGenericAssistMenu is the Assist session menu for Ready / Done / Deferred
 // (and other non-gate statuses): agent assistance, a shell in the checkout, or
-// exit. Verify runs only when the human selects it.
+// exit. Refine and Verify run only when the human selects them.
 func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, findings string) (bool, error) {
 	env.bindVerify(m, nil)
 	d := env.d
@@ -401,6 +408,10 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 			return false, nil
 		case genericAssistReadVerify:
 			env.readVerifyReport(m)
+		case genericAssistRefine:
+			return env.refineAndReturnToMenu(m)
+		case genericAssistReadRefine:
+			env.readRefineReport(m)
 		case genericAssistVerify:
 			return env.verifyAndReturnToMenu(m)
 		case genericAssistExit:
@@ -433,6 +444,10 @@ func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader
 		return genericAssistExit, err
 	}
 	switch choice {
+	case "f":
+		return genericAssistRefine, nil
+	case "p":
+		return genericAssistReadRefine, nil
 	case "r":
 		return genericAssistReadVerify, nil
 	case "v":

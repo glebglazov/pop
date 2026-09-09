@@ -24,6 +24,9 @@ func (e *gateEnv) bindVerify(m *Manifest, rv *reverifyGateContext) {
 	if rv == nil {
 		rv = &reverifyGateContext{cfg: e.cfg.Value()}
 	}
+	if e.cfg.refine != nil {
+		e.cfg.refine.manifest = m
+	}
 	e.reverify = rv
 	e.cfg.verify = &verifyGateSession{context: rv, manifest: m}
 }

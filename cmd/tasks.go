@@ -240,7 +240,7 @@ var taskArtifactsCmd = &cobra.Command{
 
 var taskAssistCmd = &cobra.Command{
 	Use:   "assist TASK_SET",
-	Short: "Open an Assist session on a task set at its current status (no drain, no Verifier)",
+	Short: "Open an Assist session with manual Refine, Verify, and finish actions",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskAssist,
 }
@@ -1263,6 +1263,7 @@ func runTaskAssistWith(d *tasks.Deps, w io.Writer, stdin io.Reader, taskSetID st
 		Input:                  stdin,
 		Fold:                   assistFold(d),
 		VerificationConvention: verificationConvention(d),
+		RefineOptions:          tasks.RefineOptions{Convention: implementationConvention(d), Overlay: refineOverlay(d)},
 	}); err != nil {
 		return fmt.Errorf("tasks assist: %w", err)
 	}

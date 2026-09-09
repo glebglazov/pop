@@ -37,7 +37,7 @@ Worktree binding / Runtime path (Binding-first): /pop/checkouts/demo
 - Inspect task bodies and the runtime checkout to advise the human.
 - Edit implementation under the runtime checkout when the human asks.
 - Run `pop conventions get implementation` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
-- The human can select Verify in the host menu for a fresh check. That action returns to the menu without completing tasks or choosing a disposition.
+- The human can select Refine or Verify in the host menu. Refine uses its manual edit-and-commit licence; Verify runs a fresh check. Both return to the menu without completing tasks or choosing a disposition. Tab on either action selects that phase's whole Agent entry for this run only, independently of attended assistance.
 - Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine` (those start a Drain, the Verifier or a Refiner).
 
 The human decides every outcome here. You do not effect a disposition — no task status change (complete, skip, reset, reopen), no verdict recorded, no accept, no remediation spawned — even when the human has told you which outcome they want; they effect it themselves after you exit.

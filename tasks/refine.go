@@ -57,6 +57,8 @@ type RefineOptions struct {
 	// Empty ⇒ resolution falls through to [work.refine].agents, then
 	// [work.implement].agents.
 	Agents []string
+	// PhaseChoice selects one whole entry for this interactive run only.
+	PhaseChoice *AgentGroupEntry
 	// Effort is the CLI Refiner effort override (`--effort`). Empty ⇒ config,
 	// then DefaultRefineEffort.
 	Effort string
@@ -101,15 +103,16 @@ type refineCoreOptions struct {
 	// Repo is the repository identity the set's Refine episode is keyed by (the
 	// git common dir). Empty resolves nothing and records no episode, so a refine
 	// pass still runs and still writes its report in a checkout pop cannot identify.
-	Repo       string
-	SetID      string
-	Agents     []string
-	Effort     string
-	Timeout    time.Duration
-	Output     io.Writer
-	Show       bool
-	Convention ImplementationConvention
-	Overlay    DocumentOverlay
+	Repo        string
+	SetID       string
+	Agents      []string
+	PhaseChoice *AgentGroupEntry
+	Effort      string
+	Timeout     time.Duration
+	Output      io.Writer
+	Show        bool
+	Convention  ImplementationConvention
+	Overlay     DocumentOverlay
 	// runRefiner returns the Refiner's document and the agent that wrote it.
 	runRefiner func(prompt string) (string, string, error)
 	probeMemo  *agentAvailabilityProbeMemo
@@ -154,6 +157,7 @@ func RefineTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		Repo:        repo,
 		SetID:       strings.TrimSpace(opts.TaskSetID),
 		Agents:      opts.Agents,
+		PhaseChoice: opts.PhaseChoice,
 		Effort:      opts.Effort,
 		Timeout:     opts.Timeout,
 		Output:      opts.Output,
@@ -321,7 +325,11 @@ func runRefiner(d *Deps, cfg *config.Config, opts refineCoreOptions, m *Manifest
 	text := buildRefinerPrompt(d, m, work, convention, overlay, previous, hasPrevious)
 	run := opts.runRefiner
 	if run == nil {
-		sel, err := resolveRefiner(opts.Agents, opts.Effort, m, cfg)
+		agents := opts.Agents
+		if opts.PhaseChoice != nil {
+			agents = []string{opts.PhaseChoice.Cmd}
+		}
+		sel, err := resolveRefiner(agents, opts.Effort, m, cfg)
 		if err != nil {
 			return "", "", err
 		}

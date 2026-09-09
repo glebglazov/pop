@@ -21,6 +21,8 @@ type AttendedSession struct {
 	override     string
 	choice       *AgentGroupEntry
 	verifyChoice *AgentGroupEntry
+	refineChoice *AgentGroupEntry
+	refine       *refineGateSession
 	verify       *verifyGateSession
 }
 
@@ -89,11 +91,17 @@ func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.G
 	if in == nil {
 		in = os.Stdin
 	}
+	if cfg != nil && cfg.refine != nil {
+		cfg.refine.addItems(&spec)
+	}
 	for {
 		spec.AttendedLabel = FormatAgentEntry(cfg.EffectiveEntry())
 		spec.AttendedPickable = AttendedPickOffered(cfg.Value())
 		if cfg != nil && cfg.verify != nil {
 			cfg.verify.decorate(&spec, cfg.verifyChoice)
+		}
+		if cfg != nil && cfg.refine != nil {
+			cfg.refine.decorate(&spec, cfg.refineChoice, cfg.Value())
 		}
 		res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
 			Interrupt:  interrupt,
@@ -109,13 +117,23 @@ func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.G
 		if res.PickAction != "" {
 			spec.FocusKey = res.PickAction
 		}
-		if res.PickAction != "" && cfg != nil && cfg.verify != nil {
+		if res.PickAction != "" && cfg != nil {
 			for _, item := range spec.Items {
-				if item.Key == res.PickAction && item.Role == "verify" {
+				if item.Key != res.PickAction {
+					continue
+				}
+				if item.Role == "verify" && cfg.verify != nil {
 					choice, notice := pickAgentEntry(cfg.verify.entries(), in, out, promptWarner(out))
 					spec.Notice = notice
 					if choice != nil {
 						cfg.verifyChoice = choice
+					}
+				}
+				if item.Role == "refine" && cfg.refine != nil {
+					choice, notice := pickAgentEntry(cfg.refine.entries(cfg.Value()), in, out, promptWarner(out))
+					spec.Notice = notice
+					if choice != nil {
+						cfg.refineChoice = choice
 					}
 				}
 			}
