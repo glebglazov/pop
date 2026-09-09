@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/errand"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/repogroup"
@@ -61,6 +62,7 @@ func (d *Deps) kinds(cfg *config.Config) []work.Kind {
 	return []work.Kind{
 		d.TaskSetKind(cfg, groups),
 		wayfinder.NewMapKind(d.MapKindDeps(cfg, groups)),
+		errand.NewKind(d.Tasks),
 	}
 }
 

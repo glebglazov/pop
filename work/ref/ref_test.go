@@ -17,6 +17,7 @@ func TestWorkRefRendersKindContainerItem(t *testing.T) {
 		{"item segment omitted when empty", WorkRef{Kind: KindTaskSet, ContainerID: "2026-08-02-foo"}, "task-set:2026-08-02-foo"},
 		{"map ticket", WorkRef{Kind: KindMap, ContainerID: "generalize-work", ItemID: "05"}, "map:generalize-work/05"},
 		{"routine container", WorkRef{Kind: KindRoutine, ContainerID: "nightly-audit"}, "routine:nightly-audit"},
+		{"errand failure", WorkRef{Kind: KindErrandFailure, ContainerID: "remove-checkout-a1b2c3"}, "errand-failure:remove-checkout-a1b2c3"},
 		{"zero ref names nothing", WorkRef{}, ""},
 	}
 	for _, tc := range cases {
@@ -64,8 +65,8 @@ func TestKindEnumIsClosed(t *testing.T) {
 			t.Fatalf("ParseKind(%q) = %q, %v", k, parsed, err)
 		}
 	}
-	if got := Kinds(); len(got) != 3 || got[0] != KindTaskSet || got[1] != KindMap || got[2] != KindRoutine {
-		t.Fatalf("Kinds() = %v, want task-set, map, routine in precedence order", got)
+	if got := Kinds(); len(got) != 4 || got[0] != KindTaskSet || got[1] != KindMap || got[2] != KindErrandFailure || got[3] != KindRoutine {
+		t.Fatalf("Kinds() = %v, want task-set, map, errand-failure, routine in precedence order", got)
 	}
 	for _, bad := range []string{"", "Task-Set", "goal", "task_set"} {
 		if _, err := ParseKind(bad); err == nil {

@@ -71,6 +71,29 @@ func (s *Store) FailErrand(path string) error {
 	return err
 }
 
+// RetryErrand returns one failed subject to the queue. A stale dashboard row
+// cannot disturb an Errand that has already moved on.
+func (s *Store) RetryErrand(path string, at time.Time) (bool, error) {
+	result, err := s.db.Exec(`UPDATE errands SET state='queued', queued_at=?, output_path=''
+		WHERE path=? AND state='failed'`, at.UTC().Format(timeLayout), path)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
+
+// DismissErrand removes one failed subject without running it. A stale
+// dashboard row cannot dismiss a queued or running Errand.
+func (s *Store) DismissErrand(path string) (bool, error) {
+	result, err := s.db.Exec(`DELETE FROM errands WHERE path=? AND state='failed'`, path)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
+
 // FinishErrand clears the request and writes its journal event atomically.
 func (s *Store) FinishErrand(path string, at time.Time) error {
 	tx, err := s.db.Begin()

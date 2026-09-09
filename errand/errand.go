@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/project"
@@ -92,18 +93,13 @@ func run(td *tasks.Deps, pd *project.Deps, s *store.Store, e store.Errand, out i
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	report, err := os.CreateTemp(dir, "removal-*.md")
+	attemptedAt := td.Now()
+	interrupted := renderFailureReport(e.Path, attemptedAt, "Interrupted: the daemon stopped before this errand finished. Retry is manual.\n")
+	report, err := createFailureReport(dir, attemptedAt, interrupted)
 	if err != nil {
 		return err
 	}
 	defer report.Close()
-	interrupted := fmt.Sprintf("Checkout removal: %s\n\nInterrupted: the daemon stopped before this errand finished. Retry is manual.\n", e.Path)
-	if _, err := io.WriteString(report, interrupted); err != nil {
-		return err
-	}
-	if err := report.Sync(); err != nil {
-		return err
-	}
 	started, err := s.StartErrand(e.Path, report.Name())
 	if err != nil || !started {
 		_ = os.Remove(report.Name())
@@ -111,7 +107,6 @@ func run(td *tasks.Deps, pd *project.Deps, s *store.Store, e store.Errand, out i
 	}
 
 	var output bytes.Buffer
-	fmt.Fprintf(&output, "Checkout removal: %s\n\n", e.Path)
 	removalDeps := *pd
 	removalDeps.Warn = func(message string) {
 		fmt.Fprintln(&output, message)
@@ -139,7 +134,7 @@ func run(td *tasks.Deps, pd *project.Deps, s *store.Store, e store.Errand, out i
 	} else {
 		fmt.Fprintln(&output, "Removed checkout.")
 	}
-	if err := os.WriteFile(report.Name(), output.Bytes(), 0o600); err != nil {
+	if err := os.WriteFile(report.Name(), []byte(renderFailureReport(e.Path, attemptedAt, output.String())), 0o600); err != nil {
 		return errors.Join(err, s.FailErrand(e.Path))
 	}
 	if removeErr != nil {
@@ -152,4 +147,38 @@ func run(td *tasks.Deps, pd *project.Deps, s *store.Store, e store.Errand, out i
 	_ = os.Remove(report.Name())
 	fmt.Fprintf(out, "errand: removed checkout %s\n", e.Path)
 	return nil
+}
+
+const failureReportTimeLayout = "20060102T150405Z"
+
+// createFailureReport reserves one timestamped document without overwriting an
+// earlier attempt. A collision advances the document instant, as the Task pass
+// reports do.
+func createFailureReport(dir string, at time.Time, body string) (*os.File, error) {
+	at = at.UTC().Truncate(time.Second)
+	for {
+		path := filepath.Join(dir, "removal-"+at.Format(failureReportTimeLayout)+".md")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			at = at.Add(time.Second)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if _, err := io.WriteString(f, body); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		if err := f.Sync(); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		return f, nil
+	}
+}
+
+func renderFailureReport(path string, at time.Time, body string) string {
+	return fmt.Sprintf("# Errand failure — Checkout removal\n\n- Attempted: %s\n- Subject: %s\n\n%s",
+		at.UTC().Format(time.RFC3339), path, body)
 }

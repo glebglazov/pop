@@ -24,19 +24,21 @@ const (
 	KindMap Kind = "map"
 	// KindRoutine is a Routine: a container of runs.
 	KindRoutine Kind = "routine"
+	// KindErrandFailure is an Errand that stopped before it finished.
+	KindErrandFailure Kind = "errand-failure"
 )
 
-// Kinds returns every Work kind in fixed precedence order — Task sets, then
-// Maps, then Routines. Callers that fan out over all kinds (the registry, the
-// dashboard) render in this order.
-func Kinds() []Kind { return []Kind{KindTaskSet, KindMap, KindRoutine} }
+// Kinds returns every Work kind in fixed precedence order — Task sets, Maps,
+// Errand failures, then Routines. Callers that fan out over all kinds (the
+// registry, the dashboard) render in this order.
+func Kinds() []Kind { return []Kind{KindTaskSet, KindMap, KindErrandFailure, KindRoutine} }
 
 // Valid reports whether k is one of the enum's members. Anything crossing a
 // boundary pop does not control — a database row, a manifest, a CLI argument —
 // is a string until this says otherwise.
 func (k Kind) Valid() bool {
 	switch k {
-	case KindTaskSet, KindMap, KindRoutine:
+	case KindTaskSet, KindMap, KindErrandFailure, KindRoutine:
 		return true
 	}
 	return false

@@ -4383,6 +4383,8 @@ func detailKindNoun(kind work.KindID) string {
 		return "Map"
 	case ref.KindRoutine:
 		return "Routine"
+	case ref.KindErrandFailure:
+		return "Errand failure"
 	case ref.KindTaskSet, "":
 		return "Task"
 	}

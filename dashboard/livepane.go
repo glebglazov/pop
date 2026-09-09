@@ -10,6 +10,7 @@ import (
 	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // livePaneState is the three-state live-pane affordance for one supervised
@@ -227,6 +228,9 @@ func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool)
 			return styleHandoffKey(dashboardMapWayfinderKeyPlain, state)
 		}
 		return dashboardMapWayfinderKeyPlain
+	}
+	if row.Kind != "" && row.Kind != ref.KindTaskSet {
+		return ""
 	}
 	var b strings.Builder
 	for _, item := range rowActivityCluster {

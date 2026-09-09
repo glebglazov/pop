@@ -329,6 +329,12 @@ type Container struct {
 	// today: it is the same Work kind as an authored Routine and says so in a
 	// cell, rather than being a fourth kind for a display distinction.
 	Badge string
+
+	// ErrandSubject is the absolute path an Errand failure was acting on, and
+	// ErrandOutputPath is the document that explains why it stopped. They are
+	// empty on every other kind. The document body stays on disk; Work carries
+	// only its pointer.
+	ErrandSubject, ErrandOutputPath string
 }
 
 // Ref names the container independently of the kind that produced it.
