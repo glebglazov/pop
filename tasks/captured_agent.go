@@ -41,8 +41,9 @@ type CapturedAgentAttempt struct {
 
 // RunCapturedAgentInvocation runs once, without a drain or a task prompt wrapper.
 // A non-zero exit, timeout, or quota refusal is a recorded outcome, not a Go
-// error. Setup, capture, and spend-reading failures return errors; when a pair
-// was written, the result still identifies it.
+// error. Setup, capture, and spend-reading failures return errors. Once the
+// agent ran, the result is returned too, even when its capture could not be
+// written; when a pair was written, the result identifies it.
 func RunCapturedAgentInvocation(d *Deps, opts CapturedAgentOptions) (*CapturedAgentAttempt, error) {
 	if strings.TrimSpace(opts.AgentSpec) == "" {
 		return nil, fmt.Errorf("captured invocation requires a recognized Agent preset; custom commands file no Captured run")
@@ -86,7 +87,7 @@ func RunCapturedAgentInvocation(d *Deps, opts CapturedAgentOptions) (*CapturedAg
 	}
 	metaPath, _, err := writeCapturedRunInDir(d, opts.DestinationDir, spendPhaseEval, "", "", "", attempt.stream, invocation.AgentPreset(), invocation.RequestedAgent, model, 1, result.Outcome, result.Reason, result.ExitCode, "", "")
 	if err != nil {
-		return nil, fmt.Errorf("write Captured run: %w", err)
+		return result, fmt.Errorf("write Captured run: %w", err)
 	}
 	result.RunID = strings.TrimSuffix(filepath.Base(metaPath), ".meta.json")
 	// Read the stored payload so Codex's Rollout splice is priced too.

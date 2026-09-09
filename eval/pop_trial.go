@@ -125,6 +125,31 @@ func runPopTrial(binary, caseDir, clone string, arm armFile, ceiling time.Durati
 	return errors.Join(statusErr, spendErr)
 }
 
+func savePopTrialReports(clone, resultDir string, record *trialRecord) error {
+	dataDir := filepath.Join(record.WorkDir, "data")
+	d := *tasks.DefaultDeps()
+	d.FS = trialFS{FileSystem: d.FS, data: dataDir}
+	identity, err := tasks.ResolveRepositoryIdentity(&d, clone)
+	if err != nil {
+		return fmt.Errorf("resolve Pop Trial reports: %w", err)
+	}
+	setDir := filepath.Join(identity.TasksDir, record.Case)
+	var copyErr error
+	for _, name := range []string{tasks.VerifyDirName, tasks.RefineDirName} {
+		source := filepath.Join(setDir, name)
+		if _, err := os.Stat(source); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			copyErr = errors.Join(copyErr, fmt.Errorf("read %s reports: %w", name, err))
+			continue
+		}
+		if err := os.CopyFS(filepath.Join(resultDir, "reports", name), os.DirFS(source)); err != nil {
+			copyErr = errors.Join(copyErr, fmt.Errorf("copy %s reports: %w", name, err))
+		}
+	}
+	return copyErr
+}
+
 func writePopTrialConfig(root, clone string, arm armFile) error {
 	var contents bytes.Buffer
 	if err := toml.NewEncoder(&contents).Encode(arm.Config); err != nil {

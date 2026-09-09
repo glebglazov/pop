@@ -394,16 +394,23 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 			armPhase = "Pop drain"
 		}
 		stopWaiting = opts.progress.wait(label, armPhase, opts.ceiling)
+		var evidenceErr error
 		if selected.Kind == "pop" {
 			trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.ceiling, &record)
+			evidenceErr = savePopTrialReports(cloneDir, resultDir, &record)
 		} else {
-			trialErr = runBareTrial(cloneDir, selected, manifest, string(spec), opts.ceiling, &record)
+			trialErr, evidenceErr = runBareTrial(cloneDir, resultDir, selected, manifest, string(spec), opts.ceiling, &record)
 		}
 		stopWaiting()
 		if trialErr != nil {
 			opts.progress.line("Trial %s attempt=%d Arm execution finished: outcome=%s error=%v", label, attempts, record.Outcome, trialErr)
 		} else {
 			opts.progress.line("Trial %s attempt=%d Arm execution finished: outcome=%s", label, attempts, record.Outcome)
+		}
+		if evidenceErr != nil {
+			opts.progress.line("Trial %s attempt=%d evidence saving failed: %v", label, attempts, evidenceErr)
+		} else {
+			opts.progress.line("Trial %s attempt=%d evidence saving finished", label, attempts)
 		}
 		var patchErr error
 		patch, patchErr = trialPatch(cloneDir, manifest.ParentCommit)
@@ -438,21 +445,21 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 // produced a Trial worth grading; a crash or a quota pause leaves the record
 // Invalid. The capture seam spells those two outcomes the way a Trial does,
 // which is what lets the agent's word carry straight into the record.
-func runBareTrial(clone string, arm armFile, manifest caseManifest, spec string, ceiling time.Duration, record *trialRecord) error {
+func runBareTrial(clone, resultDir string, arm armFile, manifest caseManifest, spec string, ceiling time.Duration, record *trialRecord) (error, error) {
 	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
 		AgentSpec: arm.agentSpec(), Prompt: barePrompt(manifest, spec), RuntimePath: clone,
-		Timeout: ceiling, DestinationDir: filepath.Join(record.WorkDir, "capture"),
+		Timeout: ceiling, DestinationDir: filepath.Join(resultDir, "capture"),
 	})
 	if attempt == nil {
-		return captureErr
+		return captureErr, nil
 	}
 	record.ActualModel, record.RunID = attempt.ActualModel, attempt.RunID
 	record.Spend, record.Notional = attempt.Spend, attempt.Notional
 	record.AgentOutcome, record.Reason = attempt.Outcome, attempt.Reason
-	if captureErr == nil && (attempt.Outcome == "completed" || attempt.Outcome == "timed_out") {
+	if attempt.Outcome == "completed" || attempt.Outcome == "timed_out" {
 		record.Outcome = attempt.Outcome
 	}
-	return captureErr
+	return nil, captureErr
 }
 
 func barePrompt(manifest caseManifest, spec string) string {

@@ -211,8 +211,12 @@ one override: `refine-off.toml`, `verify-off.toml`, `max-tries-1.toml`,
 `convention-off.toml`, `explore-off.toml`, and `model-swap.toml` (Sonnet).
 Do not run these arms until the Bare/Pop result is stable.
 
-Records are written to `eval/results/<case>/<arm>/<NN>/trial.json` and
-`diff.patch`. The record holds the Case, Arm, repeat, attempt count, requested and actual model,
+Records are written to `eval/results/<case>/<arm>/<NN>/`. Each result directory
+holds `trial.json`, `diff.patch`, the Arm's Captured run under `capture/`, and
+the Grader's Captured runs under `grading/`. A Pop-arm result also holds any
+Verify reports and Refine reports under `reports/verify/` and
+`reports/refine/`. A Trial with no reports can omit `reports/`.
+The record holds the Case, Arm, repeat, attempt count, requested and actual model,
 start and end times, outcome, Captured run ID, spend, notional cost, and work
 directory. Unknown spend figures retain the capture seam's presence flags.
 The patch compares the final tree with the parent, includes new files and
@@ -223,8 +227,8 @@ agent crash produces an Invalid Trial; its agent outcome and reason remain in
 the record. The Matrix retries it once. The standalone `grade` command remains
 available to grade a stored Trial again without running its Arm again.
 
-Clones and Captured runs stay under the Eval work root in
-`trial-<random>/repository` and `capture`. These names do not identify the Arm.
+Clones stay under the Eval work root in `trial-<random>/repository`. Captured
+runs and reports stay with the Trial result, outside the disposable clone.
 A later Grader must receive only the parent repository, patch, and Acceptance
 list, never the Trial record or Captured run. Results remain available to
 commit.

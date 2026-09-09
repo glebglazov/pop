@@ -181,9 +181,16 @@ esac
 			if tc.mode == "success" && (!record.Spend.Tokens.HasInput || record.Spend.Tokens.Input != 123) {
 				t.Fatalf("spend = %+v", record.Spend)
 			}
-			captures, err := os.ReadDir(filepath.Join(record.WorkDir, "capture"))
-			if err != nil || len(captures) != 2 {
+			captures, err := os.ReadDir(filepath.Join(dir, "capture"))
+			wantCaptures := 2
+			if tc.outcome == outcomeInvalid {
+				wantCaptures = 4
+			}
+			if err != nil || len(captures) != wantCaptures {
 				t.Fatalf("capture = %v, %v", captures, err)
+			}
+			if _, err := os.Stat(filepath.Join(record.WorkDir, "capture")); !os.IsNotExist(err) {
+				t.Fatalf("capture remained in work directory: %v", err)
 			}
 			progress.Reset()
 			if err := runTrialCommandWithProgress(trialArgs[1:], evalProgress{out: &progress}); err != nil {

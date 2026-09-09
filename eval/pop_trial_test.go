@@ -74,6 +74,12 @@ case "$2" in
   test -f "$XDG_DATA_HOME"/pop/repos/*/tasks/example/change.md || exit 18
   mkdir -p "$XDG_DATA_HOME/pop/capture-test"
   printf captured > "$XDG_DATA_HOME/pop/capture-test/run"
+  if [ -n "$EVAL_POP_REPORTS" ]; then
+   set_dir=$(printf '%s\n' "$XDG_DATA_HOME"/pop/repos/*/tasks/example)
+   mkdir -p "$set_dir/verify" "$set_dir/refine"
+   printf verified > "$set_dir/verify/verify-test.md"
+   printf refined > "$set_dir/refine/refine-test.md"
+  fi
   ;;
  implement)
   printf 'changed\n' > feature.txt
@@ -105,12 +111,22 @@ esac
 	for i, status := range []string{"DONE", "FAILED", "VERIFY-FAILED", "TIMEOUT", "CRASH"} {
 		t.Run(status, func(t *testing.T) {
 			t.Setenv("EVAL_POP_STATUS", status)
+			if status != "FAILED" {
+				t.Setenv("EVAL_POP_REPORTS", "1")
+			}
 			writeFile(t, log, "")
 			ceiling := "1m"
 			if status == "TIMEOUT" {
 				ceiling = "300ms"
 			}
 			results := filepath.Join(root, "results")
+			if status == "VERIFY-FAILED" {
+				blocked := filepath.Join(results, "example", "pop", fmt.Sprintf("%02d", i+1), "reports", "verify")
+				if err := os.MkdirAll(filepath.Dir(blocked), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, blocked, "occupied")
+			}
 			var progress bytes.Buffer
 			waits, stopped := []evalWait{}, 0
 			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling}, evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)})
@@ -131,6 +147,9 @@ esac
 			}
 			if status == "CRASH" {
 				assertProgressOrder(t, progress.String(), "Arm execution finished: outcome=invalid", "Invalid Trial retry attempt=2 reason=pop tasks implement example exited 7", "Arm execution started", "grading skipped: Invalid Trial is excluded", "finished: outcome=invalid grade=ungraded")
+			}
+			if status == "VERIFY-FAILED" && !strings.Contains(progress.String(), "evidence saving failed: copy verify reports") {
+				t.Fatalf("evidence failure progress:\n%s", progress.String())
 			}
 			result := filepath.Join(results, "example", "pop", fmt.Sprintf("%02d", i+1))
 			var record trialRecord
@@ -155,6 +174,19 @@ esac
 			patch := readFile(t, filepath.Join(result, "diff.patch"))
 			if !strings.Contains(patch, "+changed") || !strings.Contains(patch, "+new") {
 				t.Fatalf("patch: %s", patch)
+			}
+			if status == "DONE" {
+				if got := readFile(t, filepath.Join(result, "reports", "verify", "verify-test.md")); got != "verified" {
+					t.Fatalf("Verify report = %q", got)
+				}
+				if got := readFile(t, filepath.Join(result, "reports", "refine", "refine-test.md")); got != "refined" {
+					t.Fatalf("Refine report = %q", got)
+				}
+			}
+			if status == "FAILED" {
+				if _, err := os.Stat(filepath.Join(result, "reports")); !os.IsNotExist(err) {
+					t.Fatalf("reports location for Trial without reports: %v", err)
+				}
 			}
 			clone := filepath.Join(record.WorkDir, "repository")
 			if got := runGit(t, clone, "show", "-s", "--format=%an <%ae> %G?", "HEAD"); got != "Pop Eval Harness <eval@pop.invalid> N" {

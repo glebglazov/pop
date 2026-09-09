@@ -138,9 +138,12 @@ func TestRunCapturedAgentInvocationReportsCaptureFailure(t *testing.T) {
 	token := registerFakeAgent(t, &fakeAgentBehavior{attempts: []attemptScript{{rawOutput: "{}\n"}}})
 	dest := filepath.Join(t.TempDir(), "file")
 	writeFile(t, dest, "occupied")
-	_, err := RunCapturedAgentInvocation(d, CapturedAgentOptions{AgentSpec: "claude " + token, RuntimePath: t.TempDir(), Timeout: time.Minute, DestinationDir: dest})
+	attempt, err := RunCapturedAgentInvocation(d, CapturedAgentOptions{AgentSpec: "claude " + token, RuntimePath: t.TempDir(), Timeout: time.Minute, DestinationDir: dest})
 	if err == nil || !strings.Contains(err.Error(), "write Captured run") {
 		t.Fatalf("capture failure = %v", err)
+	}
+	if attempt == nil || attempt.Outcome != "completed" {
+		t.Fatalf("completed attempt lost with capture failure: %+v", attempt)
 	}
 }
 
