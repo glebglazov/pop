@@ -584,7 +584,7 @@ type WorkConfig struct {
 	Daemon *WorkDaemonConfig `toml:"daemon" merge:"fields" include:"fields" desc:"Work supervisor timing ([work.daemon] table)."`
 }
 
-// WorkDaemonConfig holds `pop work daemon` supervisor configuration. Durations
+// WorkDaemonConfig holds `pop daemon run` supervisor configuration. Durations
 // are stored as standard duration strings (e.g. "60s", "1h") and parsed by
 // ResolveWorkDaemon.
 type WorkDaemonConfig struct {

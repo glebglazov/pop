@@ -183,7 +183,7 @@ Per tester, before removal lands:
    removes the frozen snapshot that made rolling back survivable.
 
 8. **No pre-cut daemon, and `[queue]` gone from config** — stop any `pop queue run`
-   daemon started by a pre-cut binary, then start `pop work daemon` once and confirm it
+   daemon started by a pre-cut binary, then start `pop daemon run` once and confirm it
    acquires the lock rather than refusing (a refusal names the pre-cut lock file it
    found live). Verify no `<data-dir>/pop/queue/supervisor.lock` remains and that
    `~/.config/pop/config.toml` has no `[queue]` table — the keys moved to

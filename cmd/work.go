@@ -22,13 +22,12 @@ routines. show-path resolves this repository's Task-storage root — the
 directory holding repo.json, tasks/, and maps/ — for humans and planning
 skills alike.
 
-pop work daemon starts a foreground supervisor that, every poll interval, asks
+pop daemon run starts a foreground supervisor that, every poll interval, asks
 every advanceable Work kind what it can advance and dispatches it: a drain (pop
 tasks implement <set>) for each idle project with a Ready task set, a fire for
 each due routine. Execution is concurrent across projects and serial within
 each (enforced by the runtime execution lock). Ctrl-C stops the supervisor;
-in-flight drains keep running in their panes. status reports what the daemon
-can advance — task sets, then routines — and log replays what it did.`,
+in-flight drains keep running in their panes. pop work daemon is a backward-compatible alias. status reports what the daemon can advance — task sets, then routines — and log replays what it did.`,
 }
 
 var workShowPathCmd = &cobra.Command{

@@ -19,20 +19,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The three daemon-facing `pop work` verbs. `pop queue` is gone with no alias:
-// the supervisor advances every Work kind, so the command that runs it, the one
-// that reports what it can advance, and the one that replays what it did all live
-// under `work`.
+// `pop daemon run` owns the foreground supervisor. The Work readers stay under
+// `pop work`, because they describe the Work half of the daemon.
 
-// workDaemonCmd runs the supervisor in the foreground. It is deliberately the
-// only way to start one (ADR-0027): no picker path auto-starts it, and there are
-// no service-management verbs — the operator parks it in a pane and Ctrl-C stops
-// it.
-var workDaemonCmd = &cobra.Command{
+var daemonCmd = &cobra.Command{
 	Use:   "daemon",
+	Short: "Run Pop background acts",
+	Args:  cobra.NoArgs,
+}
+
+var daemonRunCmd = &cobra.Command{
+	Use:   "run",
 	Short: "Run the foreground supervisor loop",
 	Args:  cobra.NoArgs,
 	RunE:  runWorkDaemon,
+}
+
+// workDaemonCmd keeps the Work daemon command for existing scripts and panes.
+// Cobra prints Deprecated when the alias runs, so callers receive the new name.
+var workDaemonCmd = &cobra.Command{
+	Use:        "daemon",
+	Short:      "Alias for pop daemon run",
+	Deprecated: "use \"pop daemon run\" instead",
+	Args:       cobra.NoArgs,
+	RunE:       runWorkDaemon,
 }
 
 var workStatusCmd = &cobra.Command{
@@ -67,6 +77,8 @@ var workStatusIncludeDone bool
 var workStatusPreset string
 
 func init() {
+	rootCmd.AddCommand(daemonCmd)
+	daemonCmd.AddCommand(daemonRunCmd)
 	workCmd.AddCommand(workDaemonCmd)
 	workCmd.AddCommand(workStatusCmd)
 	workCmd.AddCommand(workLogCmd)

@@ -54,6 +54,40 @@ poll_interval = "2s"
 	}
 }
 
+func TestDaemonRunAndWorkAliasShareTheSupervisor(t *testing.T) {
+	path := writeDaemonConfig(t, "")
+	oldCfgFile := cfgFile
+	oldRun := supervisorRun
+	defer func() {
+		cfgFile = oldCfgFile
+		supervisorRun = oldRun
+	}()
+	cfgFile = path
+	var calls int
+	supervisorRun = func(*drain.Deps, time.Duration, io.Writer, <-chan os.Signal) error {
+		calls++
+		return nil
+	}
+
+	if err := daemonRunCmd.RunE(daemonRunCmd, nil); err != nil {
+		t.Fatalf("pop daemon run: %v", err)
+	}
+	if err := workDaemonCmd.RunE(workDaemonCmd, nil); err != nil {
+		t.Fatalf("pop work daemon: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("supervisor starts = %d, want 2", calls)
+	}
+	if got, want := workDaemonCmd.Deprecated, `use "pop daemon run" instead`; got != want {
+		t.Fatalf("work daemon deprecation = %q, want %q", got, want)
+	}
+
+	cmd, _, err := rootCmd.Find([]string{"daemon", "run"})
+	if err != nil || cmd != daemonRunCmd {
+		t.Fatalf("pop daemon run command = %v, %v; want daemon run", cmd, err)
+	}
+}
+
 // TestWorkReadSurfacesThreadViewPreset pins ADR-0197 preset wiring: default
 // surfaces get the configured default preset, and `--include-done` seeds the
 // shipped all preset on both `pop work status` and `pop work dashboard`.
