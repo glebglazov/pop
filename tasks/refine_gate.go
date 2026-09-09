@@ -117,7 +117,7 @@ func (e gateEnv) refineAndReturnToMenu(m *Manifest) (bool, error) {
 	ApplyVerifyVerdicts(e.d, after, e.cfg.Value(), e.runtimePath)
 	fmt.Fprintln(e.out)
 	Render(e.out, after)
-	return e.verifyMenu(fresh)
+	return e.reopenGateMenu(fresh)
 }
 
 func (e gateEnv) readRefineReport(m *Manifest) {

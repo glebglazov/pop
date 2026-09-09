@@ -115,7 +115,7 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 }
 
-func promptInterruptGateAction(out io.Writer, in io.Reader, reader *promptReader, sigCh <-chan os.Signal, d *Deps, cfg *gateConfig, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
+func promptInterruptGateAction(out io.Writer, in io.Reader, reader *promptReader, sigCh <-chan os.Signal, d *Deps, cfg *AttendedSession, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Interrupted: %s/%s was stopped mid-run.", taskSetID, interrupted.ID),
 		Tone:     ui.GateMenuToneWarn,

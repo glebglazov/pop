@@ -296,7 +296,7 @@ func TestGatePickAbsentFromTheLineReaderPath(t *testing.T) {
 	fx := newAttendedPickFixture(t, `["claude --model opus", "cursor"]`)
 	var out strings.Builder
 	in := strings.NewReader("tab\n0\n")
-	key, _, err := promptGateMenu(&out, in, newPromptReader(in), gateSpecWithAssistRow(), nil, newGateConfig(fx.d, fx.cfg))
+	key, _, err := promptGateMenu(&out, in, newPromptReader(in), gateSpecWithAssistRow(), nil, NewAttendedSession(fx.cfg, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

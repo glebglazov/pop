@@ -26,16 +26,10 @@ type AttendedSession struct {
 	verify       *verifyGateSession
 }
 
-type gateConfig = AttendedSession
-
 // NewAttendedSession starts one interactive run at the normal attended
 // precedence: an explicit attended flag, then the resolved config and default.
 func NewAttendedSession(cfg *config.Config, override string) *AttendedSession {
 	return &AttendedSession{cfg: cfg, override: strings.TrimSpace(override)}
-}
-
-func newGateConfig(_ *Deps, cfg *config.Config) *gateConfig {
-	return NewAttendedSession(cfg, "")
 }
 
 // Value is the config as last read.
@@ -87,7 +81,7 @@ func (g *AttendedSession) Pick(in io.Reader, out io.Writer, warn func(string, ..
 //
 // The Assists item and its launch read the same Attended session choice. Tab
 // changes that choice for this interactive run only (ADR-0266).
-func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.GateMenuSpec, interrupt <-chan os.Signal, cfg *gateConfig) (key string, forceQuit bool, err error) {
+func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.GateMenuSpec, interrupt <-chan os.Signal, cfg *AttendedSession) (key string, forceQuit bool, err error) {
 	if in == nil {
 		in = os.Stdin
 	}

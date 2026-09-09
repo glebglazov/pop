@@ -168,7 +168,7 @@ const (
 	foldConflictExit
 )
 
-func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *gateConfig, subject string, hasSet bool, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
+func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *AttendedSession, subject string, hasSet bool, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
 	var preamble []string
 	if hasSet {
 		if text := VerifiedAtBadgeText(badge); text != "" {

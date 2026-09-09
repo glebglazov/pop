@@ -302,7 +302,7 @@ func handleForcedVerifyFailedGate(d *Deps, cfg *config.Config, opts verifyCoreOp
 		out:            opts.Output,
 		in:             opts.confirmIn,
 		reader:         newPromptReader(opts.confirmIn),
-		cfg:            newGateConfig(d, cfg),
+		cfg:            NewAttendedSession(cfg, ""),
 		cwd:            opts.RuntimePath,
 		runtimePath:    opts.RuntimePath,
 		definitionPath: opts.DefPath,

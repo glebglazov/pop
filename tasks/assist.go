@@ -420,7 +420,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 }
 
-func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *gateConfig, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
+func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *AttendedSession, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Open a shell in the checkout"},

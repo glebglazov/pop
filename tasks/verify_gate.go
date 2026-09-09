@@ -8,15 +8,16 @@ import (
 )
 
 // verifyGateSession binds the current set to the Verify inputs for this run.
-// The choice stays on gateConfig when a refreshed gate replaces this binding.
+// The choice stays on the Attended session when a refreshed gate replaces
+// this binding.
 type verifyGateSession struct {
-	context  *reverifyGateContext
+	reverify *reverifyGateContext
 	manifest *Manifest
 }
 
 func (e *gateEnv) bindVerify(m *Manifest, rv *reverifyGateContext) {
 	if e.cfg == nil {
-		e.cfg = newGateConfig(e.d, nil)
+		e.cfg = NewAttendedSession(nil, "")
 	}
 	if rv == nil {
 		rv = e.reverify
@@ -28,25 +29,25 @@ func (e *gateEnv) bindVerify(m *Manifest, rv *reverifyGateContext) {
 		e.cfg.refine.manifest = m
 	}
 	e.reverify = rv
-	e.cfg.verify = &verifyGateSession{context: rv, manifest: m}
+	e.cfg.verify = &verifyGateSession{reverify: rv, manifest: m}
 }
 
 func (v *verifyGateSession) entries() []AgentGroupEntry {
-	entries := v.context.cfg.VerifyAgentEntries()
+	entries := v.reverify.cfg.VerifyAgentEntries()
 	if over := v.manifest.VerifierOverride(); over != nil && len(nonEmptyStrings(over.Agents)) > 0 {
 		entries = nil
 		for _, spec := range nonEmptyStrings(over.Agents) {
 			entries = append(entries, config.AgentEntry{Cmd: spec})
 		}
 	} else if len(entries.Commands()) == 0 {
-		sel, err := resolveVerifier(nil, "", v.manifest, v.context.cfg)
+		sel, err := resolveVerifier(nil, "", v.manifest, v.reverify.cfg)
 		if err != nil {
 			return nil
 		}
 		entries = nil
 		for _, spec := range sel.Agents {
 			entry := config.AgentEntry{Cmd: spec}
-			for _, inherited := range v.context.cfg.ImplementAgentEntries() {
+			for _, inherited := range v.reverify.cfg.ImplementAgentEntries() {
 				if inherited.Cmd == spec {
 					entry = inherited
 					break
@@ -60,7 +61,7 @@ func (v *verifyGateSession) entries() []AgentGroupEntry {
 }
 
 func (v *verifyGateSession) decorate(spec *ui.GateMenuSpec, choice *AgentGroupEntry) {
-	sel, err := resolveVerifier(v.context.agents, v.context.effort, v.manifest, v.context.cfg)
+	sel, err := resolveVerifier(v.reverify.agents, v.reverify.effort, v.manifest, v.reverify.cfg)
 	label := ""
 	var entry AgentGroupEntry
 	if choice != nil {
@@ -76,7 +77,7 @@ func (v *verifyGateSession) decorate(spec *ui.GateMenuSpec, choice *AgentGroupEn
 	}
 	if entry.Cmd != "" {
 		// The fallback walk uses this same effort resolution at launch.
-		resolved := resolveEffortModel(entry.Cmd, sel.Effort, true, v.context.cfg, nil)
+		resolved := resolveEffortModel(entry.Cmd, sel.Effort, true, v.reverify.cfg, nil)
 		entry.Model = AgentSpecModel(resolved.Spec)
 		label = FormatAgentEntry(entry)
 	}
@@ -89,7 +90,7 @@ func (v *verifyGateSession) decorate(spec *ui.GateMenuSpec, choice *AgentGroupEn
 }
 
 func (e gateEnv) manualVerify(m *Manifest) (*Manifest, error) {
-	rv := *e.cfg.verify.context
+	rv := *e.cfg.verify.reverify
 	rv.choice = e.cfg.verifyChoice
 	rv.admission = AdmissionWait
 	id, err := ResolveRepositoryIdentity(e.d, e.runtimePath)
@@ -115,10 +116,10 @@ func (e gateEnv) verifyAndReturnToMenu(m *Manifest) (bool, error) {
 	if fresh == nil {
 		fresh = m
 	}
-	return e.verifyMenu(fresh)
+	return e.reopenGateMenu(fresh)
 }
 
-func (e gateEnv) verifyMenu(m *Manifest) (bool, error) {
+func (e gateEnv) reopenGateMenu(m *Manifest) (bool, error) {
 	id, err := ResolveRepositoryIdentity(e.d, e.runtimePath)
 	if err != nil {
 		return false, err

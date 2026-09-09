@@ -28,10 +28,10 @@ type gateEnv struct {
 	reader   *promptReader
 	yes      bool
 	agentCmd string
-	// cfg is the merged config the attended gates resolve their attended entry
-	// from, held so a pick at the menu reaches the launch below it (gateConfig).
+	// cfg is the Attended session the gates resolve their attended entry from,
+	// held so a pick at the menu reaches the launch below it.
 	// Nil is legal: the built-in default agent applies.
-	cfg            *gateConfig
+	cfg            *AttendedSession
 	cwd            string
 	runtimePath    string
 	definitionPath string
@@ -135,7 +135,9 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 	for {
 		// Manual Verify follows the command participation rules (ADR-0266).
 		showReverify := gateReverifyEnabled(rv, m)
-		// Re-read report pointers when the gate returns.
+		// An assistance session or a shell side-trip can land work and file a
+		// report while the gate is open, so these are resolved again on every
+		// turn rather than captured once.
 		refine := resolveGateRefineState(d, env.cfg.Value(), m)
 		explore := ResolveExploreMark(d, m)
 		verify, hasVerify := latestVerifyPointer(d, m)
@@ -349,7 +351,7 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && m != nil && m.Valid
 }
 
-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, explore ExploreResolution, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *AttendedSession, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine gateRefineState, explore ExploreResolution, verify ReportPointer, hasVerify bool) (hitlGateAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Complete task"},
@@ -429,7 +431,7 @@ const (
 	failedGateVerify
 	failedGateReadVerify
 	failedGateRefine
-	failedGateReadRefineReport
+	failedGateReadRefine
 )
 
 // handleInteractiveFailedGate is the interactive counterpart to
@@ -527,7 +529,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			return env.verifyAndReturnToMenu(m)
 		case failedGateRefine:
 			return env.refineAndReturnToMenu(m)
-		case failedGateReadRefineReport:
+		case failedGateReadRefine:
 			env.readRefineReport(m)
 		case failedGateExit:
 			return false, nil
@@ -535,7 +537,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	}
 }
 
-func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
+func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *AttendedSession, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID),
 		Tone:     ui.GateMenuToneError,
@@ -564,7 +566,7 @@ func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfi
 	case "f":
 		return failedGateRefine, nil
 	case "p":
-		return failedGateReadRefineReport, nil
+		return failedGateReadRefine, nil
 	case "1":
 		return failedGateRerun, nil
 	case "2":
@@ -593,7 +595,7 @@ const (
 	verifyFailedGateVerify
 	verifyFailedGateReadVerify
 	verifyFailedGateRefine
-	verifyFailedGateReadRefineReport
+	verifyFailedGateReadRefine
 )
 
 // handleInteractiveVerifyFailedGate is the interactive counterpart to the
@@ -711,7 +713,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 			return env.verifyAndReturnToMenu(m)
 		case verifyFailedGateRefine:
 			return env.refineAndReturnToMenu(m)
-		case verifyFailedGateReadRefineReport:
+		case verifyFailedGateReadRefine:
 			env.readRefineReport(m)
 		case verifyFailedGateExit:
 			return false, nil
@@ -719,7 +721,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 }
 
-func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gateConfig, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
+func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *AttendedSession, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Verify-failed: %s did not clear the Verifier and needs a human decision.", taskSetID),
 		Tone:     ui.GateMenuToneError,
@@ -749,7 +751,7 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *gat
 	case "f":
 		return verifyFailedGateRefine, nil
 	case "p":
-		return verifyFailedGateReadRefineReport, nil
+		return verifyFailedGateReadRefine, nil
 	case "1":
 		return verifyFailedGateAccept, nil
 	case "2":
