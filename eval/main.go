@@ -27,9 +27,20 @@ var (
 	defaultArmsRoot    = filepath.Join("eval", "arms")
 	defaultGradersRoot = filepath.Join("eval", "graders")
 	defaultConfigPath  = filepath.Join("eval", "config.toml")
-	defaultWorkRoot    = filepath.Join("eval", "work")
+	defaultWorkRoot    = evalWorkRootWith(os.Getenv, os.UserHomeDir)
 	defaultResultsRoot = filepath.Join("eval", "results")
 )
+
+func evalWorkRootWith(getenv func(string) string, userHomeDir func() (string, error)) string {
+	if stateHome := getenv("XDG_STATE_HOME"); stateHome != "" {
+		return filepath.Join(stateHome, "pop", "eval", "work")
+	}
+	home, err := userHomeDir()
+	if err != nil {
+		return filepath.Join("/tmp", "pop", "eval", "work")
+	}
+	return filepath.Join(home, ".local", "state", "pop", "eval", "work")
+}
 
 // A Case, an Arm and a Grader are each named by a directory entry, so one shape
 // governs all three.

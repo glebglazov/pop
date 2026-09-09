@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,33 @@ import (
 
 	"github.com/glebglazov/pop/tasks"
 )
+
+func TestEvalWorkRootUsesXDGStateHome(t *testing.T) {
+	got := evalWorkRootWith(func(key string) string {
+		if key == "XDG_STATE_HOME" {
+			return "/state"
+		}
+		return ""
+	}, func() (string, error) {
+		return "", errors.New("home must not be read")
+	})
+
+	want := filepath.Join("/state", "pop", "eval", "work")
+	if got != want {
+		t.Fatalf("Eval work root = %q, want %q", got, want)
+	}
+}
+
+func TestEvalWorkRootUsesHomeFallback(t *testing.T) {
+	got := evalWorkRootWith(func(string) string { return "" }, func() (string, error) {
+		return "/home/evaluator", nil
+	})
+
+	want := filepath.Join("/home/evaluator", ".local", "state", "pop", "eval", "work")
+	if got != want {
+		t.Fatalf("Eval work root = %q, want %q", got, want)
+	}
+}
 
 func TestPrepareCaseFromHistoricalTaskSet(t *testing.T) {
 	repo := t.TempDir()

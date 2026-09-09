@@ -185,6 +185,12 @@ identity, signing configuration, or signing key.
 Use another `--repeat` flag to select another repeat number.
 `--ceiling 4h` sets the agent's Trial ceiling (four hours by default).
 `--cases`, `--arms`, `--work`, and `--results` change the directory roots.
+The Eval work root defaults to `$XDG_STATE_HOME/pop/eval/work`, or
+`~/.local/state/pop/eval/work` when `XDG_STATE_HOME` is not set. It lives in
+state outside the repository so a repository cleanup cannot delete a live
+Trial. It is not a cache because a cache cleaner must not delete a live Trial.
+The results root still defaults to `eval/results` in the repository because
+Trial records and patches are outputs that belong in Git.
 Run the Pop arm with `--arm pop`. It uses the shipped `pop` binary on PATH;
 `--pop /path/to/pop` selects a built binary. It registers the prepared Task set
 without auto-drain, then runs whole-set implement with closed stdin. All Pop
@@ -217,11 +223,11 @@ agent crash produces an Invalid Trial; its agent outcome and reason remain in
 the record. The Matrix retries it once. The standalone `grade` command remains
 available to grade a stored Trial again without running its Arm again.
 
-Clones and Captured runs stay under `eval/work/trial-<random>/repository` and
-`capture`. These names do not identify the Arm. A later Grader must receive only
-the parent repository, patch, and Acceptance list, never the Trial record or
-Captured run. `eval/work/` is local work and is ignored by Git; results remain
-available to commit.
+Clones and Captured runs stay under the Eval work root in
+`trial-<random>/repository` and `capture`. These names do not identify the Arm.
+A later Grader must receive only the parent repository, patch, and Acceptance
+list, never the Trial record or Captured run. Results remain available to
+commit.
 
 ## Grade a Trial
 
