@@ -11,9 +11,11 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/errand"
 	"github.com/glebglazov/pop/history"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
@@ -773,18 +775,16 @@ func switchTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
 }
 
 func deleteWorktree(workingPath, path string) {
-	if err := deleteWorktreeWith(project.DefaultDeps(), cmdHistoryDeps(), workingPath, path); err != nil {
+	if err := deleteWorktreeWith(cmdHistoryDeps(), workingPath, path); err != nil {
 		debug.Error("deleteWorktree %s: %v", path, err)
-		fmt.Fprintf(os.Stderr, "Failed to delete worktree: %s\n%v\n", path, err)
+		fmt.Fprintf(os.Stderr, "Failed to queue checkout removal: %s\n%v\n", path, err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "Deleted: %s\n", path)
+	fmt.Fprintf(os.Stderr, "Queued checkout removal: %s\n", path)
 }
 
-func deleteWorktreeWith(pd *project.Deps, hd *history.Deps, workingPath, path string) error {
-	err := project.RemoveCheckout(pd, workingPath, path)
-	removeFromHistoryWith(hd, path)
-	return err
+func deleteWorktreeWith(hd *history.Deps, workingPath, path string) error {
+	return errand.QueueCheckoutRemoval(hd.Tasks, store.CheckoutRemoval{Path: path, WorkingPath: workingPath})
 }
 
 // removeFromHistory deletes path from project history, logging (not

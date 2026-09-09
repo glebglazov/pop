@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/errand"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
@@ -495,8 +496,18 @@ func TestDeleteWorktreeWithRemovesDirectoryAdministrationAndHistory(t *testing.T
 			return "", nil
 		}},
 	}
-	if err := deleteWorktreeWith(pd, hd, "/repo", checkout); err != nil {
+	if err := deleteWorktreeWith(hd, "/repo", checkout); err != nil {
 		t.Fatalf("delete checkout: %v", err)
+	}
+
+	if _, err := os.Stat(checkout); err != nil {
+		t.Fatalf("queue removed checkout synchronously: %v", err)
+	}
+	if len(gitArgs) != 0 {
+		t.Fatalf("queue ran Git: %v", gitArgs)
+	}
+	if err := errand.Tick(hd.Tasks, pd, io.Discard); err != nil {
+		t.Fatal(err)
 	}
 
 	if _, err := os.Stat(checkout); !errors.Is(err, os.ErrNotExist) {

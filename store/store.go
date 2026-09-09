@@ -629,6 +629,21 @@ var migrations = []string{
 	// than a data-carrying migration.
 	`ALTER TABLE review_episodes RENAME TO refine_episodes;
 	 ALTER TABLE refine_episodes RENAME COLUMN reviewed_at TO refined_at;`,
+	// 39: Errands are keyed by subject, outside the Work registry (ADR-0273).
+	`CREATE TABLE errands (
+		path TEXT PRIMARY KEY,
+		working_path TEXT NOT NULL,
+		branch TEXT NOT NULL DEFAULT '',
+		force INTEGER NOT NULL DEFAULT 0,
+		state TEXT NOT NULL CHECK(state IN ('queued', 'running', 'failed')),
+		queued_at TEXT NOT NULL,
+		output_path TEXT NOT NULL DEFAULT ''
+	);
+	CREATE TABLE errand_completions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path TEXT NOT NULL,
+		finished_at TEXT NOT NULL
+	);`,
 }
 
 func (s *Store) migrate() error {

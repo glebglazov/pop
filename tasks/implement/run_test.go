@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/errand"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 )
@@ -612,6 +614,12 @@ func TestResolveTaskSetRuntimeForceRebindManagedTeardownAfterProgress(t *testing
 	}
 	if !strings.Contains(confirmOut.String(), managed.RuntimePath) {
 		t.Fatalf("confirm output = %q, want managed delete prompt for %q", confirmOut.String(), managed.RuntimePath)
+	}
+	if _, err := os.Stat(managed.RuntimePath); err != nil {
+		t.Fatalf("checkout removed before daemon tick: %v", err)
+	}
+	if err := errand.Tick(td, &project.Deps{FS: td.FS, Git: td.Git}, io.Discard); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be deleted")

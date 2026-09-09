@@ -371,12 +371,13 @@ func TestFoldAfterWorktreeRootMoveTearsDownAtTheNewPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold after move: %v", err)
 	}
-	if !got.TornDown {
-		t.Fatal("TornDown = false: a moved managed worktree must still read as provisioned")
+	if !got.RemovalQueued {
+		t.Fatal("RemovalQueued = false: a moved managed worktree must still read as provisioned")
 	}
 	if got.RuntimePath != newPath {
 		t.Fatalf("folded checkout = %q, want the moved path %q", got.RuntimePath, newPath)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(newPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("moved worktree should be torn down, stat err = %v", err)
 	}

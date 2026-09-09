@@ -78,9 +78,14 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 	// contribution without creating the database, and the shared handle is never
 	// closed (closing it would poison the process cache for later store calls).
 	var routineRuns []store.RoutineRun
+	var completions []store.ErrandCompletion
 	if s, ok, storeErr := td.Store(false); storeErr != nil {
 		return nil, storeErr
 	} else if ok {
+		completions, err = s.ListErrandCompletions()
+		if err != nil {
+			return nil, err
+		}
 		routineRuns, err = s.ListAllRoutineRuns()
 		if err != nil {
 			return nil, err
@@ -88,6 +93,9 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 	}
 
 	var events []LogEvent
+	for _, e := range completions {
+		events = append(events, LogEvent{Timestamp: e.FinishedAt, SetID: e.Path, RuntimePath: e.Path, Kind: "checkout_removed"})
+	}
 	for _, dr := range drains {
 		events = append(events, LogEvent{
 			Timestamp:   dr.StartedAt,

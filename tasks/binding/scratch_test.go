@@ -124,9 +124,10 @@ func TestScratchWorktreeBindsAndFoldsThroughExistingPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold: %v", err)
 	}
-	if !got.TornDown {
-		t.Fatal("TornDown = false, want the reference-counted teardown to fire on fold")
+	if !got.RemovalQueued {
+		t.Fatal("RemovalQueued = false, want the reference-counted teardown to fire on fold")
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(b.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("scratch worktree should be torn down, stat err = %v", err)
 	}

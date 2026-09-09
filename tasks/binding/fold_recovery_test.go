@@ -489,7 +489,7 @@ func TestTaskSetFoldRerunAfterRealBranchMovedCompletesItsTail(t *testing.T) {
 			if err != nil {
 				t.Fatalf("rerun after real branch moved: %v", err)
 			}
-			if !got.TornDown {
+			if !got.RemovalQueued {
 				t.Fatal("rerun did not complete reference-counted teardown")
 			}
 			if _, _, ok, err := FindBySetID(td, setID); err != nil || ok {
@@ -501,6 +501,7 @@ func TestTaskSetFoldRerunAfterRealBranchMovedCompletesItsTail(t *testing.T) {
 			if got := refAt(t, repo, "HEAD"); got != landed {
 				t.Fatalf("rerun moved trunk: %s -> %s", landed, got)
 			}
+			runQueuedRemovals(t, td)
 			if _, err := os.Stat(b.RuntimePath); !os.IsNotExist(err) {
 				t.Fatalf("managed worktree survived teardown: %v", err)
 			}
@@ -709,7 +710,7 @@ func TestTaskSetFoldTailFailureRestoresLandingMarkerAndRerunFinishes(t *testing.
 	if err != nil {
 		t.Fatalf("rerun after tail failure: %v", err)
 	}
-	if !got.TornDown {
+	if !got.RemovalQueued {
 		t.Fatal("rerun did not complete reference-counted teardown")
 	}
 	if s := manifestStatusAt(t, td, repo, setID); s != tasks.StatusDone {

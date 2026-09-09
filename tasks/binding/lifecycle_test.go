@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/errand"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -131,6 +132,7 @@ func TestTeardownManagedWorktreeRemovesCheckoutAndBranch(t *testing.T) {
 	if err := TeardownManagedWorktree(td, nil, cfg, b, LifecycleHooks{}); err != nil {
 		t.Fatalf("TeardownManagedWorktree: %v", err)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be removed, stat err = %v", err)
 	}
@@ -715,4 +717,24 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git -C %s %v: %v", dir, args, err)
 	}
 	return out
+}
+
+func runQueuedRemovals(t *testing.T, td *tasks.Deps) {
+	t.Helper()
+	s, ok, err := td.Store(false)
+	if err != nil || !ok {
+		t.Fatalf("queued store: %v", err)
+	}
+	rows, err := s.ListErrands()
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("no removal queued: %v", err)
+	}
+	for _, row := range rows {
+		if _, err := os.Stat(row.Path); err != nil {
+			t.Fatalf("checkout removed before daemon tick: %v", err)
+		}
+	}
+	if err := errand.Tick(td, &project.Deps{FS: td.FS, Git: td.Git}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
 }

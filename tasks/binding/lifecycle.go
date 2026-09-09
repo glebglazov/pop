@@ -31,7 +31,7 @@ type BindWorktreeOptions struct {
 	// seam as `register --managed`, ADR-0147). checkoutPath is still resolved to
 	// the repository identity; TrunkPath, when non-empty, is the fork base
 	// (already resolved and optionally persisted by the caller).
-	Managed bool
+	Managed   bool
 	TrunkPath string
 }
 
@@ -322,8 +322,8 @@ func unbindResolvedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config,
 	return UnbindWorktreeResult{SetID: setID}, nil
 }
 
-// TeardownAndReleaseManagedBinding removes a managed binding's checkout and
-// branch, then forgets the binding association.
+// TeardownAndReleaseManagedBinding queues a managed checkout's removal, then
+// forgets the binding association once the request is durable.
 func TeardownAndReleaseManagedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config, key string, b Binding, hooks LifecycleHooks) error {
 	if err := TeardownManagedWorktree(td, pd, cfg, b, hooks); err != nil {
 		return err
@@ -342,7 +342,7 @@ func confirmManagedWorktreeDelete(in io.Reader, out io.Writer, yes bool, runtime
 	return confirmYesNo(in, out, yes, prompt, nonInteractiveErr)
 }
 
-// TeardownManagedWorktree removes a managed binding's checkout and branch.
+// TeardownManagedWorktree queues removal of a managed checkout and its branch.
 // It must only be called for bindings whose Provisioned bit is true. Since
 // ADR-0152 that bit is derived from the checkout's location: any binding that
 // reaches this helper lives under the managed-worktree root and is therefore

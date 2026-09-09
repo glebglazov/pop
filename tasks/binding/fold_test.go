@@ -246,8 +246,8 @@ func TestFoldRebasesSetOntoTrunkThenFastForwardsTrunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold: %v\n%s", err, out.String())
 	}
-	if got.TornDown != true {
-		t.Fatalf("TornDown = %v, want true for last managed referent", got.TornDown)
+	if got.RemovalQueued != true {
+		t.Fatalf("RemovalQueued = %v, want true for last managed referent", got.RemovalQueued)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "feature.txt")); err != nil {
 		t.Fatalf("trunk must carry set work: %v", err)
@@ -270,6 +270,7 @@ func TestFoldRebasesSetOntoTrunkThenFastForwardsTrunk(t *testing.T) {
 	if _, _, ok, err := FindBySetID(td, "set-fold"); err != nil || ok {
 		t.Fatalf("binding should be released: ok=%v err=%v", ok, err)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(b.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be torn down, stat=%v", err)
 	}
@@ -409,8 +410,8 @@ func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold after assistance: %v\n%s", err, out.String())
 	}
-	if !got.TornDown {
-		t.Fatalf("TornDown = %v, want true", got.TornDown)
+	if !got.RemovalQueued {
+		t.Fatalf("RemovalQueued = %v, want true", got.RemovalQueued)
 	}
 	gotOut := out.String()
 	for _, want := range []string{
@@ -523,8 +524,8 @@ func TestFoldConflictResumeContinuesWithoutPreflight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold resume: %v\n%s", err, out.String())
 	}
-	if !got.TornDown {
-		t.Fatalf("TornDown = %v, want true", got.TornDown)
+	if !got.RemovalQueued {
+		t.Fatalf("RemovalQueued = %v, want true", got.RemovalQueued)
 	}
 	if !strings.Contains(out.String(), "2. Resume fold") {
 		t.Fatalf("missing resume option:\n%s", out.String())
@@ -966,8 +967,8 @@ func TestFoldReleasesBindingAndConfirmGatesTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold decline teardown: %v", err)
 	}
-	if got.TornDown {
-		t.Fatal("TornDown should be false when declined")
+	if got.RemovalQueued {
+		t.Fatal("RemovalQueued should be false when declined")
 	}
 	if _, _, ok, _ := FindBySetID(td, "set-confirm"); ok {
 		t.Fatal("binding must be released even when teardown declined")
@@ -998,9 +999,10 @@ func TestFoldYesSkipsTeardownConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold --yes: %v", err)
 	}
-	if !got.TornDown {
-		t.Fatal("TornDown want true with --yes")
+	if !got.RemovalQueued {
+		t.Fatal("RemovalQueued want true with --yes")
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(b.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be removed")
 	}
@@ -1027,7 +1029,7 @@ func TestFoldAdoptedReleasesButNeverDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold adopted: %v", err)
 	}
-	if got.TornDown {
+	if got.RemovalQueued {
 		t.Fatal("adopted checkout must not be torn down")
 	}
 	if _, err := os.Stat(wt); err != nil {
@@ -1163,9 +1165,10 @@ func TestFoldAdoptedManagedRootCheckoutReachesTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fold: %v", err)
 	}
-	if !got.TornDown {
-		t.Fatal("TornDown = false, want true for managed-root adoption")
+	if !got.RemovalQueued {
+		t.Fatal("RemovalQueued = false, want true for managed-root adoption")
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be torn down, stat err = %v", err)
 	}

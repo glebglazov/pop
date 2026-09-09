@@ -33,11 +33,11 @@ func confirmCheckoutFold(in io.Reader, out io.Writer, yes bool, path string) (bo
 
 // FoldResult describes a successful fold.
 type FoldResult struct {
-	SetID       string
-	RuntimePath string
-	Branch      string
-	TrunkPath   string
-	TornDown    bool
+	SetID         string
+	RuntimePath   string
+	Branch        string
+	TrunkPath     string
+	RemovalQueued bool
 }
 
 // Fold folds the checkout a finished Task set is bound to, and releases that
@@ -99,17 +99,17 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 	}
 	fmt.Fprintf(out, "Released worktree binding for %s\n", setID)
 
-	tornDown, err := maybeTeardownAfterFold(td, pd, cfg, b, opts.Yes, opts.In, out, hooks)
+	removalQueued, err := maybeTeardownAfterFold(td, pd, cfg, b, opts.Yes, opts.In, out, hooks)
 	if err != nil {
 		return FoldResult{}, err
 	}
 
 	return FoldResult{
-		SetID:       setID,
-		RuntimePath: res.RuntimePath,
-		Branch:      res.Branch,
-		TrunkPath:   res.TrunkPath,
-		TornDown:    tornDown,
+		SetID:         setID,
+		RuntimePath:   res.RuntimePath,
+		Branch:        res.Branch,
+		TrunkPath:     res.TrunkPath,
+		RemovalQueued: removalQueued,
 	}, nil
 }
 
@@ -389,6 +389,6 @@ func maybeTeardownAfterFold(td *tasks.Deps, pd *project.Deps, cfg *config.Config
 	if err := TeardownManagedWorktree(td, pd, cfg, b, hooks); err != nil {
 		return false, err
 	}
-	fmt.Fprintf(out, "Removed managed worktree at %s\n", b.RuntimePath)
+	fmt.Fprintf(out, "Queued removal of managed worktree at %s\n", b.RuntimePath)
 	return true, nil
 }

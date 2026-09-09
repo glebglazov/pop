@@ -79,6 +79,7 @@ func TestPrepareManagedWorktreesForArchiveConfirmDeletesWorktree(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(b.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("worktree should be removed, stat err = %v", err)
 	}
@@ -132,6 +133,7 @@ func TestPrepareManagedWorktreesForArchiveYesSkipsPrompt(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("prepare --yes: %v", err)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(b.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("worktree should be removed")
 	}
@@ -223,6 +225,7 @@ func TestPrepareManagedWorktreesForArchiveAdoptedLastReferentDeletes(t *testing.
 	}); err != nil {
 		t.Fatalf("prepare adopted last referent: %v", err)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be removed for adopted last referent")
 	}

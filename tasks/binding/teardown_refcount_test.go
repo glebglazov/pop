@@ -44,8 +44,8 @@ func TestClassifyManagedWorktreeMarksUnboundAfterFoldReleasesLastReferent(t *tes
 	if err != nil {
 		t.Fatalf("fold decline teardown: %v", err)
 	}
-	if got.TornDown {
-		t.Fatal("TornDown should be false when declined")
+	if got.RemovalQueued {
+		t.Fatal("RemovalQueued should be false when declined")
 	}
 
 	after, err := ClassifyManagedWorktree(td, b.RuntimePath)
@@ -113,6 +113,7 @@ func TestBindWorktreeRebindLastManagedReferentPromptsAndDeletes(t *testing.T) {
 	if !got.Replaced || got.RuntimePath != newWT {
 		t.Fatalf("got = %+v, want rebind to %q", got, newWT)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be removed, stat err = %v", err)
 	}
@@ -180,12 +181,13 @@ func TestBindWorktreeRebindYesSkipsPromptAndDeletes(t *testing.T) {
 
 	_, err := BindWorktree(td, nil, cfg, "set-a", newWT, BindWorktreeOptions{
 		Force: true,
-		Yes:     true,
-		In:      tasks.NonInteractiveReader{},
+		Yes:   true,
+		In:    tasks.NonInteractiveReader{},
 	}, LifecycleHooks{}, io.Discard)
 	if err != nil {
 		t.Fatalf("rebind --yes: %v", err)
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be removed with --yes")
 	}

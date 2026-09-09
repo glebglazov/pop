@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/errand"
 	"github.com/glebglazov/pop/internal/repokey"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/store"
@@ -419,21 +420,12 @@ func ProvisionWorktree(d *tasks.Deps, worktreesRoot, projectPath, setID, startPo
 	return Binding{RuntimePath: path, Branch: branch, Provisioned: true}, nil
 }
 
-// TeardownWorktree removes a provisioned checkout: it detaches the worktree and
-// deletes its branch. force selects `git branch -D` over `-d`. It must only be
-// called for provisioned bindings; adopted checkouts are never torn down.
+// TeardownWorktree queues removal of a provisioned checkout and its branch.
+// force permits deletion of an unmerged branch. Adopted checkouts stay intact.
 func TeardownWorktree(d *tasks.Deps, workingPath, runtimePath, branch string, force bool) error {
-	if err := project.RemoveCheckout(&project.Deps{FS: d.FS, Git: d.Git}, workingPath, runtimePath); err != nil {
-		return fmt.Errorf("remove worktree %s: %w", runtimePath, err)
-	}
-	flag := "-d"
-	if force {
-		flag = "-D"
-	}
-	if _, err := d.Git.CommandInDir(workingPath, "branch", flag, branch); err != nil {
-		return fmt.Errorf("delete branch %s: %w", branch, err)
-	}
-	return nil
+	return errand.QueueCheckoutRemoval(d, store.CheckoutRemoval{
+		Path: runtimePath, WorkingPath: workingPath, Branch: branch, Force: force,
+	})
 }
 
 // SafeComponent sanitises a Task set identifier into a filesystem-safe path

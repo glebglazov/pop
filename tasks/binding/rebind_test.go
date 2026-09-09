@@ -137,6 +137,7 @@ func TestAuthorizeLeavingBindingManagedTeardownAfterProgress(t *testing.T) {
 	if !strings.Contains(out.String(), "delete managed worktree") {
 		t.Fatalf("output = %q, want managed delete prompt after progress", out.String())
 	}
+	runQueuedRemovals(t, td)
 	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be removed after teardown confirm")
 	}

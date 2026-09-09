@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/errand"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/work"
 )
 
 // Run starts the foreground supervisor loop: it acquires the single-instance
-// lock, then every poll interval scans every registered project and spawns a
+// lock, handles Errand wakes, and every poll interval scans projects to spawn a
 // drain into tmux for each idle project with a Ready set. It returns when a
 // signal arrives on sigCh (graceful shutdown) — in-flight drains are
 // tmux-owned panes and keep running. A second `pop daemon run` while one holds
@@ -36,18 +37,38 @@ func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.S
 		return err
 	}
 
+	wakes, closeWakes, err := errand.Listen(d.Tasks)
+	if err != nil {
+		return err
+	}
+	defer closeWakes()
+	if err := errand.Recover(d.Tasks); err != nil {
+		return err
+	}
+
 	fmt.Fprintf(out, "pop work supervisor started (PID %d); poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
 	tasks.WarnProcStartUnsupported(out)
 
 	output := newRunOutputState()
+	workTimer := time.NewTimer(0)
+	defer workTimer.Stop()
+	runErrands := func() {
+		if err := errand.Tick(d.Tasks, d.Project, out); err != nil {
+			fmt.Fprintf(out, "errand: %v\n", err)
+		}
+	}
+	runErrands()
 	for {
-		tick(d, out, output)
-
 		select {
 		case <-sigCh:
 			fmt.Fprintln(out, "\nShutting down supervisor; in-flight drains keep running in their panes.")
 			return nil
-		case <-time.After(interval):
+		case <-wakes:
+			runErrands()
+		case <-workTimer.C:
+			runErrands()
+			tick(d, out, output)
+			workTimer.Reset(interval)
 		}
 	}
 }
