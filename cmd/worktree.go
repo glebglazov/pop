@@ -232,13 +232,13 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 		case ui.ActionDelete:
 			if result.Selected != nil {
-				deleteWorktree(result.Selected.Path, false)
+				deleteWorktree(ctx.GitRoot, result.Selected.Path)
 			}
 			// Continue loop to show picker again
 
 		case ui.ActionForceDelete:
 			if result.Selected != nil {
-				deleteWorktree(result.Selected.Path, true)
+				deleteWorktree(ctx.GitRoot, result.Selected.Path)
 			}
 			// Continue loop to show picker again
 
@@ -353,6 +353,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
 		{Icon: iconBoundManaged, Desc: "Managed worktree (Task set bound)"},
 		{Icon: iconUnboundManaged, Desc: "Unbound managed worktree (no Task set bound)"},
+		{Icon: iconHalfRemoved, Desc: "Half-removed checkout"},
 	}
 	if attentionEnabled {
 		iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
@@ -452,6 +453,10 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 		sessionName := project.TmuxSessionNameAt(ctx, wt.Path, wt.Name)
 		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
+		}
+		if wt.Prunable {
+			items[i].Marker = iconHalfRemoved
+			continue
 		}
 		if state, err := binding.ClassifyManagedWorktree(td, wt.Path); err == nil {
 			switch state {
@@ -767,26 +772,19 @@ func switchTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
 	return tmuxmod.Attach(mod, checkoutSessionName(item.Path), item.Path)
 }
 
-func deleteWorktree(path string, force bool) {
-	args := []string{"worktree", "remove"}
-	if force {
-		args = append(args, "--force")
-	}
-	args = append(args, path)
-
-	cmd := exec.Command("git", args...)
-	output, err := cmd.CombinedOutput()
-
-	if err != nil {
-		debug.Error("deleteWorktree %s: %v: %s", path, err, output)
-		fmt.Fprintf(os.Stderr, "Failed to delete worktree: %s\n%s\n", path, output)
+func deleteWorktree(workingPath, path string) {
+	if err := deleteWorktreeWith(project.DefaultDeps(), cmdHistoryDeps(), workingPath, path); err != nil {
+		debug.Error("deleteWorktree %s: %v", path, err)
+		fmt.Fprintf(os.Stderr, "Failed to delete worktree: %s\n%v\n", path, err)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "Deleted: %s\n", path)
-	// Worktree is gone — drop its history entry so it no longer skews
-	// recency sorting or session-name matching. The tmux session (if any)
-	// is left alone; killing it stays an explicit, separate action.
-	removeFromHistory(path)
+}
+
+func deleteWorktreeWith(pd *project.Deps, hd *history.Deps, workingPath, path string) error {
+	err := project.RemoveCheckout(pd, workingPath, path)
+	removeFromHistoryWith(hd, path)
+	return err
 }
 
 // removeFromHistory deletes path from project history, logging (not

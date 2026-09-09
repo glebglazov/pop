@@ -29,6 +29,7 @@ const (
 	// rather than "not classified yet" (ADR-0152).
 	iconUnboundManaged = "U"
 	iconBoundManaged   = "M"
+	iconHalfRemoved    = "!"
 	// Work-session badges, one per Work kind. A session hosting a Work container
 	// is a different animal from a project's session — you are in it to decide,
 	// drain or fire something, not to sit in a checkout — so it gets its own

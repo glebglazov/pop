@@ -55,9 +55,10 @@ func NewProject(path string) Project {
 
 // Worktree represents a git worktree
 type Worktree struct {
-	Name   string
-	Branch string
-	Path   string
+	Name     string
+	Branch   string
+	Path     string
+	Prunable bool
 }
 
 // RepoContext holds information about the current git repository
@@ -450,6 +451,8 @@ func parseWorktrees(output string) []Worktree {
 			current.Branch = "detached"
 		case line == "bare":
 			isBare = true
+		case strings.HasPrefix(line, "prunable"):
+			current.Prunable = true
 		case line == "":
 			if current.Path != "" && current.Name != ".bare" && !isBare {
 				worktrees = append(worktrees, current)

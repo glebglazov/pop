@@ -59,6 +59,18 @@ detached
 			},
 		},
 		{
+			name: "prunable worktree",
+			input: `worktree /path/to/half-removed
+HEAD 0123456789abcdef
+branch refs/heads/feature
+prunable gitdir file points to non-existent location
+
+`,
+			expected: []Worktree{
+				{Name: "half-removed", Path: "/path/to/half-removed", Branch: "feature", Prunable: true},
+			},
+		},
+		{
 			name: "filters out .bare directory",
 			input: `worktree /projects/repo/.bare
 bare
@@ -137,6 +149,9 @@ branch refs/heads/master
 				}
 				if wt.Branch != tt.expected[i].Branch {
 					t.Errorf("worktree[%d].Branch = %q, want %q", i, wt.Branch, tt.expected[i].Branch)
+				}
+				if wt.Prunable != tt.expected[i].Prunable {
+					t.Errorf("worktree[%d].Prunable = %v, want %v", i, wt.Prunable, tt.expected[i].Prunable)
 				}
 			}
 		})

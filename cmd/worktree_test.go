@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -420,6 +421,19 @@ func TestBuildWorktreeItemsDistinguishesBoundManagedWorktree(t *testing.T) {
 	}
 }
 
+func TestBuildWorktreeItemsMarksHalfRemovedCheckout(t *testing.T) {
+	t.Parallel()
+	worktrees := []project.Worktree{{
+		Name: "half-removed", Path: "/repo/half-removed", Branch: "feature", Prunable: true,
+	}}
+
+	items := buildWorktreeItems(&project.RepoContext{}, worktrees, map[string]int64{}, isolatedWorktreeTestTasksDeps(t))
+
+	if items[0].Marker != iconHalfRemoved {
+		t.Errorf("Marker = %q, want %q", items[0].Marker, iconHalfRemoved)
+	}
+}
+
 // historyTestDeps builds a cmd history seam whose store lives under an isolated
 // data dir, seeded with the two entries the removal cases work against. It seeds
 // them through the legacy-file fold, which is also the shape a real machine's
@@ -453,6 +467,49 @@ func historyEntryPaths(t *testing.T, d *history.Deps) []string {
 		out = append(out, e.Path)
 	}
 	return out
+}
+
+func TestDeleteWorktreeWithRemovesDirectoryAdministrationAndHistory(t *testing.T) {
+	t.Parallel()
+	checkout := filepath.Join(t.TempDir(), "feature")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".git"), []byte("gitdir: /repo/.git/worktrees/feature"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hd := historyTestDeps(t)
+	hist, err := history.LoadWith(hd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hist.Record(checkout); err != nil {
+		t.Fatal(err)
+	}
+
+	var gitArgs []string
+	pd := &project.Deps{
+		FS: deps.NewRealFileSystem(),
+		Git: &deps.MockGit{CommandInDirFunc: func(_ string, args ...string) (string, error) {
+			gitArgs = append([]string(nil), args...)
+			return "", nil
+		}},
+	}
+	if err := deleteWorktreeWith(pd, hd, "/repo", checkout); err != nil {
+		t.Fatalf("delete checkout: %v", err)
+	}
+
+	if _, err := os.Stat(checkout); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checkout remains: %v", err)
+	}
+	if got := strings.Join(gitArgs, " "); got != "worktree prune" {
+		t.Fatalf("git command = %q, want worktree prune", got)
+	}
+	for _, path := range historyEntryPaths(t, hd) {
+		if path == checkout {
+			t.Fatalf("history entry remains for %s", checkout)
+		}
+	}
 }
 
 func TestRemoveFromHistoryWith(t *testing.T) {

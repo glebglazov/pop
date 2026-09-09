@@ -423,7 +423,7 @@ func ProvisionWorktree(d *tasks.Deps, worktreesRoot, projectPath, setID, startPo
 // deletes its branch. force selects `git branch -D` over `-d`. It must only be
 // called for provisioned bindings; adopted checkouts are never torn down.
 func TeardownWorktree(d *tasks.Deps, workingPath, runtimePath, branch string, force bool) error {
-	if _, err := d.Git.CommandInDir(workingPath, "worktree", "remove", runtimePath); err != nil {
+	if err := project.RemoveCheckout(&project.Deps{FS: d.FS, Git: d.Git}, workingPath, runtimePath); err != nil {
 		return fmt.Errorf("remove worktree %s: %w", runtimePath, err)
 	}
 	flag := "-d"
