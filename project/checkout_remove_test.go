@@ -75,6 +75,81 @@ func TestRemoveCheckoutContinuesAfterEntryFailureAndReportsSurvivor(t *testing.T
 	}
 }
 
+func TestRemoveCheckoutWarnsAboutHoldersWithoutStoppingRemoval(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	checkout := filepath.Join(root, "checkout")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "held"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var warning string
+	d := &Deps{
+		FS: deps.NewRealFileSystem(),
+		Git: &deps.MockGit{CommandInDirFunc: func(_ string, args ...string) (string, error) {
+			if strings.Join(args, " ") == "rev-parse --git-dir" {
+				return ".git/worktrees/checkout", nil
+			}
+			return "", nil
+		}},
+		Holders: checkoutHolderProbeFunc(func(path, gitDir string) ([]deps.CheckoutHolder, error) {
+			if path != checkout || gitDir != filepath.Join(checkout, ".git", "worktrees", "checkout") {
+				t.Fatalf("probe paths = %q, %q", path, gitDir)
+			}
+			return []deps.CheckoutHolder{{PID: 42, Name: "language-server"}}, nil
+		}),
+		Warn: func(message string) { warning = message },
+	}
+
+	if err := RemoveCheckout(d, root, checkout); err != nil {
+		t.Fatalf("remove checkout: %v", err)
+	}
+	if !strings.Contains(warning, "language-server") || !strings.Contains(warning, "42") {
+		t.Fatalf("warning = %q, want holder name and PID", warning)
+	}
+	if _, err := os.Stat(checkout); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checkout remains after holder warning: %v", err)
+	}
+}
+
+func TestRemoveCheckoutStaysQuietWhenProbeFindsNoHolders(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	checkout := filepath.Join(root, "checkout")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	d := &Deps{
+		FS: deps.NewRealFileSystem(),
+		Git: &deps.MockGit{CommandInDirFunc: func(_ string, args ...string) (string, error) {
+			if strings.Join(args, " ") == "rev-parse --git-dir" {
+				return ".git", nil
+			}
+			return "", nil
+		}},
+		Holders: checkoutHolderProbeFunc(func(string, string) ([]deps.CheckoutHolder, error) { return nil, nil }),
+		Warn:    func(string) { called = true },
+	}
+
+	if err := RemoveCheckout(d, root, checkout); err != nil {
+		t.Fatalf("remove checkout: %v", err)
+	}
+	if called {
+		t.Fatal("warning emitted without a holder")
+	}
+}
+
+type checkoutHolderProbeFunc func(checkoutPath, gitDir string) ([]deps.CheckoutHolder, error)
+
+func (f checkoutHolderProbeFunc) CheckoutHolders(checkoutPath, gitDir string) ([]deps.CheckoutHolder, error) {
+	return f(checkoutPath, gitDir)
+}
+
 func checkoutRemovalRepo(t *testing.T) (string, string) {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "repo")

@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,8 +13,10 @@ import (
 
 // Deps holds external dependencies for the project package
 type Deps struct {
-	Git deps.Git
-	FS  deps.FileSystem
+	Git     deps.Git
+	FS      deps.FileSystem
+	Holders deps.CheckoutHolderProbe
+	Warn    func(string)
 	// Shape memoizes the per-path repository-shape probe for one load. Nil means
 	// no load has claimed a scope and every probe reads the filesystem.
 	Shape *ShapeMemo
@@ -22,8 +25,12 @@ type Deps struct {
 // DefaultDeps returns dependencies using real implementations
 func DefaultDeps() *Deps {
 	return &Deps{
-		Git: deps.NewRealGit(),
-		FS:  deps.NewRealFileSystem(),
+		Git:     deps.NewRealGit(),
+		FS:      deps.NewRealFileSystem(),
+		Holders: deps.NewRealCheckoutHolderProbe(),
+		Warn: func(message string) {
+			fmt.Fprintln(os.Stderr, message)
+		},
 	}
 }
 

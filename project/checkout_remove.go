@@ -17,6 +17,7 @@ func RemoveCheckout(d *Deps, workingPath, checkoutPath string) error {
 		d = defaultDeps
 	}
 
+	warnCheckoutHolders(d, checkoutPath)
 	removeCheckoutTree(d, checkoutPath)
 	survivors := checkoutSurvivors(d, checkoutPath)
 
@@ -29,6 +30,32 @@ func RemoveCheckout(d *Deps, workingPath, checkoutPath string) error {
 		pruneErr = fmt.Errorf("prune worktrees: %w", pruneErr)
 	}
 	return errors.Join(removalErr, pruneErr)
+}
+
+func warnCheckoutHolders(d *Deps, checkoutPath string) {
+	if d.Holders == nil || d.Warn == nil {
+		return
+	}
+	gitDir, err := d.Git.CommandInDir(checkoutPath, "rev-parse", "--git-dir")
+	if err != nil {
+		return
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(checkoutPath, gitDir)
+	}
+	holders, err := d.Holders.CheckoutHolders(checkoutPath, filepath.Clean(gitDir))
+	if err != nil || len(holders) == 0 {
+		return
+	}
+	names := make([]string, 0, len(holders))
+	for _, holder := range holders {
+		if holder.Name == "" {
+			names = append(names, fmt.Sprintf("pid %d", holder.PID))
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s (pid %d)", holder.Name, holder.PID))
+	}
+	d.Warn(fmt.Sprintf("warning: removing checkout %s while held by %s", checkoutPath, strings.Join(names, ", ")))
 }
 
 func removeCheckoutTree(d *Deps, path string) {
