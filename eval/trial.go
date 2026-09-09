@@ -117,10 +117,10 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 		})
 }
 
-func preflightMatrix(armNames []string, arms map[string]armFile, pop, workRoot, resultsRoot string) error {
+func preflightMatrix(armNames []string, loadedArms map[string]armFile, pop, workRoot, resultsRoot string) error {
 	popSelected := false
 	for _, name := range armNames {
-		arm := arms[name]
+		arm := loadedArms[name]
 		invocation, err := tasks.ResolveAgentInvocation(arm.agentSpec(), "", "", ".")
 		if err != nil {
 			return fmt.Errorf("preflight Arm %q: resolve agent binary: %w", name, err)
@@ -469,7 +469,11 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 // produced a Trial worth grading; a crash or a quota pause leaves the record
 // Invalid. The capture seam spells those two outcomes the way a Trial does,
 // which is what lets the agent's word carry straight into the record.
-func runBareTrial(clone, resultDir string, arm armFile, manifest caseManifest, spec string, ceiling time.Duration, record *trialRecord) (error, error) {
+//
+// The two failures answer apart: once the seam returns an attempt, the agent
+// has run and been paid for, so a capture it could not write or price is a hole
+// in the Trial's evidence rather than a reason to void the Trial.
+func runBareTrial(clone, resultDir string, arm armFile, manifest caseManifest, spec string, ceiling time.Duration, record *trialRecord) (trialErr, evidenceErr error) {
 	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
 		AgentSpec: arm.agentSpec(), Prompt: barePrompt(manifest, spec), RuntimePath: clone,
 		Timeout: ceiling, DestinationDir: filepath.Join(resultDir, "capture"),
