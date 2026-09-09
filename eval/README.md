@@ -143,6 +143,8 @@ Trial Case=example Arm=bare repeat=1 attempt=1 Arm execution started
 Trial Case=example Arm=bare repeat=1 attempt=1 Arm execution finished: outcome=completed
 Trial Case=example Arm=bare repeat=1 attempt=1 patch saving started
 Trial Case=example Arm=bare repeat=1 attempt=1 patch saving finished: path=/path/to/result/diff.patch
+Trial Case=example Arm=bare repeat=1 attempt=1 work cleanup started
+Trial Case=example Arm=bare repeat=1 attempt=1 work cleanup finished
 Trial Case=example Arm=bare repeat=1 grading preparation started
 Trial Case=example Arm=bare repeat=1 grading preparation finished
 Trial Case=example Arm=bare repeat=1 Objective gate started: go test ./...
@@ -185,6 +187,10 @@ identity, signing configuration, or signing key.
 Use another `--repeat` flag to select another repeat number.
 `--ceiling 4h` sets the agent's Trial ceiling (four hours by default).
 `--cases`, `--arms`, `--work`, and `--results` change the directory roots.
+By default, the harness deletes a Trial's work directory after it saves the
+record, patch, Captured runs, and reports, before grading starts. This cleanup
+also applies to Invalid Trials. Use `--keep-work` to retain each work directory
+for one debugging run; the progress output names every retained path.
 The Eval work root defaults to `$XDG_STATE_HOME/pop/eval/work`, or
 `~/.local/state/pop/eval/work` when `XDG_STATE_HOME` is not set. It lives in
 state outside the repository so a repository cleanup cannot delete a live
@@ -227,11 +233,24 @@ agent crash produces an Invalid Trial; its agent outcome and reason remain in
 the record. The Matrix retries it once. The standalone `grade` command remains
 available to grade a stored Trial again without running its Arm again.
 
-Clones stay under the Eval work root in `trial-<random>/repository`. Captured
-runs and reports stay with the Trial result, outside the disposable clone.
+A Trial clone stays under the Eval work root in
+`trial-<random>/repository` until its saved outputs are complete. Captured runs
+and reports stay with the Trial result, outside the disposable clone.
 A later Grader must receive only the parent repository, patch, and Acceptance
 list, never the Trial record or Captured run. Results remain available to
 commit.
+
+## Clean Eval work
+
+```sh
+go run ./eval clean
+```
+
+The command removes leftover `trial-*` and Acceptance-drafting directories
+under the Eval work root, then reports how many directories and bytes it
+reclaimed. `--work <path>` selects another work root. An empty or absent root is
+a successful no-op with a message. The command does not remove unrelated
+directories under the work root.
 
 ## Grade a Trial
 

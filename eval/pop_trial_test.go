@@ -117,7 +117,7 @@ esac
 			writeFile(t, log, "")
 			ceiling := "1m"
 			if status == "TIMEOUT" {
-				ceiling = "300ms"
+				ceiling = "2s"
 			}
 			results := filepath.Join(root, "results")
 			if status == "VERIFY-FAILED" {
@@ -129,7 +129,7 @@ esac
 			}
 			var progress bytes.Buffer
 			waits, stopped := []evalWait{}, 0
-			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling}, evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)})
+			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling, "--keep-work"}, evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)})
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}

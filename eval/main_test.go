@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -37,6 +38,49 @@ func TestEvalWorkRootUsesHomeFallback(t *testing.T) {
 	want := filepath.Join("/home/evaluator", ".local", "state", "pop", "eval", "work")
 	if got != want {
 		t.Fatalf("Eval work root = %q, want %q", got, want)
+	}
+}
+
+func TestCleanEvalWork(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"trial-one", "example-acceptance-two", "unrelated"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(root, dir, "payload"), strings.Repeat("x", 32))
+	}
+	var out bytes.Buffer
+	if err := cleanEvalWork(root, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"trial-one", "example-acceptance-two"} {
+		if _, err := os.Stat(filepath.Join(root, dir)); !os.IsNotExist(err) {
+			t.Fatalf("disposable work directory %s remains: %v", dir, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "unrelated")); err != nil {
+		t.Fatalf("unrelated work directory was removed: %v", err)
+	}
+	if !strings.Contains(out.String(), "Cleaned 2 Eval work directories") || !strings.Contains(out.String(), "reclaimed ") || strings.Contains(out.String(), "reclaimed 0 bytes") {
+		t.Fatalf("clean report = %q", out.String())
+	}
+}
+
+func TestCleanEvalWorkEmptyOrAbsent(t *testing.T) {
+	root := t.TempDir()
+	for name, tc := range map[string]struct{ path, message string }{
+		"empty":  {root, "no disposable work"},
+		"absent": {filepath.Join(root, "absent"), "is absent"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := cleanEvalWork(tc.path, &out); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), tc.message) || !strings.Contains(out.String(), "reclaimed 0 bytes") {
+				t.Fatalf("clean report = %q", out.String())
+			}
+		})
 	}
 }
 

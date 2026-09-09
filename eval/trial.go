@@ -66,11 +66,12 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	pop := flags.String("pop", "pop", "Pop binary path")
 	ceiling := flags.Duration("ceiling", 4*time.Hour, "Trial ceiling")
 	gradeTimeout := flags.Duration("grade-timeout", time.Hour, "Grader ceiling")
+	keepWork := flags.Bool("keep-work", false, "Keep each Trial work directory")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 || *ceiling <= 0 || *gradeTimeout <= 0 {
-		return errors.New("usage: go run ./eval run [--case <name>] [--arm <arm>] [--repeat N] [--ceiling 4h]")
+		return errors.New("usage: go run ./eval run [--case <name>] [--arm <arm>] [--repeat N] [--ceiling 4h] [--keep-work]")
 	}
 	selectedCases, err := selectCases(*cases, caseNames)
 	if err != nil {
@@ -103,7 +104,7 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 		return err
 	}
 	sort.Ints(repeats)
-	trialOpts := trialOptions{cases: *cases, arms: *arms, work: *work, results: *results, pop: *pop, ceiling: *ceiling, progress: progress}
+	trialOpts := trialOptions{cases: *cases, arms: *arms, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
 	return runMatrix(selectedCases, armNames, repeats, *results, progress,
 		func(name, arm string, repeat int) (string, error) {
 			return runOneTrial(name, arm, repeat, trialOpts)
@@ -331,6 +332,7 @@ func selectCases(root string, selected []string) ([]string, error) {
 type trialOptions struct {
 	cases, arms, work, results, pop string
 	ceiling                         time.Duration
+	keepWork                        bool
 	progress                        evalProgress
 }
 
@@ -435,6 +437,16 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	}
 	if err := tasks.WriteAtomic(filepath.Join(resultDir, "trial.json"), append(data, '\n'), 0o644); err != nil {
 		return "", fmt.Errorf("phase result saving: write Trial record: %w", err)
+	}
+	if opts.keepWork {
+		opts.progress.line("Trial %s attempt=%d work kept: path=%s", label, attempts, workDir)
+	} else {
+		opts.progress.line("Trial %s attempt=%d work cleanup started", label, attempts)
+		if err := os.RemoveAll(workDir); err != nil {
+			opts.progress.line("Trial %s attempt=%d work cleanup failed: %v", label, attempts, err)
+			return "", fmt.Errorf("phase work cleanup: remove Trial work directory: %w", err)
+		}
+		opts.progress.line("Trial %s attempt=%d work cleanup finished", label, attempts)
 	}
 	fmt.Println(resultDir)
 	return record.Outcome, trialErr

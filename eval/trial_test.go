@@ -147,6 +147,7 @@ esac
 					"preparation started", "preparation finished",
 					"Arm execution started", "Arm execution finished: outcome=completed",
 					"patch saving started", "patch saving finished:",
+					"work cleanup started", "work cleanup finished",
 					"Objective gate started: false", "Objective gate finished: failed exit=1 command=false",
 					"Grader execution skipped: one or more Objective gates failed",
 					"finished: outcome=completed grade=gate_failed acceptance=0 quality=0/5 result=",
@@ -162,9 +163,8 @@ esac
 				t.Fatalf("clone is not fresh and neutral: %s", record.WorkDir)
 			}
 			previousWork = record.WorkDir
-			clone := filepath.Join(record.WorkDir, "repository")
-			if head := runGit(t, clone, "rev-parse", "HEAD"); head != parent {
-				t.Fatalf("HEAD = %s", head)
+			if _, err := os.Stat(record.WorkDir); !os.IsNotExist(err) {
+				t.Fatalf("Trial work directory remains after saved outputs: %v", err)
 			}
 			if got := readFile(t, promptPath); got != barePrompt(manifest, spec) {
 				t.Fatalf("captured prompt = %q", got)
@@ -201,6 +201,23 @@ esac
 			}
 		})
 	}
+	t.Run("keep work", func(t *testing.T) {
+		t.Setenv("FAKE_TRIAL_MODE", "success")
+		trialArgs := append(append([]string{}, args...), "--repeat", "5", "--keep-work")
+		var progress bytes.Buffer
+		if err := runTrialCommandWithProgress(trialArgs[1:], evalProgress{out: &progress}); err != nil {
+			t.Fatal(err)
+		}
+		var record trialRecord
+		decodeJSONFile(t, filepath.Join(results, "example", "anonymous-arm", "05", "trial.json"), &record)
+		clone := filepath.Join(record.WorkDir, "repository")
+		if head := runGit(t, clone, "rev-parse", "HEAD"); head != parent {
+			t.Fatalf("HEAD = %s", head)
+		}
+		if !strings.Contains(progress.String(), "work kept: path="+record.WorkDir) {
+			t.Fatalf("keep-work progress:\n%s", progress.String())
+		}
+	})
 	if got := readFile(t, filepath.Join(repo, "feature.txt")); got != "later\n" {
 		t.Fatalf("source changed: %q", got)
 	}

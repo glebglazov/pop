@@ -86,9 +86,11 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("expected a command (available: prepare, draft-acceptance, run, grade, rollup)")
+		return errors.New("expected a command (available: prepare, draft-acceptance, run, grade, rollup, clean)")
 	}
 	switch args[0] {
+	case "clean":
+		return runCleanCommand(args[1:])
 	case "grade":
 		return runGradeCommand(args[1:])
 	case "run":
@@ -100,7 +102,7 @@ func run(args []string) error {
 	case "draft-acceptance":
 		return runDraftAcceptanceCommand(args[1:])
 	default:
-		return fmt.Errorf("unknown command %q (available: prepare, draft-acceptance, run, grade, rollup)", args[0])
+		return fmt.Errorf("unknown command %q (available: prepare, draft-acceptance, run, grade, rollup, clean)", args[0])
 	}
 }
 
