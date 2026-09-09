@@ -116,7 +116,11 @@ go run ./eval run --case <first-case> --case <second-case> --arm bare --arm pop 
 
 With no selection flags, the command runs every approved Case against the Bare
 and Pop arms at repeat 1. A selected Acceptance list must have
-`Status: approved`. The command checks approval before it creates a clone.
+`Status: approved`. Before it creates a clone, the command checks approval,
+that every selected Arm's agent binary is available, that the `pop` binary is
+available when a Pop arm is selected, and that the work and result roots are
+writable. A preflight failure aborts the Matrix without a Trial attempt or
+record.
 Trials run in repeat-major order: every selected Case and Arm runs for one
 repeat before the next repeat starts. An existing `trial.json` is skipped, so
 the same command resumes a stopped Matrix. An Invalid Trial runs one more time
@@ -172,6 +176,11 @@ For a Bare-arm Trial, the command clones the Case repository, checks out the
 parent SHA detached, and makes one captured invocation. The prompt has a fixed
 preamble with the repository URL, completion instruction, no-commit rule, and
 Objective gate commands, followed by the spec without changes.
+
+Every repository clone made by the harness has the local identity
+`Pop Eval Harness <eval@pop.invalid>`. The harness also disables commit signing
+in each clone. Trials therefore do not depend on or inherit the machine's Git
+identity, signing configuration, or signing key.
 
 Use another `--repeat` flag to select another repeat number.
 `--ceiling 4h` sets the agent's Trial ceiling (four hours by default).

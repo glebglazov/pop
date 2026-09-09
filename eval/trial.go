@@ -91,10 +91,16 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	if err := repeats.validate(); err != nil {
 		return err
 	}
+	loadedArms := make(map[string]armFile, len(armNames))
 	for _, arm := range armNames {
-		if _, err := loadArm(*arms, arm); err != nil {
+		loaded, err := loadArm(*arms, arm)
+		if err != nil {
 			return err
 		}
+		loadedArms[arm] = loaded
+	}
+	if err := preflightMatrix(armNames, loadedArms, *pop, *work, *results); err != nil {
+		return err
 	}
 	sort.Ints(repeats)
 	trialOpts := trialOptions{cases: *cases, arms: *arms, work: *work, results: *results, pop: *pop, ceiling: *ceiling, progress: progress}
@@ -106,6 +112,47 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 			gradeArgs := []string{"--cases", *cases, "--arms", *arms, "--graders", *graders, "--config", *configPath, "--work", *work, "--results", *results, "--timeout", gradeTimeout.String(), name, arm, strconv.Itoa(repeat)}
 			return runGradeCommandWithProgress(gradeArgs, progress, false)
 		})
+}
+
+func preflightMatrix(armNames []string, arms map[string]armFile, pop, workRoot, resultsRoot string) error {
+	popSelected := false
+	for _, name := range armNames {
+		arm := arms[name]
+		invocation, err := tasks.ResolveAgentInvocation(arm.agentSpec(), "", "", ".")
+		if err != nil {
+			return fmt.Errorf("preflight Arm %q: resolve agent binary: %w", name, err)
+		}
+		if _, err := exec.LookPath(invocation.Name); err != nil {
+			return fmt.Errorf("preflight Arm %q: agent binary %q not found: %w", name, invocation.Name, err)
+		}
+		popSelected = popSelected || arm.Kind == "pop"
+	}
+	if popSelected {
+		if _, err := exec.LookPath(pop); err != nil {
+			return fmt.Errorf("preflight Pop binary %q not found: %w", pop, err)
+		}
+	}
+	for _, root := range []struct {
+		name string
+		path string
+	}{{"work", workRoot}, {"results", resultsRoot}} {
+		if err := probeEvalRoot(root.path); err != nil {
+			return fmt.Errorf("preflight %s root %s is not writable: %w", root.name, root.path, err)
+		}
+	}
+	return nil
+}
+
+func probeEvalRoot(root string) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(root, ".pop-eval-write-probe-*")
+	if err != nil {
+		return err
+	}
+	name := probe.Name()
+	return errors.Join(probe.Close(), os.Remove(name))
 }
 
 func runMatrix(cases, arms []string, repeats []int, results string, progress evalProgress, runTrial func(string, string, int) (string, error), gradeOneTrial func(string, string, int) error) error {

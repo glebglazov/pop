@@ -159,6 +159,15 @@ func cloneAtCommit(repositoryURL, commit, destination string) error {
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("clone Case repository: %s", strings.TrimSpace(string(output)))
 	}
+	for _, setting := range []struct{ key, value string }{
+		{"user.name", "Pop Eval Harness"},
+		{"user.email", "eval@pop.invalid"},
+		{"commit.gpgsign", "false"},
+	} {
+		if _, err := git(destination, "config", "--local", setting.key, setting.value); err != nil {
+			return fmt.Errorf("configure Case clone %s: %w", setting.key, err)
+		}
+	}
 	if _, err := git(destination, "checkout", "--detach", commit); err != nil {
 		return fmt.Errorf("check out Case parent commit: %w", err)
 	}

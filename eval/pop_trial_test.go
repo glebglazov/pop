@@ -47,6 +47,12 @@ func TestPopTrialCommand(t *testing.T) {
 	}
 	t.Setenv("XDG_DATA_HOME", human)
 	t.Setenv("XDG_CONFIG_HOME", humanConfig)
+	gitHome := filepath.Join(root, "git-home")
+	if err := os.Mkdir(gitHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(gitHome, ".gitconfig"), "[commit]\n\tgpgsign = true\n")
+	t.Setenv("HOME", gitHome)
 	t.Setenv("TMUX", "human-server")
 	t.Setenv("TMUX_PANE", "%99")
 	log := filepath.Join(root, "commands")
@@ -72,6 +78,8 @@ case "$2" in
  implement)
   printf 'changed\n' > feature.txt
   printf 'new\n' > new.txt
+  git add feature.txt new.txt || exit 21
+  git commit -qm 'Trial implementation' || exit 22
   case "$EVAL_POP_STATUS" in TIMEOUT) exec sleep 30 ;; FAILED|VERIFY-FAILED) exit 1 ;; CRASH) exit 7 ;; esac
   ;;
  status)
@@ -89,6 +97,11 @@ esac
 	if err := os.Chmod(binary, 0755); err != nil {
 		t.Fatal(err)
 	}
+	writeFile(t, filepath.Join(root, "claude"), "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(root, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for i, status := range []string{"DONE", "FAILED", "VERIFY-FAILED", "TIMEOUT", "CRASH"} {
 		t.Run(status, func(t *testing.T) {
 			t.Setenv("EVAL_POP_STATUS", status)
@@ -142,6 +155,10 @@ esac
 			patch := readFile(t, filepath.Join(result, "diff.patch"))
 			if !strings.Contains(patch, "+changed") || !strings.Contains(patch, "+new") {
 				t.Fatalf("patch: %s", patch)
+			}
+			clone := filepath.Join(record.WorkDir, "repository")
+			if got := runGit(t, clone, "show", "-s", "--format=%an <%ae> %G?", "HEAD"); got != "Pop Eval Harness <eval@pop.invalid> N" {
+				t.Fatalf("Trial commit identity and signature = %q", got)
 			}
 			var want strings.Builder
 			attempts := 1
