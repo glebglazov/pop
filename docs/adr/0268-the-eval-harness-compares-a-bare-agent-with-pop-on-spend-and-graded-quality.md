@@ -5,6 +5,14 @@ relates: "stands on the Spend lens and Captured run of [ADR-0165](0165-stream-sh
 
 # The eval harness compares a bare agent with pop on spend and graded quality
 
+> **Amended by [ADR-0270](0270-a-trial-keeps-its-evidence-and-its-clone-lives-outside-the-repository.md):**
+> decision 7's per-Trial clones no longer live beside the results in `eval/`.
+> They move to an **Eval work root** in local state and are deleted once the
+> Trial's evidence is lifted into its result directory, which stays committed
+> as decision 6 has it. Decision 3's isolation stands, with a fixed git
+> identity written into every clone, and decision 6 gains a fourth **Trial
+> outcome**, the Lost Trial. Every other decision here is unchanged.
+
 ## Context
 
 Pop's promise is that its machinery — planning into tasks, a drain with retries,
