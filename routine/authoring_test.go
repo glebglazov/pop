@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -294,6 +295,41 @@ func TestRefineAgentSessionSpawnFailureLoopsBack(t *testing.T) {
 	}
 	if strings.Count(text, `Refine routine "gate"`) < 2 {
 		t.Fatalf("gate should loop back after a spawn failure:\n%s", text)
+	}
+}
+
+func TestRefineSelectedAgentUnavailableLoopsBackWithoutFallback(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	var out bytes.Buffer
+	d := refineDeps(t, dataHome, "1\n0\n", &out)
+	runner := &fakeAttendedRunner{}
+	d.Tasks.Runner = runner
+	d.Tasks.LookPath = func(file string) (string, error) {
+		if file == "claude" {
+			return "", os.ErrNotExist
+		}
+		return "/bin/" + file, nil
+	}
+	d.LoadConfig = func() (*config.Config, error) {
+		return &config.Config{Work: &config.WorkConfig{Attended: &config.AgentGroupConfig{
+			Agents: config.AgentEntriesFromCommands("claude", "cursor"),
+		}}}, nil
+	}
+	addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
+
+	if err := RefineWith(d, "gate", ""); err != nil {
+		t.Fatalf("unavailable Agent must not close the gate: %v", err)
+	}
+	if runner.called {
+		t.Fatal("a different attended Agent launched after the selected one refused")
+	}
+	text := out.String()
+	if !strings.Contains(text, "Could not prepare the authoring agent: attended agent unavailable: claude binary is missing") {
+		t.Fatalf("selected Agent refusal was not reported:\n%s", text)
+	}
+	if strings.Count(text, `Refine routine "gate"`) < 2 {
+		t.Fatalf("gate did not return after the refusal:\n%s", text)
 	}
 }
 

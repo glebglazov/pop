@@ -32,7 +32,7 @@ and the attended launch-time skip rule in [the attended invocation decision](019
    No model or argument is inherited from the entry it replaces. Existing
    preset argument defaults still apply where the entry states no value.
 4. An attended launch selects exactly one entry. Without a session choice or
-   flag, it selects the first usable configured attended entry, else the existing
+   flag, it selects the first valid configured attended entry, else the existing
    built-in default. A valid entry with a missing executable or quota cooldown
    remains the selected entry; availability must not promote another entry.
    If it cannot launch, report why and return to the menu where one exists.

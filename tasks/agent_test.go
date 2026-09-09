@@ -1015,6 +1015,16 @@ func TestAttendedSessionLaunchesFromTheAttendedGroup(t *testing.T) {
 	if bare.AgentPreset != DefaultAgentPreset {
 		t.Fatalf("preset = %q, want the built-in %s", bare.AgentPreset, DefaultAgentPreset)
 	}
+
+	// Validity is about the entry shape, not runtime availability. A malformed
+	// head is excluded, so the first valid configured entry is selected.
+	firstValid, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), attendedGroupConfig("", "cursor"), "", "", "assist prompt", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstValid.AgentPreset != "cursor" {
+		t.Fatalf("preset = %q, want first valid configured cursor", firstValid.AgentPreset)
+	}
 }
 
 // TestAttendedEntryOwnsItsPosture pins decision 4 of ADR-0195: the preset's

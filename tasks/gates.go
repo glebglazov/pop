@@ -124,8 +124,8 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
 	body := gateTaskBody(d, m, hitl)
 	// The agent is resolved when assistance is chosen, never on the way in: the
-	// walk that picks one refuses when every attended entry is cooling or
-	// missing, and that refusal belongs in the menu, not in the door.
+	// selected entry can refuse because it is cooling or missing, and that
+	// refusal belongs in the menu, not in the door.
 	var invocation *AgentAssistanceInvocation
 
 	for {

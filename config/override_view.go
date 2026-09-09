@@ -388,8 +388,8 @@ func renderKeyTOML(key string, value any) string {
 }
 
 // renderTOMLValue renders a generic TOML value. Arrays break one element per
-// line — an agent list is read down the page, and its order is the fallback
-// order — while tables stay inline so an entry occupies one line.
+// line — an Agent list is read down the page in its configured order — while
+// tables stay inline so an entry occupies one line.
 func renderTOMLValue(value any, indent string) string {
 	switch v := value.(type) {
 	case nil:

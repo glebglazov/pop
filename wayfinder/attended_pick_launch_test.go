@@ -1,6 +1,7 @@
 package wayfinder
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -69,5 +70,53 @@ func TestFanOutRunsThePickedEntryInEveryPane(t *testing.T) {
 		if title := fake.PaneTitles[paneID]; !strings.HasSuffix(title, " · Picked · opus") {
 			t.Fatalf("grilling pane title = %q, want it named by the picked entry", title)
 		}
+	}
+}
+
+// Both Map launch paths stop on the selected entry. A missing binary must not
+// launch the valid entry behind it or send any command to a pane.
+func TestMapAttendedLaunchesNeverFallThrough(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		launch func(*Deps, *config.Config) error
+	}{
+		{
+			name: "assist",
+			launch: func(d *Deps, cfg *config.Config) error {
+				_, err := AssistMap(d, cfg, "", claimMapID, "")
+				return err
+			},
+		},
+		{
+			name: "grilling",
+			launch: func(d *Deps, cfg *config.Config) error {
+				_, err := NextFrontierTicket(d, cfg, "", claimMapID, "")
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _ := claimFixture(t)
+			d.Tasks.LookPath = func(file string) (string, error) {
+				if file == "claude" {
+					return "", fmt.Errorf("%s is missing", file)
+				}
+				return "/bin/" + file, nil
+			}
+			fake := atTime(d, at(9))
+			cfg := &config.Config{Work: &config.WorkConfig{Attended: &config.AgentGroupConfig{
+				Agents: config.AgentEntriesFromCommands("claude", "cursor"),
+			}}}
+
+			err := tc.launch(d, cfg)
+			if err == nil || !strings.Contains(err.Error(), "claude binary is missing") {
+				t.Fatalf("error = %v, want selected claude refusal", err)
+			}
+			for paneID, commands := range fake.SentCommands {
+				if len(commands) > 0 {
+					t.Fatalf("pane %s received %v; cursor must not launch", paneID, commands)
+				}
+			}
+		})
 	}
 }

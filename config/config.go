@@ -305,13 +305,13 @@ type ImplementConfig struct {
 	IncludeImplementationConvention bool `toml:"include_implementation_convention" include:"replace" desc:"Inline the resolved implementation convention into every implement prompt (default false)."`
 }
 
-// AgentGroupConfig is a Work group whose only setting is its ordered agent
-// list — a kind with no retry loop of its own ([work.routine],
-// [work.attended]).
+// AgentGroupConfig is a Work group whose only setting is its ordered Agent
+// entries ([work.routine], [work.attended]). Each group defines how it uses the
+// order: Routine runs walk a fallback list, while attended sessions choose one
+// entry and never fall through to another.
 type AgentGroupConfig struct {
-	// Agents is the ordered fallback list for this kind of work. When empty,
-	// resolution falls through to the kind's documented fallback.
-	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for this kind of work (strings or {display_name, cmd} tables)."`
+	// Agents is the ordered list of Agent entries for this kind of work.
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered Agent list for this kind of work (strings or {display_name, cmd} tables)."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -573,6 +573,7 @@ type WorkConfig struct {
 	Routine *AgentGroupConfig `toml:"routine" merge:"fields" include:"fields" desc:"Routine Work group ([work.routine] table)."`
 	// Attended is the group every human-facing session shares — gate assistance,
 	// an Assist session, Map assist, map grilling, a Routine refinement session.
+	// Its entries are choices: a launch selects one and never falls through.
 	Attended *AgentGroupConfig `toml:"attended" merge:"fields" include:"fields" desc:"Attended-session Work group ([work.attended] table)."`
 	// Dashboard holds Work-read-surface settings (view presets). Distinct from
 	// the root [dashboard] table, which configures the monitor/pane dashboard.

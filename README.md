@@ -73,6 +73,8 @@ enabled = false
 # Assist session, Map assist, map grilling, a Routine refinement session. The
 # entry's cmd is the whole invocation (model included); pop appends the preset's
 # declared posture flag only where cmd does not already name it (ADR-0195).
+# These are choices, not fallbacks. Pop selects one entry for a launch and
+# reports if it is cooling or its binary is missing; it never tries the next.
 # agents = ["claude", "codex"]
 
 # Every group's agents list takes the same entry type: a table naming the entry
