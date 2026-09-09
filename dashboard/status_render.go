@@ -48,11 +48,19 @@ type StatusTables struct {
 // non-interactive) so it stays greppable/pipeable and serves as the daemon's run
 // baseline.
 func RenderStatus(out io.Writer, snap drain.StatusSnapshot, tables StatusTables) {
+	fmt.Fprintf(out, "Daemon: errands %s; work %s\n", runningWord(snap.Daemon.Errands), runningWord(snap.Daemon.Work))
 	view := drain.BuildRunView(snap, time.Now())
 	drain.RenderRunSummary(out, view)
 	renderStatusTable(out, statusTaskSetsCaption, workPage(), tables.TaskSets, mapRow)
 	renderStatusTable(out, statusRoutinesCaption, routinePage(), tables.Routines, nil)
 	renderStatusScanErrors(out, view.ScanErrors)
+}
+
+func runningWord(running bool) string {
+	if running {
+		return "running"
+	}
+	return "stopped"
 }
 
 // BuildStatusTables builds the two tables the status surface prints, through the

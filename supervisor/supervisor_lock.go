@@ -11,7 +11,7 @@ import (
 	"github.com/glebglazov/pop/tasks/drain"
 )
 
-// SupervisorLockMetadata is persisted in the single-instance supervisor lock.
+// SupervisorLockMetadata is persisted in a daemon-half lock.
 // ProcStart records the owning process's start token so a recycled PID does not
 // make a stale lock read "already running" — liveness pairs PID with start
 // token, the same standard drain rows use (ADR-0055). It is empty on platforms
@@ -22,9 +22,24 @@ type SupervisorLockMetadata struct {
 	PID       int       `json:"pid"`
 	StartedAt time.Time `json:"started_at"`
 	ProcStart string    `json:"proc_start,omitempty"`
+	Half      Half      `json:"half,omitempty"`
 }
 
-// SupervisorLock is a held single-instance supervisor lock.
+// Half names one independently live half of the Pop daemon.
+type Half string
+
+const (
+	ErrandHalf Half = "errands"
+	WorkHalf   Half = "work"
+)
+
+// Liveness is the running state of both Pop daemon halves.
+type Liveness struct {
+	Errands bool
+	Work    bool
+}
+
+// SupervisorLock is one held daemon-half lock.
 type SupervisorLock struct {
 	path string
 }
@@ -48,9 +63,19 @@ func SupervisorLockDir(d *tasks.Deps) string {
 	return drain.WorkDataDir(d)
 }
 
-// SupervisorLockPath returns the path to the single-instance supervisor lock.
+// SupervisorLockPath returns the established Work-half lock path.
 func SupervisorLockPath(d *tasks.Deps) string {
 	return filepath.Join(SupervisorLockDir(d), "supervisor.lock")
+}
+
+// HalfLockPath returns the lock path for one Pop daemon half. The Work half
+// keeps the established path so a daemon from before the split still excludes
+// a second Work half.
+func HalfLockPath(d *tasks.Deps, half Half) string {
+	if half == ErrandHalf {
+		return filepath.Join(SupervisorLockDir(d), "errands.lock")
+	}
+	return SupervisorLockPath(d)
 }
 
 // LegacySupervisorLockPath returns the pre-cut lock path, under the queue-named
@@ -62,15 +87,55 @@ func LegacySupervisorLockPath(d *tasks.Deps) string {
 	return filepath.Join(drain.LegacyQueueDataDir(d), "supervisor.lock")
 }
 
-// AcquireSupervisorLock acquires the single-instance supervisor lock. A second
-// `pop daemon run` while one is already supervising is refused with an
-// operational error naming the running PID; a stale lock (PID no longer alive)
-// is reclaimed, mirroring the runtime execution lock's self-healing.
+// AcquireSupervisorLock keeps the former Work-half API. New callers that must
+// name their half use AcquireHalfLock.
 func AcquireSupervisorLock(d *tasks.Deps) (*SupervisorLock, error) {
-	if err := refuseIfLegacySupervisorLive(d); err != nil {
-		return nil, err
+	return AcquireHalfLock(d, WorkHalf)
+}
+
+// AcquireHalfLock acquires the single-instance lock for one daemon half.
+func AcquireHalfLock(d *tasks.Deps, half Half) (*SupervisorLock, error) {
+	if half != ErrandHalf && half != WorkHalf {
+		return nil, fmt.Errorf("unknown Pop daemon half %q", half)
 	}
-	return acquireSupervisorLock(d, false)
+	if half == WorkHalf {
+		if err := refuseIfLegacySupervisorLive(d); err != nil {
+			return nil, err
+		}
+	}
+	return acquireSupervisorLock(d, half, false)
+}
+
+// ReadLiveness reports which Pop daemon halves have live lock owners. A lock
+// written before halves were recorded represents the former combined daemon.
+func ReadLiveness(d *tasks.Deps) Liveness {
+	var state Liveness
+	for _, half := range []Half{ErrandHalf, WorkHalf} {
+		data, err := d.FS.ReadFile(HalfLockPath(d, half))
+		if err != nil {
+			continue
+		}
+		meta, err := parseSupervisorLockMetadata(data)
+		if err != nil || !tasks.ProcessLiveWithToken(d, meta.PID, meta.ProcStart) {
+			continue
+		}
+		if meta.Half == "" {
+			state.Errands = true
+			state.Work = true
+			continue
+		}
+		if half == ErrandHalf {
+			state.Errands = true
+		} else {
+			state.Work = true
+		}
+	}
+	if data, err := d.FS.ReadFile(LegacySupervisorLockPath(d)); err == nil {
+		if meta, err := parseSupervisorLockMetadata(data); err == nil && tasks.ProcessLiveWithToken(d, meta.PID, meta.ProcStart) {
+			state.Work = true
+		}
+	}
+	return state
 }
 
 // refuseIfLegacySupervisorLive refuses when a pre-cut daemon is still supervising
@@ -100,19 +165,20 @@ func refuseIfLegacySupervisorLive(d *tasks.Deps) error {
 	)}
 }
 
-func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error) {
+func acquireSupervisorLock(d *tasks.Deps, half Half, retried bool) (*SupervisorLock, error) {
 	lockDir := SupervisorLockDir(d)
 	if err := d.FS.MkdirAll(lockDir, 0o755); err != nil {
 		return nil, &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf("create supervisor lock directory: %w", err)}
 	}
 
-	lockPath := SupervisorLockPath(d)
+	lockPath := HalfLockPath(d, half)
 	pid := os.Getpid()
 	procStart, _ := tasks.ProcessStartTokenFor(d, pid)
 	meta := SupervisorLockMetadata{
 		PID:       pid,
 		StartedAt: time.Now().UTC(),
 		ProcStart: procStart,
+		Half:      half,
 	}
 	payload, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -142,7 +208,7 @@ func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error)
 		if retried {
 			return nil, &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf("acquire supervisor lock after recovery: %w", readErr)}
 		}
-		return acquireSupervisorLock(d, true)
+		return acquireSupervisorLock(d, half, true)
 	}
 
 	existingMeta, parseErr := parseSupervisorLockMetadata(existing)
@@ -151,12 +217,13 @@ func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error)
 		if retried {
 			return nil, &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf("acquire supervisor lock after recovery: %w", parseErr)}
 		}
-		return acquireSupervisorLock(d, true)
+		return acquireSupervisorLock(d, half, true)
 	}
 
 	if tasks.ProcessLiveWithToken(d, existingMeta.PID, existingMeta.ProcStart) {
 		return nil, &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
-			"work supervisor already running (PID %d since %s) holding %s",
+			"Pop daemon %s half already running (PID %d since %s) holding %s",
+			half,
 			existingMeta.PID,
 			existingMeta.StartedAt.Format(time.RFC3339),
 			lockPath,
@@ -169,7 +236,7 @@ func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error)
 	if retried {
 		return nil, &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf("acquire supervisor lock after removing stale lock")}
 	}
-	return acquireSupervisorLock(d, true)
+	return acquireSupervisorLock(d, half, true)
 }
 
 func parseSupervisorLockMetadata(data []byte) (*SupervisorLockMetadata, error) {

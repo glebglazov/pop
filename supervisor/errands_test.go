@@ -70,7 +70,10 @@ func TestRunningDaemonWakesForRemovalAndKeepsJournal(t *testing.T) {
 			}
 		}
 	}
-	waitNotice("pop work supervisor started")
+	waitNotice("errands running; work running")
+	if live := ReadLiveness(td); !live.Errands || !live.Work {
+		t.Fatalf("full daemon liveness = %+v, want both halves", live)
+	}
 	// A one-hour Work interval must not delay a human-requested Errand.
 	if err := errand.QueueCheckoutRemoval(td, store.CheckoutRemoval{Path: checkout, WorkingPath: repo}); err != nil {
 		t.Fatal(err)
@@ -93,5 +96,48 @@ func TestRunningDaemonWakesForRemovalAndKeepsJournal(t *testing.T) {
 	rows, err := s.ListErrands()
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("completed row: %+v, %v", rows, err)
+	}
+}
+
+func TestErrandHalfRunsRemovalWithoutStartingWorkHalf(t *testing.T) {
+	td := queuetest.DataDeps(t)
+	repo := t.TempDir()
+	queuetest.InitGitRepo(t, repo)
+	checkout := filepath.Join(t.TempDir(), "feature")
+	if output, err := exec.Command("git", "-C", repo, "worktree", "add", "-b", "feature", checkout).CombinedOutput(); err != nil {
+		t.Fatalf("worktree: %v: %s", err, output)
+	}
+	signals := make(chan os.Signal, 1)
+	finished := make(chan error, 1)
+	notices := make(daemonNotice, 100)
+	go func() { finished <- RunErrands(td, project.DefaultDeps(), notices, signals) }()
+	waitFor := func(match string) {
+		t.Helper()
+		deadline := time.After(10 * time.Second)
+		for {
+			select {
+			case line := <-notices:
+				if strings.Contains(line, match) {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("Errand half did not report %q", match)
+			}
+		}
+	}
+	waitFor("errands running; work stopped")
+	if live := ReadLiveness(td); !live.Errands || live.Work {
+		t.Fatalf("liveness = %+v, want only Errands", live)
+	}
+	if err := errand.QueueCheckoutRemoval(td, store.CheckoutRemoval{Path: checkout, WorkingPath: repo}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("errand: removed checkout")
+	if _, err := os.Stat(checkout); !os.IsNotExist(err) {
+		t.Fatalf("checkout remains: %v", err)
+	}
+	signals <- os.Interrupt
+	if err := <-finished; err != nil {
+		t.Fatal(err)
 	}
 }

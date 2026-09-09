@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"fmt"
-	"github.com/glebglazov/pop/tasks/drain"
 	"io"
 	"os"
 	"sync"
@@ -10,7 +9,9 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/errand"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/work"
 )
 
@@ -21,17 +22,27 @@ import (
 // tmux-owned panes and keep running. A second `pop daemon run` while one holds
 // the lock is refused before the loop starts.
 func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal) error {
+	if ReadLiveness(d.Tasks).Errands {
+		return runWork(d, interval, out, sigCh, true)
+	}
+	errandsLock, err := AcquireHalfLock(d.Tasks, ErrandHalf)
+	if err != nil {
+		if ReadLiveness(d.Tasks).Errands {
+			return runWork(d, interval, out, sigCh, true)
+		}
+		return err
+	}
+	defer func() { _ = errandsLock.Release() }()
+	workLock, err := AcquireHalfLock(d.Tasks, WorkHalf)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = workLock.Release() }()
 	out, supervisorLog, err := supervisorOutput(d.Tasks, out)
 	if err != nil {
 		return err
 	}
 	defer supervisorLog.Close()
-
-	lock, err := AcquireSupervisorLock(d.Tasks)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = lock.Release() }()
 
 	if _, err := d.LoadConfig(config.DefaultConfigPath()); err != nil {
 		return err
@@ -46,7 +57,7 @@ func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.S
 		return err
 	}
 
-	fmt.Fprintf(out, "pop work supervisor started (PID %d); poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
+	fmt.Fprintf(out, "Pop daemon started (PID %d): errands running; work running; poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
 	tasks.WarnProcStartUnsupported(out)
 
 	output := newRunOutputState()
@@ -71,6 +82,87 @@ func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.S
 			workTimer.Reset(interval)
 		}
 	}
+}
+
+// RunErrands runs only the auto-startable Errand half. It has no poll timer:
+// the durable queue wakes it for each human-requested act.
+func RunErrands(td *tasks.Deps, pd *project.Deps, out io.Writer, sigCh <-chan os.Signal) error {
+	out, supervisorLog, err := supervisorOutput(td, out)
+	if err != nil {
+		return err
+	}
+	defer supervisorLog.Close()
+	lock, err := AcquireHalfLock(td, ErrandHalf)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	wakes, closeWakes, err := errand.Listen(td)
+	if err != nil {
+		return err
+	}
+	defer closeWakes()
+	if err := errand.Recover(td); err != nil {
+		return err
+	}
+	run := func() {
+		if err := errand.Tick(td, pd, out); err != nil {
+			fmt.Fprintf(out, "errand: %v\n", err)
+		}
+	}
+	fmt.Fprintf(out, "Pop daemon started (PID %d): errands running; work stopped.\n", os.Getpid())
+	run()
+	for {
+		select {
+		case <-sigCh:
+			return nil
+		case <-wakes:
+			run()
+		}
+	}
+}
+
+// RunWork runs only the explicit agent-running Work half.
+func RunWork(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal) error {
+	return runWork(d, interval, out, sigCh, false)
+}
+
+func runWork(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal, errandsRunning bool) error {
+	out, supervisorLog, err := supervisorOutput(d.Tasks, out)
+	if err != nil {
+		return err
+	}
+	defer supervisorLog.Close()
+	lock, err := AcquireHalfLock(d.Tasks, WorkHalf)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	if _, err := d.LoadConfig(config.DefaultConfigPath()); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Pop daemon started (PID %d): errands %s; work running; poll every %s. Ctrl-C to stop.\n", os.Getpid(), runningState(errandsRunning), interval)
+	tasks.WarnProcStartUnsupported(out)
+	output := newRunOutputState()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-sigCh:
+			fmt.Fprintln(out, "\nShutting down Work half; in-flight drains keep running in their panes.")
+			return nil
+		case <-timer.C:
+			tick(d, out, output)
+			timer.Reset(interval)
+		}
+	}
+}
+
+func runningState(running bool) string {
+	if running {
+		return "running"
+	}
+	return "stopped"
 }
 
 // tick performs one reconcile-candidate-dispatch pass over every advanceable
@@ -98,6 +190,7 @@ func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 	runOut.lastScan = ""
 
 	if snap, err := drain.BuildStatus(d, cfg); err == nil {
+		snap.Daemon = daemonLiveness(d.Tasks)
 		preSpawn := drain.BuildRunView(snap, time.Now())
 		runOut.emitViewTransition(out, preSpawn, nil, func(w io.Writer) {
 			renderBaseline(w, d, cfg, snap)
@@ -122,6 +215,7 @@ func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 	}
 
 	if snap, err := drain.BuildStatus(d, cfg); err == nil {
+		snap.Daemon = daemonLiveness(d.Tasks)
 		// A just-spawned drain has not yet acquired its runtime lock, so the
 		// post-spawn scan still lists its set as Ready, not Running. Seed the
 		// spawned sets into the swallow snapshot so next tick's view diff does
@@ -131,6 +225,11 @@ func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 		// guard, not by this view patch (see seedSpawnedRunning).
 		runOut.emitPostSpawnView(out, drain.SeedSpawnedRunning(drain.BuildRunView(snap, time.Now()), spawned))
 	}
+}
+
+func daemonLiveness(td *tasks.Deps) drain.DaemonLiveness {
+	live := ReadLiveness(td)
+	return drain.DaemonLiveness{Errands: live.Errands, Work: live.Work}
 }
 
 // advancers is the supervisor's list: the advanceable kinds of the read-surface

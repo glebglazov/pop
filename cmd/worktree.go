@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -16,6 +17,7 @@ import (
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/supervisor"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
@@ -775,9 +777,10 @@ func switchTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
 }
 
 func deleteWorktree(workingPath, path string) {
-	if err := deleteWorktreeWith(cmdHistoryDeps(), workingPath, path); err != nil {
+	hd := cmdHistoryDeps()
+	if err := queuePickerCheckoutRemoval(hd, workingPath, path, ensureErrandHalf); err != nil {
 		debug.Error("deleteWorktree %s: %v", path, err)
-		fmt.Fprintf(os.Stderr, "Failed to queue checkout removal: %s\n%v\n", path, err)
+		fmt.Fprintf(os.Stderr, "Failed to queue or start checkout removal: %s\n%v\n", path, err)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "Queued checkout removal: %s\n", path)
@@ -785,6 +788,40 @@ func deleteWorktree(workingPath, path string) {
 
 func deleteWorktreeWith(hd *history.Deps, workingPath, path string) error {
 	return errand.QueueCheckoutRemoval(hd.Tasks, store.CheckoutRemoval{Path: path, WorkingPath: workingPath})
+}
+
+func queuePickerCheckoutRemoval(hd *history.Deps, workingPath, path string, ensure func(*tasks.Deps) error) error {
+	if err := deleteWorktreeWith(hd, workingPath, path); err != nil {
+		return err
+	}
+	if err := ensure(hd.Tasks); err != nil {
+		return fmt.Errorf("start Errand half: %w", err)
+	}
+	return nil
+}
+
+// ensureErrandHalf starts the picker-authorized half through the same detached
+// process shape as the Pane monitor. The half lock settles concurrent starts.
+func ensureErrandHalf(td *tasks.Deps) error {
+	if supervisor.ReadLiveness(td).Errands {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, "daemon", "errands")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		return cmd.Process.Release()
+	}
+	return nil
 }
 
 // removeFromHistory deletes path from project history, logging (not

@@ -523,6 +523,34 @@ func TestDeleteWorktreeWithRemovesDirectoryAdministrationAndHistory(t *testing.T
 	}
 }
 
+func TestPickerRemovalQueuesBeforeStartingErrandHalf(t *testing.T) {
+	t.Parallel()
+	checkout := filepath.Join(t.TempDir(), "feature")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hd := historyTestDeps(t)
+	started := false
+	ensure := func(td *tasks.Deps) error {
+		started = true
+		s, ok, err := td.Store(false)
+		if err != nil || !ok {
+			t.Fatalf("queued store = %v, %v", ok, err)
+		}
+		rows, err := s.ListErrands()
+		if err != nil || len(rows) != 1 || rows[0].Path != checkout {
+			t.Fatalf("Errands before start = %+v, %v", rows, err)
+		}
+		return nil
+	}
+	if err := queuePickerCheckoutRemoval(hd, "/repo", checkout, ensure); err != nil {
+		t.Fatal(err)
+	}
+	if !started {
+		t.Fatal("picker did not start the Errand half")
+	}
+}
+
 func TestRemoveFromHistoryWith(t *testing.T) {
 	t.Parallel()
 

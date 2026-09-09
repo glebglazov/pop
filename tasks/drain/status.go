@@ -56,9 +56,12 @@ type SkippedRepo struct {
 
 // StatusSnapshot is the pure data model for `pop work status`.
 type StatusSnapshot struct {
-	PickedUp             []PickedUpSet
-	Idle                 []IdleProject
-	Skipped              []SkippedRepo
+	// Daemon is filled by command and supervisor edges, where daemon lock
+	// liveness is available without making the Work model import its host.
+	Daemon   DaemonLiveness
+	PickedUp []PickedUpSet
+	Idle     []IdleProject
+	Skipped  []SkippedRepo
 	// ActiveAgentCooldowns is every live machine-global agent-preset cooldown by
 	// preset, carrying where each expiry came from: a read surface that prints a
 	// guessed ceiling as a stated reset misreports it (ADR-0235).
@@ -79,6 +82,12 @@ type StatusSnapshot struct {
 	// default config path behind the injected seam's back. Nil (a snapshot built by
 	// hand) leaves verification off, exactly as an absent [work.verify] does.
 	Config *config.Config
+}
+
+// DaemonLiveness is the two-half state shown by Work read surfaces.
+type DaemonLiveness struct {
+	Errands bool
+	Work    bool
 }
 
 // BuildStatus derives queue status from on-disk lock/state truth.

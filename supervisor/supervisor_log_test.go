@@ -34,7 +34,7 @@ func TestRunTeesSupervisorNarrationToDurableLog(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	want := "pop work supervisor started"
+	want := "errands running; work running"
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 	}

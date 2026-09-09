@@ -236,3 +236,41 @@ func TestSupervisorLockReleaseRemovesFile(t *testing.T) {
 	}
 	_ = again.Release()
 }
+
+func TestDaemonHalfLocksAreIndependentAndSingleInstance(t *testing.T) {
+	d := lockDeps(t, true)
+	errands, err := AcquireHalfLock(d, ErrandHalf)
+	if err != nil {
+		t.Fatalf("acquire Errand half: %v", err)
+	}
+	defer errands.Release()
+	if _, err := AcquireHalfLock(d, ErrandHalf); err == nil {
+		t.Fatal("second Errand half must be refused")
+	}
+	work, err := AcquireHalfLock(d, WorkHalf)
+	if err != nil {
+		t.Fatalf("Errand half must not block Work half: %v", err)
+	}
+	defer work.Release()
+	if got := ReadLiveness(d); !got.Errands || !got.Work {
+		t.Fatalf("liveness = %+v, want both halves running", got)
+	}
+}
+
+func TestLegacyCombinedLockReportsBothHalves(t *testing.T) {
+	d := lockDeps(t, true)
+	path := SupervisorLockPath(d)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(SupervisorLockMetadata{PID: 4242, StartedAt: time.Now().UTC(), ProcStart: "start-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadLiveness(d); !got.Errands || !got.Work {
+		t.Fatalf("legacy liveness = %+v, want both halves running", got)
+	}
+}

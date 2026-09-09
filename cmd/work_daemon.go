@@ -35,14 +35,22 @@ var daemonRunCmd = &cobra.Command{
 	RunE:  runWorkDaemon,
 }
 
+var daemonErrandsCmd = &cobra.Command{
+	Use:    "errands",
+	Short:  "Run the Errand half",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runErrandHalf,
+}
+
 // workDaemonCmd keeps the Work daemon command for existing scripts and panes.
 // Cobra prints Deprecated when the alias runs, so callers receive the new name.
 var workDaemonCmd = &cobra.Command{
 	Use:        "daemon",
-	Short:      "Alias for pop daemon run",
+	Short:      "Run the Work half (deprecated alias)",
 	Deprecated: "use \"pop daemon run\" instead",
 	Args:       cobra.NoArgs,
-	RunE:       runWorkDaemon,
+	RunE:       runWorkHalf,
 }
 
 var workStatusCmd = &cobra.Command{
@@ -79,6 +87,7 @@ var workStatusPreset string
 func init() {
 	rootCmd.AddCommand(daemonCmd)
 	daemonCmd.AddCommand(daemonRunCmd)
+	daemonCmd.AddCommand(daemonErrandsCmd)
 	workCmd.AddCommand(workDaemonCmd)
 	workCmd.AddCommand(workStatusCmd)
 	workCmd.AddCommand(workLogCmd)
@@ -106,9 +115,11 @@ func completeWorkStatusPreset(cmd *cobra.Command, args []string, toComplete stri
 }
 
 var (
-	workConfigLoad  = config.Load
-	supervisorRun   = supervisor.Run
-	workBuildStatus = drain.BuildStatus
+	workConfigLoad       = config.Load
+	supervisorRun        = supervisor.Run
+	supervisorRunWork    = supervisor.RunWork
+	supervisorRunErrands = supervisor.RunErrands
+	workBuildStatus      = drain.BuildStatus
 	// workBuildStatusTables builds the two tables `pop work status` prints. The
 	// builder lives in the dashboard package because the daemon's run baseline
 	// prints the same two tables through it; the var is the test seam.
@@ -128,6 +139,14 @@ func cmdOut(cmd *cobra.Command) io.Writer {
 }
 
 func runWorkDaemon(cmd *cobra.Command, args []string) error {
+	return runConfiguredDaemon(supervisorRun)
+}
+
+func runWorkHalf(cmd *cobra.Command, args []string) error {
+	return runConfiguredDaemon(supervisorRunWork)
+}
+
+func runConfiguredDaemon(run func(*drain.Deps, time.Duration, io.Writer, <-chan os.Signal) error) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
@@ -151,7 +170,7 @@ func runWorkDaemon(cmd *cobra.Command, args []string) error {
 	if p, ok := config.ShippedWorkViewPreset("active"); ok {
 		d.ViewPreset = p
 	}
-	err = supervisorRun(d, resolved.PollInterval, os.Stdout, sigCh)
+	err = run(d, resolved.PollInterval, os.Stdout, sigCh)
 	if err != nil {
 		var exitErr *tasks.ExitError
 		if errors.As(err, &exitErr) {
@@ -163,6 +182,14 @@ func runWorkDaemon(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return nil
+}
+
+func runErrandHalf(cmd *cobra.Command, args []string) error {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	d := cmdLayerDeps()
+	return supervisorRunErrands(d.tasksDeps(), d.projectDeps(), os.Stdout, sigCh)
 }
 
 func runWorkStatus(cmd *cobra.Command, args []string) error {
@@ -191,6 +218,8 @@ func runWorkStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	live := supervisor.ReadLiveness(d.Tasks)
+	snap.Daemon = drain.DaemonLiveness{Errands: live.Errands, Work: live.Work}
 	// The task-set table is the Work dashboard's rows (ADR-0121): status and the
 	// dashboard share one row builder and one comparator, so the page snapshots
 	// yield the same rows, filter, and sort the dashboard renders. Map rows are the

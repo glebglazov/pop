@@ -54,18 +54,24 @@ poll_interval = "2s"
 	}
 }
 
-func TestDaemonRunAndWorkAliasShareTheSupervisor(t *testing.T) {
+func TestDaemonRunStartsBothHalvesAndWorkAliasStartsOnlyWork(t *testing.T) {
 	path := writeDaemonConfig(t, "")
 	oldCfgFile := cfgFile
 	oldRun := supervisorRun
+	oldRunWork := supervisorRunWork
 	defer func() {
 		cfgFile = oldCfgFile
 		supervisorRun = oldRun
+		supervisorRunWork = oldRunWork
 	}()
 	cfgFile = path
-	var calls int
+	var fullCalls, workCalls int
 	supervisorRun = func(*drain.Deps, time.Duration, io.Writer, <-chan os.Signal) error {
-		calls++
+		fullCalls++
+		return nil
+	}
+	supervisorRunWork = func(*drain.Deps, time.Duration, io.Writer, <-chan os.Signal) error {
+		workCalls++
 		return nil
 	}
 
@@ -75,8 +81,8 @@ func TestDaemonRunAndWorkAliasShareTheSupervisor(t *testing.T) {
 	if err := workDaemonCmd.RunE(workDaemonCmd, nil); err != nil {
 		t.Fatalf("pop work daemon: %v", err)
 	}
-	if calls != 2 {
-		t.Fatalf("supervisor starts = %d, want 2", calls)
+	if fullCalls != 1 || workCalls != 1 {
+		t.Fatalf("daemon starts = full %d, work %d; want one each", fullCalls, workCalls)
 	}
 	if got, want := workDaemonCmd.Deprecated, `use "pop daemon run" instead`; got != want {
 		t.Fatalf("work daemon deprecation = %q, want %q", got, want)
@@ -310,7 +316,7 @@ func TestWorkStatusAndLogPrintTheirSurfaces(t *testing.T) {
 	if err := runWorkStatus(workStatusCmd, nil); err != nil {
 		t.Fatalf("work status: %v", err)
 	}
-	for _, want := range []string{"Summary:", "Task sets:", "Routines:"} {
+	for _, want := range []string{"Daemon: errands stopped; work stopped", "Summary:", "Task sets:", "Routines:"} {
 		if !strings.Contains(statusOut.String(), want) {
 			t.Fatalf("work status output missing %q:\n%s", want, statusOut.String())
 		}
