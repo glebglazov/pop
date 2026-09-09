@@ -303,9 +303,9 @@ func TestAssistAddressesTheSetsOwnCheckout(t *testing.T) {
 	}
 }
 
-// TestAssistOpensWithNoUsableAgent: with every attended agent unusable the
-// session still opens and shows the set; the walk runs when assistance is
-// chosen, and its refusal prints in the menu.
+// TestAssistOpensWithNoUsableAgent: when the selected attended agent is
+// unusable the session still opens and shows the set; its refusal prints in the
+// menu without promoting another entry.
 func TestAssistOpensWithNoUsableAgent(t *testing.T) {
 	d, defPath, root := setupAssistFixture(t, doneAFKSet())
 	d.LookPath = func(string) (string, error) { return "", errors.New("not on PATH") }
@@ -329,7 +329,7 @@ func TestAssistOpensWithNoUsableAgent(t *testing.T) {
 	if !strings.Contains(outStr, "Assist session: demo") {
 		t.Fatalf("session must open with no usable agent:\n%s", outStr)
 	}
-	if !strings.Contains(outStr, "Could not start Assist assistance: no usable attended agent") {
+	if !strings.Contains(outStr, "Could not start Assist assistance: attended agent unavailable") {
 		t.Fatalf("the agent refusal must print in the menu:\n%s", outStr)
 	}
 }

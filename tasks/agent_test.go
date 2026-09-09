@@ -1085,42 +1085,24 @@ func TestAttendedAssistanceLaunchesAutoApproved(t *testing.T) {
 	}
 }
 
-// TestAttendedLaunchTimeSkip pins ADR-0195 decision 6: an attended launch takes
-// the first entry whose preset is not cooling and whose binary is on PATH,
-// names each skipped entry and why in Detail, and never implies a mid-session
-// switch. When every entry is unusable the session refuses with that same
-// information; a store it cannot read still proceeds on the first entry.
-func TestAttendedLaunchTimeSkip(t *testing.T) {
+// An attended launch checks exactly the entry selected by precedence. It
+// reports why that entry cannot run and never promotes another configured one.
+func TestAttendedLaunchNeverFallsBack(t *testing.T) {
 	cfg := attendedGroupConfig("claude", "cursor", "codex")
 
-	t.Run("skips cooling preset and names it", func(t *testing.T) {
+	t.Run("refuses a cooling selected preset", func(t *testing.T) {
 		d := attendedTestDeps(t)
 		until := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
 		if err := updateAgentCooldown(d, "claude", until); err != nil {
 			t.Fatal(err)
 		}
-		inv, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if inv.AgentPreset != "cursor" {
-			t.Fatalf("preset = %q, want cursor after skipping cooling claude", inv.AgentPreset)
-		}
-		wantSkip := formatAttendedSkipCooling(AgentQuotaCooldownView{Preset: "claude", Until: until, Guessed: true})
-		if !strings.Contains(inv.Detail, wantSkip) {
-			t.Fatalf("Detail = %q, want %q", inv.Detail, wantSkip)
-		}
-		if !strings.Contains(inv.Detail, "native") {
-			t.Fatalf("Detail = %q, want native launch wording kept", inv.Detail)
-		}
-		for _, banned := range []string{"fallback", "trying next", "switch"} {
-			if strings.Contains(strings.ToLower(inv.Detail), banned) {
-				t.Fatalf("Detail = %q implies mid-session switch (%q)", inv.Detail, banned)
-			}
+		_, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
+		if err == nil || !strings.Contains(err.Error(), formatAttendedCooling(AgentQuotaCooldownView{Preset: "claude", Until: until, Guessed: true})) {
+			t.Fatalf("error = %v, want selected claude cooldown", err)
 		}
 	})
 
-	t.Run("skips missing binary and names it", func(t *testing.T) {
+	t.Run("refuses a missing selected binary", func(t *testing.T) {
 		d := attendedTestDeps(t)
 		d.LookPath = func(file string) (string, error) {
 			if file == "claude" {
@@ -1128,47 +1110,23 @@ func TestAttendedLaunchTimeSkip(t *testing.T) {
 			}
 			return "/bin/" + file, nil
 		}
-		inv, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if inv.AgentPreset != "cursor" {
-			t.Fatalf("preset = %q, want cursor after skipping missing claude", inv.AgentPreset)
-		}
-		wantSkip := formatAttendedSkipMissingBinary("claude")
-		if !strings.Contains(inv.Detail, wantSkip) {
-			t.Fatalf("Detail = %q, want %q", inv.Detail, wantSkip)
+		_, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
+		if err == nil || !strings.Contains(err.Error(), formatAttendedMissingBinary("claude")) {
+			t.Fatalf("error = %v, want selected claude missing binary", err)
 		}
 	})
 
-	t.Run("refuses when every entry is unusable", func(t *testing.T) {
+	t.Run("an explicit attended flag selects only itself", func(t *testing.T) {
 		d := attendedTestDeps(t)
-		until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-		if err := updateAgentCooldown(d, "claude", until); err != nil {
-			t.Fatal(err)
-		}
 		d.LookPath = func(file string) (string, error) {
-			if file == "claude" {
-				return "/bin/claude", nil
+			if file == "cursor-agent" || file == "cursor" {
+				return "", exec.ErrNotFound
 			}
-			return "", exec.ErrNotFound
+			return "/bin/" + file, nil
 		}
-		_, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
-		if err == nil {
-			t.Fatal("expected refusal when every attended entry is unusable")
-		}
-		msg := err.Error()
-		if !strings.Contains(msg, formatAttendedSkipCooling(AgentQuotaCooldownView{Preset: "claude", Until: until, Guessed: true})) {
-			t.Fatalf("error = %q, want cooling skip for claude", msg)
-		}
-		if !strings.Contains(msg, formatAttendedSkipMissingBinary("cursor")) {
-			t.Fatalf("error = %q, want missing-binary skip for cursor", msg)
-		}
-		if !strings.Contains(msg, formatAttendedSkipMissingBinary("codex")) {
-			t.Fatalf("error = %q, want missing-binary skip for codex", msg)
-		}
-		if strings.Contains(strings.ToLower(msg), "fallback") || strings.Contains(msg, "trying next") {
-			t.Fatalf("error = %q implies mid-session switch", msg)
+		_, err := ResolveAgentAssistanceInvocation(d, cfg, "cursor", "", "assist prompt", "/tmp/runtime")
+		if err == nil || !strings.Contains(err.Error(), "cursor") {
+			t.Fatalf("error = %v, want the explicit cursor refusal", err)
 		}
 	})
 
@@ -1187,9 +1145,6 @@ func TestAttendedLaunchTimeSkip(t *testing.T) {
 		}
 		if inv.AgentPreset != "claude" {
 			t.Fatalf("preset = %q, want first entry when store cannot be read", inv.AgentPreset)
-		}
-		if strings.Contains(inv.Detail, "skipped") {
-			t.Fatalf("Detail = %q, want no skip notes when cooling could not be read", inv.Detail)
 		}
 	})
 }
@@ -1283,7 +1238,7 @@ func TestNormalizeClaudeStreamJSONDetectsQuotaPause(t *testing.T) {
 func TestClaudeQuotaResetAtParsesCapturedWeeklyLimitString(t *testing.T) {
 	loc := time.FixedZone("local", -5*60*60)
 	reason := "You've hit your weekly limit · resets Mon 12:00am"
-	now := time.Date(2026, 6, 11, 15, 0, 0, 0, loc) // Thu
+	now := time.Date(2026, 6, 11, 15, 0, 0, 0, loc)                           // Thu
 	want := time.Date(2026, 6, 15, 0, 0, 0, 0, loc).Add(quotaAssuranceOffset) // next Mon, padded once
 	got := claudeQuotaResetAt(reason, now)
 	if !got.Equal(want) {

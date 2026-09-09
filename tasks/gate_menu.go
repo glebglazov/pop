@@ -14,57 +14,66 @@ import (
 // ui.RunGateMenu; tests may swap it.
 var runGateMenu = ui.RunGateMenu
 
-// gateConfig is the merged config a gate reads, held rather than copied into
-// it: an attended pick on the assist row rewrites the override layer while the
-// gate is open, and the row that names the agent and the launch below it must
-// both read what the pick wrote. Every gate host threads one of these so the
-// two can never disagree.
-//
-// A nil holder, and a nil config inside one, are legal everywhere: the built-in
-// default agent applies and there is nothing to re-read.
-type gateConfig struct {
-	d   *Deps
-	cfg *config.Config
+// AttendedSession owns the attended choice for one interactive run. The menu
+// and every later launch in that run share this value; no state is saved.
+type AttendedSession struct {
+	cfg      *config.Config
+	override string
+	choice   *AgentGroupEntry
 }
 
-// newGateConfig holds the config a gate was handed, with the deps that re-read
-// it after a pick.
-func newGateConfig(d *Deps, cfg *config.Config) *gateConfig {
-	return &gateConfig{d: d, cfg: cfg}
+type gateConfig = AttendedSession
+
+// NewAttendedSession starts one interactive run at the normal attended
+// precedence: an explicit attended flag, then the resolved config and default.
+func NewAttendedSession(cfg *config.Config, override string) *AttendedSession {
+	return &AttendedSession{cfg: cfg, override: strings.TrimSpace(override)}
+}
+
+func newGateConfig(_ *Deps, cfg *config.Config) *gateConfig {
+	return NewAttendedSession(cfg, "")
 }
 
 // Value is the config as last read.
-func (g *gateConfig) Value() *config.Config {
+func (g *AttendedSession) Value() *config.Config {
 	if g == nil {
 		return nil
 	}
 	return g.cfg
 }
 
-// deps is the bag the re-read and the write go through, nil for a gate built
-// without one.
-func (g *gateConfig) deps() *Deps {
-	if g == nil {
-		return nil
+// EffectiveEntry is the same whole entry the next launch will use.
+func (g *AttendedSession) EffectiveEntry() AgentGroupEntry {
+	if g != nil && g.choice != nil {
+		return *g.choice
 	}
-	return g.d
+	if g == nil {
+		return EffectiveAttendedEntry(nil)
+	}
+	return LaunchedAttendedEntry(g.cfg, g.override)
 }
 
-// reload re-reads the merged config from the path every gate host loaded it
-// from, so what the menu renders next is what a load resolves rather than what
-// was chosen (ADR-0264 decision 6). A read that fails leaves the config the
-// gate already had: a stale row is better than a gate that cannot re-open.
-func (g *gateConfig) reload() {
-	if g == nil {
-		return
+// ResolveAssistance applies the session choice before the attended flag. The
+// agent command belongs to the selected entry and is never mixed with another.
+func (g *AttendedSession) ResolveAssistance(d *Deps, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
+	spec := ""
+	if g != nil {
+		spec = g.override
+		if g.choice != nil {
+			spec = g.choice.Cmd
+		}
 	}
-	cd := configDeps(g.d)
-	if cd == nil {
-		return
+	return ResolveAgentAssistanceInvocation(d, g.Value(), spec, agentCmd, prompt, runtimePath)
+}
+
+// Pick changes this run only. A cancel or picker error leaves the current
+// choice intact and returns a notice for the gate.
+func (g *AttendedSession) Pick(in io.Reader, out io.Writer, warn func(string, ...any)) string {
+	choice, notice := PickAttendedAgent(g.Value(), in, out, warn)
+	if g != nil && choice != nil {
+		g.choice = choice
 	}
-	if cfg, err := config.LoadWith(cd, config.DefaultConfigPathWith(cd)); err == nil {
-		g.cfg = cfg
-	}
+	return notice
 }
 
 // promptGateMenu runs the shared inline gate menu and returns the chosen key.
@@ -72,23 +81,14 @@ func (g *gateConfig) reload() {
 // shared per-run prompt reader used on the non-TTY line path so queued input
 // across gates is not lost.
 //
-// The Assists item names the attended entry cfg resolves to, so a gate says
-// which agent the default choice will launch (ADR-0196 decision 9). cfg is the
-// merged config, override layer included: whatever the Config dashboard wrote is
-// what the menu reports (ADR-0202 decision 5).
-//
-// It is also where that entry is changed. While the attended list holds a
-// choice the assist row names the key that opens it; the menu hands a pick back
-// here, this writes the Agent override, re-reads the merged config and runs the
-// menu again on the result (ADR-0264). The loop is what keeps the promise: the
-// row a human returns to names the entry a load resolves, so a value the layer
-// refused leaves the row naming the entry that was already in force.
+// The Assists item and its launch read the same Attended session choice. Tab
+// changes that choice for this interactive run only (ADR-0266).
 func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.GateMenuSpec, interrupt <-chan os.Signal, cfg *gateConfig) (key string, forceQuit bool, err error) {
 	if in == nil {
 		in = os.Stdin
 	}
 	for {
-		spec.AttendedLabel = FormatAgentEntry(EffectiveAttendedEntry(cfg.Value()))
+		spec.AttendedLabel = FormatAgentEntry(cfg.EffectiveEntry())
 		spec.AttendedPickable = AttendedPickOffered(cfg.Value())
 		res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
 			Interrupt:  interrupt,
@@ -104,8 +104,7 @@ func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.G
 		if !res.PickAttended {
 			return res.Key, false, nil
 		}
-		spec.Notice = PickAttendedAgent(cfg.deps(), cfg.Value(), in, out, promptWarner(out))
-		cfg.reload()
+		spec.Notice = cfg.Pick(in, out, promptWarner(out))
 	}
 }
 

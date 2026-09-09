@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/prompt"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -21,19 +20,14 @@ import (
 // tooling (e.g. test a JQL query live). It is front-loaded with rules embedded
 // in the binary. Any failure to resolve or start the agent is reported and the
 // gate loop continues; it never crashes the gate.
-func authoringSessionFromGate(d *Deps, out io.Writer, id, agentOverride string) {
+func authoringSessionFromGate(d *Deps, out io.Writer, id string, session *tasks.AttendedSession) {
 	r, err := loadManifest(d, id)
 	if err != nil {
 		fmt.Fprintf(out, "Could not load the routine: %v\n", err)
 		return
 	}
-	spec, cfg, err := resolveAuthoringAgentSpec(d, agentOverride)
-	if err != nil {
-		fmt.Fprintf(out, "Could not resolve the authoring agent: %v\n", err)
-		return
-	}
 	prompt := buildAuthoringPrompt(d, id, r)
-	invocation, err := tasks.ResolveAgentAssistanceInvocation(d.taskDeps(), cfg, spec, "", prompt, r.Manifest.BoundDirectory)
+	invocation, err := session.ResolveAssistance(d.taskDeps(), "", prompt, r.Manifest.BoundDirectory)
 	if err != nil {
 		fmt.Fprintf(out, "Could not prepare the authoring agent: %v\n", err)
 		return
@@ -48,21 +42,6 @@ func authoringSessionFromGate(d *Deps, out io.Writer, id, agentOverride string) 
 		fmt.Fprintf(out, "Authoring session exited with status %d.\n", exitCode)
 	}
 	fmt.Fprintln(out, "Authoring session ended; returning to the menu.")
-}
-
-// resolveAuthoringAgentSpec picks the attended agent override for a gate
-// authoring session and loads the config the invocation resolves against. A
-// refinement session is a human-facing session like any other, so it launches
-// from [work.attended].agents rather than from the [work.routine].agents list
-// scheduled Fires walk (ADR-0195); an explicit --agent still wins for the
-// session. There is no headless quota fall-through — the human switches agents
-// by hand if one is unavailable.
-func resolveAuthoringAgentSpec(d *Deps, override string) (string, *config.Config, error) {
-	cfg, err := d.LoadConfig()
-	if err != nil {
-		return "", nil, fmt.Errorf("load config: %w", err)
-	}
-	return strings.TrimSpace(override), cfg, nil
 }
 
 // runRoutineAttendedAgent runs the resolved attended agent command in the bound
@@ -112,20 +91,20 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	createMode := isCreateModePrompt(promptBody)
 
 	return prompt.MustRender(promptTemplates, "authoring.tmpl.md", authoringPromptView{
-		ID:               id,
-		QuotedID:         strconv.Quote(id),
-		CreateMode:       createMode,
-		ReviseMode:       !createMode,
-		BoundDirectory:   r.Manifest.BoundDirectory,
-		PromptPath:       filepath.Join(dir, promptFileName),
-		MemoryDir:        memoryDir,
-		RunsDir:          runsDir,
-		ScheduleGrammar:  ScheduleGrammar,
-		ScheduleLabel:    ScheduleLabel(r.Manifest.Schedule),
-		Unscheduled:      !r.Manifest.IsScheduled(),
-		PromptBody:       endWithNewline(promptBody),
-		PromptNoun:       "your prompt.md",
-		WrappedExample:   frameworkContractExample(memoryDir, runsDir),
+		ID:              id,
+		QuotedID:        strconv.Quote(id),
+		CreateMode:      createMode,
+		ReviseMode:      !createMode,
+		BoundDirectory:  r.Manifest.BoundDirectory,
+		PromptPath:      filepath.Join(dir, promptFileName),
+		MemoryDir:       memoryDir,
+		RunsDir:         runsDir,
+		ScheduleGrammar: ScheduleGrammar,
+		ScheduleLabel:   ScheduleLabel(r.Manifest.Schedule),
+		Unscheduled:     !r.Manifest.IsScheduled(),
+		PromptBody:      endWithNewline(promptBody),
+		PromptNoun:      "your prompt.md",
+		WrappedExample:  frameworkContractExample(memoryDir, runsDir),
 	})
 }
 

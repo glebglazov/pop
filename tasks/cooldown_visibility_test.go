@@ -110,26 +110,26 @@ func TestClearAgentQuotaCooldownDropsOnlyTheNamedPreset(t *testing.T) {
 	}
 }
 
-// The attended launch-time skip is the one place a human meets a cooldown before
-// any drain runs (ADR-0195 decision 6). A guess there has to name itself: read as
+// An attended launch refusal is one place a human meets a cooldown before any
+// drain runs. A guess there has to name itself: read as
 // a provider's reset, it looks like a wait worth respecting rather than a ceiling
 // worth clearing.
-func TestAttendedSkipNamesAGuessAsAGuess(t *testing.T) {
+func TestAttendedRefusalNamesAGuessAsAGuess(t *testing.T) {
 	until := time.Date(2026, 8, 25, 0, 58, 0, 0, time.UTC)
 
-	guessed := formatAttendedSkipCooling(AgentQuotaCooldownView{
+	guessed := formatAttendedCooling(AgentQuotaCooldownView{
 		Preset:  "claude",
 		Until:   until,
 		Guessed: true,
 		Class:   QuotaWindowFiveHour,
 	})
-	for _, want := range []string{"skipped claude", "guessed cooldown", "session limit", "backstop"} {
+	for _, want := range []string{"claude", "guessed cooldown", "session limit", "backstop"} {
 		if !strings.Contains(guessed, want) {
 			t.Fatalf("guessed skip %q missing %q", guessed, want)
 		}
 	}
 
-	stated := formatAttendedSkipCooling(AgentQuotaCooldownView{Preset: "claude", Until: until})
+	stated := formatAttendedCooling(AgentQuotaCooldownView{Preset: "claude", Until: until})
 	if !strings.Contains(stated, "cooling until") {
 		t.Fatalf("stated skip %q does not read as a reset", stated)
 	}

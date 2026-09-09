@@ -19,16 +19,9 @@ var runGateMenu = ui.RunGateMenu
 // key. reader is the shared per-gate tty.Reader used on the non-TTY line path
 // so schedule edits after a menu choice do not lose queued input.
 //
-// The Assists item names the attended entry the merged config resolves to — the
-// override layer included, so a change made in the Config dashboard shows here
-// (ADR-0196 decision 9, ADR-0202 decision 5).
-//
-// A Routine gate carries the same key on that row as a task gate: the attended
-// list is one list, so the place a human sees the agent named is the place they
-// change it (ADR-0264). Each turn of the loop re-reads config, which is how the
-// row that follows a pick names what a load resolves rather than what was
-// chosen — and how it keeps naming the entry in force when the layer refused.
-func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec ui.GateMenuSpec, d *Deps) (string, error) {
+// The Assists item names the entry this refinement run will launch. Tab changes
+// its Attended session choice and writes no saved configuration (ADR-0266).
+func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec ui.GateMenuSpec, session *tasks.AttendedSession) (string, error) {
 	if in == nil {
 		in = os.Stdin
 	}
@@ -36,9 +29,8 @@ func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec
 		fmt.Fprintf(out, format+"\n", args...)
 	}
 	for {
-		cfg, _ := d.LoadConfig()
-		spec.AttendedLabel = tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
-		spec.AttendedPickable = tasks.AttendedPickOffered(cfg)
+		spec.AttendedLabel = tasks.FormatAgentEntry(session.EffectiveEntry())
+		spec.AttendedPickable = tasks.AttendedPickOffered(session.Value())
 		res, err := runGateMenu(spec, in, out, ui.GateMenuRunConfig{
 			LineReader: reader,
 			Warn:       warn,
@@ -49,7 +41,7 @@ func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec
 		if !res.PickAttended {
 			return res.Key, nil
 		}
-		spec.Notice = tasks.PickAttendedAgent(d.taskDeps(), cfg, in, out, warn)
+		spec.Notice = session.Pick(in, out, warn)
 	}
 }
 

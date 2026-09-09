@@ -21,11 +21,6 @@ func TestPromptRoutineGateMenuNamesTheAttendedEntry(t *testing.T) {
 			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
 		}},
 	}}
-	d := &Deps{
-		LoadConfig: func() (*config.Config, error) { return cfg, nil },
-		Tasks:      &tasks.Deps{},
-	}
-
 	orig := runGateMenu
 	defer func() { runGateMenu = orig }()
 	calls := 0
@@ -39,7 +34,7 @@ func TestPromptRoutineGateMenuNamesTheAttendedEntry(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("")
-	key, err := promptRoutineGateMenu(&out, in, tty.NewReader(in), refineGateSpec("demo", &Routine{Manifest: Manifest{Schedule: "every 1h"}}, "no runs yet"), d)
+	key, err := promptRoutineGateMenu(&out, in, tty.NewReader(in), refineGateSpec("demo", &Routine{Manifest: Manifest{Schedule: "every 1h"}}, "no runs yet"), tasks.NewAttendedSession(cfg, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +69,6 @@ func TestPromptRoutineGateMenuOffersTheAttendedPick(t *testing.T) {
 		{"one entry", lonely, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := &Deps{LoadConfig: func() (*config.Config, error) { return tc.cfg, nil }, Tasks: &tasks.Deps{}}
 			orig := runGateMenu
 			defer func() { runGateMenu = orig }()
 			runGateMenu = func(spec ui.GateMenuSpec, _ io.Reader, _ io.Writer, _ ui.GateMenuRunConfig) (ui.GateMenuResult, error) {
@@ -85,7 +79,7 @@ func TestPromptRoutineGateMenuOffersTheAttendedPick(t *testing.T) {
 			}
 			var out bytes.Buffer
 			in := strings.NewReader("")
-			if _, err := promptRoutineGateMenu(&out, in, tty.NewReader(in), refineGateSpec("demo", &Routine{Manifest: Manifest{Schedule: "every 1h"}}, "no runs yet"), d); err != nil {
+			if _, err := promptRoutineGateMenu(&out, in, tty.NewReader(in), refineGateSpec("demo", &Routine{Manifest: Manifest{Schedule: "every 1h"}}, "no runs yet"), tasks.NewAttendedSession(tc.cfg, "")); err != nil {
 				t.Fatal(err)
 			}
 		})

@@ -26,6 +26,7 @@ import (
 // the deferred finalize share — the live Drain handle, the reused gate prompt
 // reader, and the accumulating result.
 type implementRun struct {
+	attended   *gateConfig
 	d          *Deps
 	loadConfig func(string) (*config.Config, error)
 	opts       RunTaskSetOptions
@@ -399,6 +400,9 @@ func (r *implementRun) releaseGateHold() {
 // not methods on implementRun, so the targeted single-task HITL path can build
 // its own env and share them (decision 6).
 func (r *implementRun) newGateEnv() gateEnv {
+	if r.attended == nil {
+		r.attended = newGateConfig(r.d, r.plan.cfg)
+	}
 	return gateEnv{
 		d:              r.d,
 		out:            r.out,
@@ -411,7 +415,7 @@ func (r *implementRun) newGateEnv() gateEnv {
 		definitionPath: r.resolved.DefinitionPath,
 		statePath:      r.statePath,
 		taskSetID:      r.taskSetID,
-		cfg:            newGateConfig(r.d, r.plan.cfg),
+		cfg:            r.attended,
 	}
 }
 

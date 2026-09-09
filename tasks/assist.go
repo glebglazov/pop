@@ -91,14 +91,13 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		out:            out,
 		in:             in,
 		reader:         newPromptReader(in),
-		agentOverride:  agentOverride,
 		agentCmd:       opts.AgentCmd,
 		cwd:            target.projectPath,
 		runtimePath:    target.runtimePath,
 		definitionPath: target.definitionPath,
 		statePath:      target.statePath,
 		taskSetID:      setID,
-		cfg:            newGateConfig(d, cfg),
+		cfg:            NewAttendedSession(cfg, agentOverride),
 		fold:           opts.Fold,
 		treeStable:     assistTreeStable(d, target.runtimePath, setID),
 	}
@@ -356,7 +355,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 		}
 		switch action {
 		case genericAssistAgent:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), env.agentOverride, env.agentCmd, prompt, runtimePath)
+			invocation, err = env.cfg.ResolveAssistance(d, env.agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start Assist assistance: %v\n", err)
 				continue

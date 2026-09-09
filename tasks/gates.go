@@ -22,17 +22,12 @@ import (
 // functions over it — deliberately not implementRun methods — so both callers
 // share them.
 type gateEnv struct {
-	d      *Deps
-	out    io.Writer
-	in     io.Reader
-	reader *promptReader
-	yes    bool
-	// agentOverride is the attended agent a human named for this session, empty
-	// when they named none. A drain's --agent does not reach here: an attended
-	// session launches from [work.attended].agents, never from the list the drain
-	// beside it walks (ADR-0195).
-	agentOverride string
-	agentCmd      string
+	d        *Deps
+	out      io.Writer
+	in       io.Reader
+	reader   *promptReader
+	yes      bool
+	agentCmd string
 	// cfg is the merged config the attended gates resolve their attended entry
 	// from, held so a pick at the menu reaches the launch below it (gateConfig).
 	// Nil is legal: the built-in default agent applies.
@@ -110,7 +105,6 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 	out := env.out
 	in := env.in
 	reader := env.reader
-	agentOverride := env.agentOverride
 	agentCmd := env.agentCmd
 	cwd := env.cwd
 	runtimePath := env.runtimePath
@@ -189,7 +183,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			RenderTaskComplete(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case hitlGateAssist:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = env.cfg.ResolveAssistance(d, agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start HITL assistance: %v\n", err)
 				continue
@@ -465,7 +459,6 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	out := env.out
 	in := env.in
 	reader := env.reader
-	agentOverride := env.agentOverride
 	agentCmd := env.agentCmd
 	cwd := env.cwd
 	runtimePath := env.runtimePath
@@ -501,7 +494,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			RenderTaskReset(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case failedGateAssist:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = env.cfg.ResolveAssistance(d, agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start Failed assistance: %v\n", err)
 				continue
@@ -609,7 +602,6 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	out := env.out
 	in := env.in
 	reader := env.reader
-	agentOverride := env.agentOverride
 	agentCmd := env.agentCmd
 	runtimePath := env.runtimePath
 	taskSetID := env.taskSetID
@@ -680,7 +672,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 			release()
 			return true, nil
 		case verifyFailedGateAssist:
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = env.cfg.ResolveAssistance(d, agentCmd, prompt, runtimePath)
 			if err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start Verify-failed assistance: %v\n", err)
 				continue

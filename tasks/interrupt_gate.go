@@ -55,7 +55,6 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	out := env.out
 	in := env.in
 	reader := env.reader
-	agentOverride := env.agentOverride
 	agentCmd := env.agentCmd
 	runtimePath := env.runtimePath
 	taskSetID := env.taskSetID
@@ -70,10 +69,7 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 
 	prompt := BuildInterruptAssistancePrompt(d, taskSetID, m, *interrupted, runtimePath)
-	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
-	if err != nil {
-		return false, exitErr(ExitSetup, "%v", err)
-	}
+	var invocation *AgentAssistanceInvocation
 
 	for {
 		action, err := promptInterruptGateAction(out, in, reader, sigCh, d, env.cfg, taskSetID, interrupted, invocation)
@@ -87,9 +83,10 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 			// Reuse the shared attended-assistance handler (same as HITL/Failed).
 			// The agent advises/edits by hand only: no state change and no refresh,
 			// so we loop straight back to the interrupt menu on exit.
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = env.cfg.ResolveAssistance(d, agentCmd, prompt, runtimePath)
 			if err != nil {
-				return false, exitErr(ExitSetup, "%v", err)
+				fmt.Fprintf(outputFor(out), "Could not start interrupt assistance: %v\n", err)
+				continue
 			}
 			fmt.Fprintf(outputFor(out), "Starting interrupt assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
@@ -101,10 +98,6 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 				fmt.Fprintf(outputFor(out), "Interrupt assistance exited with status %d.\n", exitCode)
 			}
 			prompt = BuildInterruptAssistancePrompt(d, taskSetID, m, *interrupted, runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg.Value(), agentOverride, agentCmd, prompt, runtimePath)
-			if err != nil {
-				return false, exitErr(ExitSetup, "%v", err)
-			}
 		case interruptGateShellChoice:
 			// Reuse the shared shell side-trip (same as HITL/Failed/Verify-fail):
 			// no state change, no refresh — loop back to the interrupt menu.

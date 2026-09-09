@@ -1,11 +1,13 @@
 package tasks
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -21,6 +23,7 @@ import (
 type attendedPickFixture struct {
 	d            *Deps
 	cfg          *config.Config
+	configPath   string
 	overridePath string
 }
 
@@ -57,11 +60,11 @@ func newAttendedPickFixture(t *testing.T, agents string) attendedPickFixture {
 		StatFunc:        os.Stat,
 	}
 	d := &Deps{FS: fs, LookPath: func(file string) (string, error) { return "/usr/bin/" + file, nil }}
-	cfg, err := config.LoadWith(configDeps(d), configPath)
+	cfg, err := config.LoadWith(&config.Deps{FS: fs}, configPath)
 	if err != nil {
 		t.Fatalf("LoadWith() error: %v", err)
 	}
-	return attendedPickFixture{d: d, cfg: cfg, overridePath: filepath.Join(dataDir, "pop", "config.override.toml")}
+	return attendedPickFixture{d: d, cfg: cfg, configPath: configPath, overridePath: filepath.Join(dataDir, "pop", "config.override.toml")}
 }
 
 // gateKeyDriver stands in for the terminal: each call to the gate menu replays
@@ -105,13 +108,22 @@ func gateSpecWithAssistRow() ui.GateMenuSpec {
 	}
 }
 
-// The whole path ADR-0264 describes, driven from the keyboard: a gate whose
-// assist row names the head entry, tab, a pick of the second entry, and back to
-// the gate — where the row names what a re-read of config resolves, the override
-// layer holds the reordered list, and 1 launches the entry the row promised.
-func TestGatePickWritesTheOverrideAndLaunchesThePickedEntry(t *testing.T) {
-	fx := newAttendedPickFixture(t, `[{ display_name = "Claude Usual", cmd = "claude --model opus" }, { display_name = "Cursor", cmd = "cursor" }]`)
-	gate := newGateConfig(fx.d, fx.cfg)
+// The keyboard path selects one whole entry for this run. It overrides the
+// attended flag, but it changes neither source config nor an existing override.
+func TestGatePickIsSessionOnlyAndLaunchesTheExactEntry(t *testing.T) {
+	fx := newAttendedPickFixture(t, `[{ display_name = "Claude Usual", cmd = "claude --model opus" }, { display_name = "Claude Chosen", cmd = "claude --model sonnet --permission-mode plan" }]`)
+	sourceBefore, err := os.ReadFile(fx.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fx.overridePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	overrideBefore := []byte("[work.attended]\nagents = [\"codex\"]\n")
+	if err := os.WriteFile(fx.overridePath, overrideBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gate := NewAttendedSession(fx.cfg, "codex")
 
 	driver, seen := gateKeyDriver(t,
 		[]tea.KeyPressMsg{{Code: tea.KeyTab}},
@@ -130,33 +142,46 @@ func TestGatePickWritesTheOverrideAndLaunchesThePickedEntry(t *testing.T) {
 		t.Fatalf("key = %q, want 1", key)
 	}
 
-	assertStoredOrder(t, fx.overridePath, `"cursor"`, `"claude --model opus"`)
-
 	if len(*seen) != 2 {
 		t.Fatalf("the gate ran %d times, want 2 (before and after the pick)", len(*seen))
 	}
 	before, after := (*seen)[0], (*seen)[1]
-	if before.AttendedLabel != "Claude Usual · opus" || !before.AttendedPickable {
+	if before.AttendedLabel != "codex" || !before.AttendedPickable {
 		t.Fatalf("the first row = %q pickable=%v", before.AttendedLabel, before.AttendedPickable)
 	}
-	if after.AttendedLabel != "Cursor" {
+	if after.AttendedLabel != "Claude Chosen · sonnet" {
 		t.Fatalf("the row after the pick = %q, want the picked entry", after.AttendedLabel)
 	}
 	if after.Notice != "" {
 		t.Fatalf("a landed pick said %q", after.Notice)
 	}
-	if !strings.Contains(out.String(), "1. Get agent assistance (default) · Cursor · tab to change") {
+	if !strings.Contains(out.String(), "1. Get agent assistance (default) · Claude Chosen · sonnet · tab to change") {
 		t.Fatalf("the re-rendered row is not what the human saw:\n%s", out.String())
 	}
 
 	// And the launch behind that row resolves the same entry, from the same
 	// re-read config the row was rendered from.
-	invocation, err := ResolveAgentAssistanceInvocation(fx.d, gate.Value(), "", "", "briefing", t.TempDir())
+	invocation, err := gate.ResolveAssistance(fx.d, "", "briefing", t.TempDir())
 	if err != nil {
 		t.Fatalf("ResolveAgentAssistanceInvocation: %v", err)
 	}
-	if invocation.AgentPreset != "cursor" {
+	if invocation.AgentPreset != "claude" {
 		t.Fatalf("the launch resolved %q, want the picked entry:\n%s", invocation.AgentPreset, invocation.Display)
+	}
+	wantArgs := []string{"--model", "sonnet", "--permission-mode", "plan", "briefing"}
+	if !reflect.DeepEqual(invocation.Command.Args, wantArgs) {
+		t.Fatalf("launch args = %#v, want %#v", invocation.Command.Args, wantArgs)
+	}
+	assertFileContent(t, fx.configPath, sourceBefore)
+	assertFileContent(t, fx.overridePath, overrideBefore)
+
+	other := NewAttendedSession(fx.cfg, "cursor")
+	if got := other.EffectiveEntry().Cmd; got != "cursor" {
+		t.Fatalf("another run inherited the choice: %q", got)
+	}
+	fresh := NewAttendedSession(fx.cfg, "")
+	if got := fresh.EffectiveEntry().Cmd; got != "claude --model opus" {
+		t.Fatalf("a fresh run inherited the choice: %q", got)
 	}
 }
 
@@ -164,7 +189,7 @@ func TestGatePickWritesTheOverrideAndLaunchesThePickedEntry(t *testing.T) {
 // back exactly as it was.
 func TestGatePickEscapeWritesNothing(t *testing.T) {
 	fx := newAttendedPickFixture(t, `["claude --model opus", "cursor"]`)
-	gate := newGateConfig(fx.d, fx.cfg)
+	gate := NewAttendedSession(fx.cfg, "codex")
 
 	driver, seen := gateKeyDriver(t,
 		[]tea.KeyPressMsg{{Code: tea.KeyTab}},
@@ -181,26 +206,31 @@ func TestGatePickEscapeWritesNothing(t *testing.T) {
 	if _, err := os.Stat(fx.overridePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("escape wrote an override: %v", err)
 	}
-	if after := (*seen)[1]; after.AttendedLabel != "claude --model opus · opus" || after.Notice != "" {
+	if after := (*seen)[1]; after.AttendedLabel != "codex" || after.Notice != "" {
 		t.Fatalf("the gate came back changed: row %q notice %q", after.AttendedLabel, after.Notice)
+	}
+	invocation, err := gate.ResolveAssistance(fx.d, "", "briefing", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.AgentPreset != "codex" {
+		t.Fatalf("cancel changed the attended flag: %q", invocation.AgentPreset)
 	}
 }
 
-// A write the layer refuses leaves the row naming the entry that was in force,
-// and says why in the menu — the gate's stdout is the drain log.
-func TestGatePickRefusedWriteKeepsTheEntryInForce(t *testing.T) {
+// A picker failure leaves the entry already in force and reports the failure in
+// the gate instead of changing session state.
+func TestGatePickerErrorKeepsTheEntryInForce(t *testing.T) {
 	fx := newAttendedPickFixture(t, `[{ display_name = "Claude Usual", cmd = "claude --model opus" }, { display_name = "Cursor", cmd = "cursor" }]`)
-	mock := fx.d.FS.(*deps.MockFileSystem)
-	mock.WriteFileFunc = func(string, []byte, os.FileMode) error {
-		return errors.New("the override file is read-only")
-	}
-	gate := newGateConfig(fx.d, fx.cfg)
+	gate := NewAttendedSession(fx.cfg, "codex")
 
 	driver, seen := gateKeyDriver(t,
 		[]tea.KeyPressMsg{{Code: tea.KeyTab}},
 		[]tea.KeyPressMsg{{Code: '1', Text: "1"}},
 	)
-	restore := swapGateSeams(t, driver, pickerKeyDriver(tea.KeyPressMsg{Code: '2', Text: "2"}))
+	restore := swapGateSeams(t, driver, func([]ui.AttendedAgentEntry, io.Reader, io.Writer, func(string, ...any)) (*ui.AttendedAgentEntry, error) {
+		return nil, errors.New("picker broke")
+	})
 	defer restore()
 
 	var out strings.Builder
@@ -209,14 +239,54 @@ func TestGatePickRefusedWriteKeepsTheEntryInForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := (*seen)[1]
-	if after.AttendedLabel != "Claude Usual · opus" {
+	if after.AttendedLabel != "codex" {
 		t.Fatalf("the row = %q, want the entry that was in force", after.AttendedLabel)
 	}
-	if !strings.Contains(after.Notice, "the override file is read-only") {
+	if !strings.Contains(after.Notice, "picker broke") {
 		t.Fatalf("the refusal is not in the menu: %q", after.Notice)
 	}
-	if !strings.Contains(out.String(), "the override file is read-only") {
+	if !strings.Contains(out.String(), "picker broke") {
 		t.Fatalf("the human never saw the refusal:\n%s", out.String())
+	}
+}
+
+func TestDrainKeepsItsAttendedChoiceAcrossGateEnvironments(t *testing.T) {
+	fx := newAttendedPickFixture(t, `["claude --model opus", "cursor"]`)
+	run := &implementRun{
+		d:        fx.d,
+		plan:     &runPlan{cfg: fx.cfg},
+		resolved: &ResolvedPaths{},
+		// This is the implementation agent flag. It must not select attended
+		// assistance before the human uses Tab.
+		opts: RunTaskSetOptions{AgentPreset: "codex"},
+	}
+	first := run.newGateEnv().cfg
+	if got := first.EffectiveEntry().Cmd; got != "claude --model opus" {
+		t.Fatalf("implementation flag became attended choice: %q", got)
+	}
+
+	original := runAttendedPicker
+	runAttendedPicker = pickerKeyDriver(tea.KeyPressMsg{Code: '2', Text: "2"})
+	t.Cleanup(func() { runAttendedPicker = original })
+	if notice := first.Pick(strings.NewReader(""), io.Discard, func(string, ...any) {}); notice != "" {
+		t.Fatalf("pick notice = %q", notice)
+	}
+	second := run.newGateEnv().cfg
+	if first != second || second.EffectiveEntry().Cmd != "cursor" {
+		t.Fatalf("later gate lost choice: first=%p second=%p entry=%q", first, second, second.EffectiveEntry().Cmd)
+	}
+
+	runAttendedPicker = func([]ui.AttendedAgentEntry, io.Reader, io.Writer, func(string, ...any)) (*ui.AttendedAgentEntry, error) {
+		return nil, errors.New("picker broke later")
+	}
+	second.Pick(strings.NewReader(""), io.Discard, func(string, ...any) {})
+	if got := second.EffectiveEntry().Cmd; got != "cursor" {
+		t.Fatalf("picker error lost current choice: %q", got)
+	}
+
+	fresh := (&implementRun{d: fx.d, plan: &runPlan{cfg: fx.cfg}, resolved: &ResolvedPaths{}}).newGateEnv().cfg
+	if got := fresh.EffectiveEntry().Cmd; got != "claude --model opus" {
+		t.Fatalf("fresh drain inherited choice: %q", got)
 	}
 }
 
@@ -257,19 +327,6 @@ func TestAttendedPickChoicesSkipMalformedEntries(t *testing.T) {
 			t.Fatalf("a malformed entry was offered: %+v", choice)
 		}
 	}
-	if err := PromoteAttendedAgent(fx.d, fx.cfg, "cursor"); err != nil {
-		t.Fatalf("PromoteAttendedAgent: %v", err)
-	}
-	// The head moves and the tail keeps the order it was configured in.
-	assertStoredOrder(t, fx.overridePath, `"cursor"`, `"claude --model opus"`)
-	assertStoredOrder(t, fx.overridePath, `"claude --model opus"`, `"codex"`)
-	stored, err := os.ReadFile(fx.overridePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(stored), "Broken") {
-		t.Fatalf("the malformed entry was written back:\n%s", stored)
-	}
 }
 
 // One usable entry is no choice: the row says what it has always said and the
@@ -284,17 +341,14 @@ func TestAttendedPickNotOfferedForASingleEntry(t *testing.T) {
 	}
 }
 
-// assertStoredOrder reads the override layer as the file it is and checks the
-// attended list runs head-first in the order a pick left it.
-func assertStoredOrder(t *testing.T, path string, head, tail string) {
+func assertFileContent(t *testing.T, path string, want []byte) {
 	t.Helper()
-	stored, err := os.ReadFile(path)
+	got, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read the override layer: %v", err)
+		t.Fatal(err)
 	}
-	headAt, tailAt := strings.Index(string(stored), head), strings.Index(string(stored), tail)
-	if headAt < 0 || tailAt < 0 || headAt > tailAt {
-		t.Fatalf("the override does not hold %s ahead of %s:\n%s", head, tail, stored)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s changed:\n%s", path, got)
 	}
 }
 

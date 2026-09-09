@@ -60,19 +60,21 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 		in = os.Stdin
 	}
 	reader := tty.NewReader(in)
+	cfg, _ := d.LoadConfig()
+	session := tasks.NewAttendedSession(cfg, agentOverride)
 
 	for {
 		r, err := loadManifest(d, id)
 		if err != nil {
 			return err
 		}
-		choice, err := promptRoutineGateMenu(out, in, reader, refineGateSpec(id, r, lastRunSummary(d, id)), d)
+		choice, err := promptRoutineGateMenu(out, in, reader, refineGateSpec(id, r, lastRunSummary(d, id)), session)
 		if err != nil {
 			return err
 		}
 		switch choice {
 		case "1":
-			authoringSessionFromGate(d, out, id, agentOverride)
+			authoringSessionFromGate(d, out, id, session)
 		case "2":
 			fireFromGate(d, out, id)
 		case "3":

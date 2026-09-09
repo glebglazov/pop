@@ -83,15 +83,11 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 		return fmt.Errorf("fold refused: list conflicted paths: %w", err)
 	}
 
-	// The gate menu may rewrite the attended list under the loop, so the config
-	// the row renders from and the launch below it resolves is held, not copied.
-	gate := newGateConfig(d, cfg)
+	// The menu and every assistance launch share one Attended session choice.
+	gate := NewAttendedSession(cfg, agentOverride)
 
 	prompt := BuildFoldConflictPrompt(d, ctx, conflicted)
-	invocation, err := ResolveAgentAssistanceInvocation(d, gate.Value(), agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
-	if err != nil {
-		return fmt.Errorf("fold refused: %w", err)
-	}
+	var invocation *AgentAssistanceInvocation
 
 	reader := newPromptReader(in)
 	for {
@@ -106,9 +102,10 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 		}
 		switch action {
 		case foldConflictAgent:
-			invocation, err = ResolveAgentAssistanceInvocation(d, gate.Value(), agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
+			invocation, err = gate.ResolveAssistance(d, opts.AgentCmd, prompt, ctx.RuntimePath)
 			if err != nil {
-				return fmt.Errorf("fold refused: %w", err)
+				fmt.Fprintf(outputFor(out), "Could not start fold conflict assistance: %v\n", err)
+				continue
 			}
 			fmt.Fprintf(outputFor(out), "Starting fold conflict assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, ctx.RuntimePath, out, invocation)
@@ -124,10 +121,6 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 				return fmt.Errorf("fold refused: list conflicted paths: %w", err)
 			}
 			prompt = BuildFoldConflictPrompt(d, ctx, conflicted)
-			invocation, err = ResolveAgentAssistanceInvocation(d, gate.Value(), agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
-			if err != nil {
-				return fmt.Errorf("fold refused: %w", err)
-			}
 			if err := foldRebaseCompleted(d, ctx.RuntimePath, ctx.TrunkBranch); err != nil {
 				// Still unresolved — re-prompt rather than refuse once.
 				continue

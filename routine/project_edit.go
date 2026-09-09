@@ -146,6 +146,8 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 		in = os.Stdin
 	}
 	reader := tty.NewReader(in)
+	cfg, _ := d.LoadConfig()
+	session := tasks.NewAttendedSession(cfg, agentOverride)
 
 	key := checkoutKey(pr.Dir)
 	storeID := projectStoreID(key, name)
@@ -156,13 +158,13 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 		if err != nil {
 			return err
 		}
-		choice, err := promptRoutineGateMenu(out, in, reader, projectRefineGateSpec(name, lastRunSummary(d, storeID)), d)
+		choice, err := promptRoutineGateMenu(out, in, reader, projectRefineGateSpec(name, lastRunSummary(d, storeID)), session)
 		if err != nil {
 			return err
 		}
 		switch choice {
 		case "1":
-			projectAuthoringSessionFromGate(d, out, pr, agentOverride)
+			projectAuthoringSessionFromGate(d, out, pr, session)
 		case "2":
 			fireFromGate(d, out, ProjectOrigin+name)
 		case "3":
@@ -182,14 +184,9 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 // Project routine's refinement gate (ADR-0138). It mirrors
 // authoringSessionFromGate but runs in the checkout and front-loads a
 // project-aware briefing: manual-only, no schedule, and pop never commits.
-func projectAuthoringSessionFromGate(d *Deps, out io.Writer, pr *ProjectRoutine, agentOverride string) {
-	spec, cfg, err := resolveAuthoringAgentSpec(d, agentOverride)
-	if err != nil {
-		fmt.Fprintf(out, "Could not resolve the authoring agent: %v\n", err)
-		return
-	}
+func projectAuthoringSessionFromGate(d *Deps, out io.Writer, pr *ProjectRoutine, session *tasks.AttendedSession) {
 	prompt := buildProjectAuthoringPrompt(d, pr)
-	invocation, err := tasks.ResolveAgentAssistanceInvocation(d.taskDeps(), cfg, spec, "", prompt, pr.Dir)
+	invocation, err := session.ResolveAssistance(d.taskDeps(), "", prompt, pr.Dir)
 	if err != nil {
 		fmt.Fprintf(out, "Could not prepare the authoring agent: %v\n", err)
 		return
