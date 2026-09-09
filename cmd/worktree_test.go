@@ -496,7 +496,7 @@ func TestDeleteWorktreeWithRemovesDirectoryAdministrationAndHistory(t *testing.T
 			return "", nil
 		}},
 	}
-	if err := deleteWorktreeWith(hd, "/repo", checkout); err != nil {
+	if err := deleteWorktreeWith(hd, "/repo", checkout, func(*tasks.Deps) error { return nil }); err != nil {
 		t.Fatalf("delete checkout: %v", err)
 	}
 
@@ -543,7 +543,7 @@ func TestPickerRemovalQueuesBeforeStartingErrandHalf(t *testing.T) {
 		}
 		return nil
 	}
-	if err := queuePickerCheckoutRemoval(hd, "/repo", checkout, ensure); err != nil {
+	if err := deleteWorktreeWith(hd, "/repo", checkout, ensure); err != nil {
 		t.Fatal(err)
 	}
 	if !started {

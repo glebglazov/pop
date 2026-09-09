@@ -106,6 +106,27 @@ func run(td *tasks.Deps, pd *project.Deps, s *store.Store, e store.Errand, out i
 		return err
 	}
 
+	output, removeErr := performCheckoutRemoval(td, pd, e, out)
+	if err := os.WriteFile(report.Name(), []byte(renderFailureReport(e.Path, attemptedAt, output)), 0o600); err != nil {
+		return errors.Join(err, s.FailErrand(e.Path))
+	}
+	if removeErr != nil {
+		fmt.Fprintf(out, "errand: removal failed for %s; output: %s\n", e.Path, report.Name())
+		return s.FailErrand(e.Path)
+	}
+	if err := s.FinishErrand(e.Path, td.Now()); err != nil {
+		return err
+	}
+	_ = os.Remove(report.Name())
+	fmt.Fprintf(out, "errand: removed checkout %s\n", e.Path)
+	return nil
+}
+
+// performCheckoutRemoval carries out one subject and returns everything a reader
+// of the failure document needs to see: the holder warnings, whatever the
+// recursive delete could not finish, and the branch the managed checkout owned.
+// Its narration is tee'd to out so a watched daemon reports as it works.
+func performCheckoutRemoval(td *tasks.Deps, pd *project.Deps, e store.Errand, out io.Writer) (string, error) {
 	var output bytes.Buffer
 	removalDeps := *pd
 	removalDeps.Warn = func(message string) {
@@ -134,19 +155,7 @@ func run(td *tasks.Deps, pd *project.Deps, s *store.Store, e store.Errand, out i
 	} else {
 		fmt.Fprintln(&output, "Removed checkout.")
 	}
-	if err := os.WriteFile(report.Name(), []byte(renderFailureReport(e.Path, attemptedAt, output.String())), 0o600); err != nil {
-		return errors.Join(err, s.FailErrand(e.Path))
-	}
-	if removeErr != nil {
-		fmt.Fprintf(out, "errand: removal failed for %s; output: %s\n", e.Path, report.Name())
-		return s.FailErrand(e.Path)
-	}
-	if err := s.FinishErrand(e.Path, td.Now()); err != nil {
-		return err
-	}
-	_ = os.Remove(report.Name())
-	fmt.Fprintf(out, "errand: removed checkout %s\n", e.Path)
-	return nil
+	return output.String(), removeErr
 }
 
 const failureReportTimeLayout = "20060102T150405Z"

@@ -778,7 +778,7 @@ func switchTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
 
 func deleteWorktree(workingPath, path string) {
 	hd := cmdHistoryDeps()
-	if err := queuePickerCheckoutRemoval(hd, workingPath, path, ensureErrandHalf); err != nil {
+	if err := deleteWorktreeWith(hd, workingPath, path, ensureErrandHalf); err != nil {
 		debug.Error("deleteWorktree %s: %v", path, err)
 		fmt.Fprintf(os.Stderr, "Failed to queue or start checkout removal: %s\n%v\n", path, err)
 		return
@@ -786,12 +786,11 @@ func deleteWorktree(workingPath, path string) {
 	fmt.Fprintf(os.Stderr, "Queued checkout removal: %s\n", path)
 }
 
-func deleteWorktreeWith(hd *history.Deps, workingPath, path string) error {
-	return errand.QueueCheckoutRemoval(hd.Tasks, store.CheckoutRemoval{Path: path, WorkingPath: workingPath})
-}
-
-func queuePickerCheckoutRemoval(hd *history.Deps, workingPath, path string, ensure func(*tasks.Deps) error) error {
-	if err := deleteWorktreeWith(hd, workingPath, path); err != nil {
+// deleteWorktreeWith records the request before starting the half that performs
+// it, so a half that starts and reads the queue immediately still finds it.
+func deleteWorktreeWith(hd *history.Deps, workingPath, path string, ensure func(*tasks.Deps) error) error {
+	subject := store.CheckoutRemoval{Path: path, WorkingPath: workingPath}
+	if err := errand.QueueCheckoutRemoval(hd.Tasks, subject); err != nil {
 		return err
 	}
 	if err := ensure(hd.Tasks); err != nil {

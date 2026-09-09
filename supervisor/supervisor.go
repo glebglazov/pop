@@ -105,19 +105,19 @@ func RunErrands(td *tasks.Deps, pd *project.Deps, out io.Writer, sigCh <-chan os
 	if err := errand.Recover(td); err != nil {
 		return err
 	}
-	run := func() {
+	runErrands := func() {
 		if err := errand.Tick(td, pd, out); err != nil {
 			fmt.Fprintf(out, "errand: %v\n", err)
 		}
 	}
 	fmt.Fprintf(out, "Pop daemon started (PID %d): errands running; work stopped.\n", os.Getpid())
-	run()
+	runErrands()
 	for {
 		select {
 		case <-sigCh:
 			return nil
 		case <-wakes:
-			run()
+			runErrands()
 		}
 	}
 }
