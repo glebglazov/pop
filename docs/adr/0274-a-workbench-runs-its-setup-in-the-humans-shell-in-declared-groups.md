@@ -40,6 +40,15 @@ what the parser is reading.
 - **Reusing `internal/fanout.Map`** for the group. Rejected: its own package doc
   promises one pure read over independent inputs, and quietly widening that to
   side-effecting writes makes the document a lie for every later reader.
+- **Nested groups, or a `needs = [...]` dependency graph**, to express two
+  independent chains. Rejected — see the division of labour above; `&&` inside
+  one command already says it.
+- **Running each command in its own tmux pane** and gating the apply on them.
+  Genuinely tempting, because the session already exists by then and the human
+  would watch real output in real panes with no renderer written. Rejected: the
+  apply would have to block on `tmux wait-for` and lift exit statuses out of
+  panes, trading one clean error return for remote plumbing, and a pane that
+  exits takes its output with it.
 
 ## Consequences
 
@@ -49,7 +58,21 @@ what the parser is reading.
   is the truth about it: prompting work is sequential.
 - A group's output is **buffered per command** and flushed in declaration order
   when the group ends, the failing command first. Live interleaving produces
-  lines that cannot be attributed to a command.
+  lines that cannot be attributed to a command — and two commands that both draw
+  with `\r`, as bundler and pnpm do, fight over the one line.
+- Because the output is held back, a group in flight draws a **Setup progress
+  line**: one refreshing line naming every command in the group and its elapsed
+  state, degrading to plain start and finish lines where stdout is not a
+  terminal. Buffering without it cannot be told apart from a hang. Both apply
+  paths can draw it: the picker's create handler runs after the picker program
+  has returned, so no `tea` program holds the terminal.
+- Group boundaries are **barriers**, and that is the only structure groups have.
+  The barrier reading is the trap — two chains that must not wait on each other
+  are one group of two commands, not two groups.
+- Progress is ephemeral on the create path: pop switches the client to the new
+  session moments later, leaving the lines behind in the pane the picker ran in.
+  A failure is not ephemeral — it aborts the apply before any attach, so it
+  stays on screen, which is why a failed group needs no report document.
 - The first failure in declaration order aborts the apply, after the group's
   siblings finish. A group is a unit; pop does not report half of one.
 - The Human shell reads the human's configuration on every command, so a slow

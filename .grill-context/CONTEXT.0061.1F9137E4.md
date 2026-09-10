@@ -5,13 +5,18 @@ branch: master
 ---
 
 + Setup command
-  A shell command a **Workbench** runs for its side effects before any of its windows exists.
-  avoid: before_apply command, pre-command, hook command
+  A shell command a **Workbench** runs for its side effects before any of its windows exists. It is a command *line*, so an ordered chain within it is the shell's own `&&`.
+  avoid: before_apply command, pre-command, hook command, lane, step
   under: Workbench
 
 + Setup group
-  A set of **Setup command**s a **Workbench** declares as independent of each other, and which therefore run together rather than in sequence. A group of one is the ordinary sequential case.
+  A set of **Setup command**s a **Workbench** declares as independent of each other, and which therefore run together rather than in sequence. Group boundaries are barriers — everything in one group finishes before the next begins — so two chains that must not wait on each other are two commands in one group, never two groups.
   avoid: parallel stage, stage, phase, batch
+  under: Workbench
+
++ Setup progress line
+  The single refreshing line pop draws while a **Setup group** runs, naming every command in the group and its elapsed state. It exists because a group's output is held back until the group ends, and silence is indistinguishable from a hang. Falls back to plain start and finish lines where there is no terminal to refresh.
+  avoid: spinner, progress bar, status bar
   under: Workbench
 
 + Human shell
