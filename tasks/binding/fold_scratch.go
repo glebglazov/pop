@@ -198,13 +198,15 @@ func rebaseScratchOntoTrunk(td *tasks.Deps, cfg *config.Config, opts FoldOptions
 		}
 	}
 	err := tasks.HandleFoldConflict(td, cfg, tasks.FoldConflictContext{
-		SetID:       ctx.setID,
-		Manifest:    ctx.manifest,
-		RuntimePath: ctx.setPath,
-		SetBranch:   ctx.setBranch,
-		TrunkBranch: ctx.trunkBranch,
-		TrunkPath:   ctx.trunkPath,
+		SetID:         ctx.setID,
+		Manifest:      ctx.manifest,
+		RuntimePath:   ctx.setPath,
+		SetBranch:     ctx.setBranch,
+		TrunkBranch:   ctx.trunkBranch,
+		TrunkPath:     ctx.trunkPath,
+		ScratchBranch: scratch,
 	}, tasks.FoldConflictAssistanceOptions{
+		Yes:         opts.Yes,
 		AgentPreset: opts.AgentPreset,
 		AgentCmd:    opts.AgentCmd,
 		In:          opts.In,
@@ -227,7 +229,17 @@ func fastForwardTrunk(td *tasks.Deps, trunkPath, branch string) error {
 // landRebasedFold resumes a fold whose scratch branch already sits on top of
 // trunk. It starts at the same trunk read and landing checks that follow a
 // first-run rebase, then crosses the Fold boundary and runs the shared tail.
-func landRebasedFold(td *tasks.Deps, ctx foldRebaseContext, scratch string) error {
+func landRebasedFold(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldRebaseContext, scratch string) error {
+	if err := tasks.HandleFoldLanding(td, cfg, tasks.FoldConflictContext{
+		SetID: ctx.setID, Manifest: ctx.manifest, RuntimePath: ctx.setPath,
+		SetBranch: ctx.setBranch, TrunkBranch: ctx.trunkBranch, TrunkPath: ctx.trunkPath,
+		ScratchBranch: scratch,
+	}, tasks.FoldConflictAssistanceOptions{Yes: opts.Yes, In: opts.In, Out: out}); err != nil {
+		if errors.Is(err, tasks.ErrFoldAbandon) {
+			abandonFoldScratch(td, ctx, scratch)
+		}
+		return err
+	}
 	trunkBefore, err := revParseHEAD(td, ctx.trunkPath)
 	if err != nil {
 		return fmt.Errorf("fold refused: read trunk HEAD: %w", err)

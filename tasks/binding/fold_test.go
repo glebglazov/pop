@@ -405,7 +405,7 @@ func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
 	var out bytes.Buffer
 	got, err := Fold(td, nil, cfg, "set-resolve", FoldOptions{
 		Yes: true,
-		In:  strings.NewReader("\n"), // agent assistance; post-resolve verify declines on EOF→n
+		In:  strings.NewReader("\n"), // agent assistance; --yes skips the landing gate
 	}, LifecycleHooks{}, &out)
 	if err != nil {
 		t.Fatalf("fold after assistance: %v\n%s", err, out.String())
@@ -421,7 +421,6 @@ func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
 		"3. Retry fold from scratch",
 		"4. Verify set",
 		"0. Exit",
-		"Verify set? [y/N]:",
 	} {
 		if !strings.Contains(gotOut, want) {
 			t.Fatalf("output missing %q:\n%s", want, gotOut)
@@ -519,7 +518,7 @@ func TestFoldConflictResumeContinuesWithoutPreflight(t *testing.T) {
 	var out bytes.Buffer
 	got, err := Fold(td, nil, cfg, "set-resume", FoldOptions{
 		Yes: true,
-		In:  strings.NewReader("2\nn\n"), // resume, decline post-resolve verify
+		In:  strings.NewReader("2\n"), // resume; --yes skips the landing gate
 	}, LifecycleHooks{}, &out)
 	if err != nil {
 		t.Fatalf("fold resume: %v\n%s", err, out.String())

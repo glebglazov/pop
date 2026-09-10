@@ -106,7 +106,7 @@ func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, o
 		if plan.landedInTrunk {
 			err = landFoldedBranch(td, ctx, foldScratchBranch(plan.branch))
 		} else if plan.rebasedOntoTrunk {
-			err = landRebasedFold(td, ctx, foldScratchBranch(plan.branch))
+			err = landRebasedFold(td, cfg, opts, out, ctx, foldScratchBranch(plan.branch))
 		} else {
 			err = foldRebaseAndFastForward(td, cfg, opts, out, ctx)
 		}

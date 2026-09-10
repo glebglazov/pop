@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/glebglazov/pop/config"
 )
 
 func TestBuildFoldConflictPromptCarriesContextAndBoundaries(t *testing.T) {
@@ -187,38 +185,5 @@ func TestPromptFoldConflictActionSelectsResumeRetryVerifyAbandon(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("input %q: got %v, want %v", tc.in, got, tc.want)
 		}
-	}
-}
-
-func TestOfferFoldPostResolveVerifyDeclineProceeds(t *testing.T) {
-	d := newTestDeps(t)
-	var out bytes.Buffer
-	reader := newPromptReader(strings.NewReader("\n"))
-	err := offerFoldPostResolveVerify(d, nil, FoldConflictContext{SetID: "demo"}, FoldConflictAssistanceOptions{}, &out, reader)
-	if err != nil {
-		t.Fatalf("decline verify: %v", err)
-	}
-	if !strings.Contains(out.String(), "Verify set? [y/N]:") {
-		t.Fatalf("missing verify offer:\n%s", out.String())
-	}
-}
-
-func TestOfferFoldPostResolveVerifyFailStops(t *testing.T) {
-	d := newTestDeps(t)
-	var out bytes.Buffer
-	reader := newPromptReader(strings.NewReader("y\n"))
-	err := offerFoldPostResolveVerify(d, &config.Config{}, FoldConflictContext{
-		SetID:       "missing-set",
-		RuntimePath: t.TempDir(),
-	}, FoldConflictAssistanceOptions{
-		RunVerifier: func(string) (string, error) {
-			return "VERDICT: FIXABLE\nFINDINGS: still broken\n", nil
-		},
-	}, &out, reader)
-	if err == nil {
-		t.Fatal("expected verify failure to stop fold")
-	}
-	if !strings.Contains(err.Error(), "fold refused") {
-		t.Fatalf("err = %v, want fold refused", err)
 	}
 }

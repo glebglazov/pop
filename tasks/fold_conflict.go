@@ -30,21 +30,23 @@ var ErrFoldAbandon = errors.New("fold abandoned: rebase aborted, trunk unchanged
 // FoldConflictContext carries the identity and git context for a fold rebase
 // conflict inside the set's own checkout.
 type FoldConflictContext struct {
-	SetID       string
-	Manifest    *Manifest
-	RuntimePath string
-	SetBranch   string
-	TrunkBranch string
-	TrunkPath   string
+	SetID         string
+	Manifest      *Manifest
+	RuntimePath   string
+	SetBranch     string
+	TrunkBranch   string
+	TrunkPath     string
+	ScratchBranch string
 }
 
 // FoldConflictAssistanceOptions configures an attended fold-conflict session.
 type FoldConflictAssistanceOptions struct {
+	Yes         bool
 	AgentPreset string
 	AgentCmd    string
 	In          io.Reader
 	Out         io.Writer
-	// RunVerifier is a test seam for Verify set / post-resolve verify; nil uses
+	// RunVerifier is a test seam for Verify set at either Fold gate; nil uses
 	// the real Verifier path behind verifyResolvedSet.
 	RunVerifier func(prompt string) (string, error)
 }
@@ -125,7 +127,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 				// Still unresolved — re-prompt rather than refuse once.
 				continue
 			}
-			return offerFoldPostResolveVerify(d, gate.Value(), ctx, opts, out, reader)
+			return runFoldLandingGate(d, gate, ctx, opts, out, in, reader)
 		case foldConflictResume:
 			if err := foldResumeRebase(d, ctx.RuntimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Resume fold: %v\n", err)
@@ -133,7 +135,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 			if err := foldRebaseCompleted(d, ctx.RuntimePath, ctx.TrunkBranch); err != nil {
 				continue
 			}
-			return offerFoldPostResolveVerify(d, gate.Value(), ctx, opts, out, reader)
+			return runFoldLandingGate(d, gate, ctx, opts, out, in, reader)
 		case foldConflictRetry:
 			if _, err := d.Git.CommandInDir(ctx.RuntimePath, "rebase", "--abort"); err != nil {
 				return fmt.Errorf("fold refused: abort rebase for retry: %w", err)
@@ -355,26 +357,6 @@ func foldResumeRebase(d *Deps, setPath string, out io.Writer) error {
 	}
 	fmt.Fprintln(outputFor(out), "Resumed rebase.")
 	return nil
-}
-
-func offerFoldPostResolveVerify(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, out io.Writer, reader *promptReader) error {
-	if strings.TrimSpace(ctx.SetID) == "" {
-		return nil
-	}
-	display := outputFor(out)
-	fmt.Fprintln(display)
-	fmt.Fprintln(display, "Rebase resolved. Verify the set before fast-forwarding trunk?")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Verify set? [y/N]: "))
-	answer, err := readPromptLine(reader, out, "n")
-	if err != nil {
-		return err
-	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "y", "yes":
-		return runFoldSetVerify(d, cfg, ctx, opts, out)
-	default:
-		return nil
-	}
 }
 
 func runFoldSetVerify(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, out io.Writer) error {

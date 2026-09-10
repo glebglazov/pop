@@ -125,7 +125,7 @@ func TestFoldConflictExitParksAndALaterFoldResumesIt(t *testing.T) {
 	var out strings.Builder
 	if _, err := Fold(td, nil, cfg, "set-park", FoldOptions{
 		Yes: true,
-		In:  strings.NewReader("2\nn\n"), // resume, decline the post-resolve verify
+		In:  strings.NewReader("2\n"), // resume; --yes skips the landing gate
 	}, LifecycleHooks{}, &out); err != nil {
 		t.Fatalf("fold resuming a parked rebase: %v\n%s", err, out.String())
 	}
