@@ -260,6 +260,33 @@ A window's `layout` is a tree. A leaf runs a `command`; a container splits its
 `children` either into `"rows"` (stacked top→bottom) or `"columns"` (side-by-side),
 sizing them by relative `weight` (default `1`).
 
+### Setup commands and groups
+
+A Workbench runs `before_apply` on every apply, before it creates or merges
+windows. Commands run in the session directory through the Human shell, with
+its configured functions and aliases.
+
+```toml
+[[workbenches]]
+name = "dev"
+before_apply = [
+  "make decrypt",
+  { parallel = ["bundle install && bundle exec rake assets", "pnpm install"] },
+  "make ready",
+]
+```
+
+Bare commands run one at a time and can read terminal input. Commands in a
+`parallel` Setup group run together with no input stream. All commands in the
+group finish before the next entry starts. Use `&&` within one command for a
+chain with dependencies. Put commands that prompt outside a `parallel` group.
+
+Pop holds each group's output per command until the group finishes, then prints
+it in declared order, with the first failed command's output first. The first
+failure in declared order stops the apply and names the command that failed;
+all its siblings finish before pop returns the error. Existing lists of bare
+commands keep their sequential behavior.
+
 ### A single-pane window
 
 ```toml

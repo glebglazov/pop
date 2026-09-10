@@ -20,9 +20,10 @@ type templateRuntimeDeps struct {
 	UserHomeDir func() (string, error)
 	ConfigDeps  *config.Deps
 	ErrOut      io.Writer
-	// RunBeforeApply runs one before_apply shell command with cwd = dir
-	// (the session directory). Injected so tests can observe ordering and cwd.
-	RunBeforeApply func(mod tmuxmod.Tmux, command, dir string) error
+	Out         io.Writer
+	// RunBeforeApply runs one Setup command with the supplied streams. Group
+	// commands call it concurrently with no stdin and separate output buffers.
+	RunBeforeApply func(mod tmuxmod.Tmux, command, dir string, stdin io.Reader, stdout, stderr io.Writer) error
 }
 
 func defaultTemplateRuntimeDeps() templateRuntimeDeps {
@@ -39,15 +40,15 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 		UserHomeDir:    os.UserHomeDir,
 		ConfigDeps:     config.DefaultDeps(),
 		ErrOut:         os.Stderr,
+		Out:            os.Stdout,
 		RunBeforeApply: runBeforeApplyCommand,
 	}
 }
 
 // runBeforeApplyCommand runs a single before_apply shell command synchronously
-// with cwd = dir (the session directory), streaming its output to the user's
-// terminal. It is the production implementation of templateRuntimeDeps.RunBeforeApply.
-func runBeforeApplyCommand(mod tmuxmod.Tmux, command, dir string) error {
-	return runHumanShellCommand(mod, command, dir, os.Environ(), os.Stdin, os.Stdout, os.Stderr)
+// with cwd = dir (the session directory) and the caller's streams.
+func runBeforeApplyCommand(mod tmuxmod.Tmux, command, dir string, stdin io.Reader, stdout, stderr io.Writer) error {
+	return runHumanShellCommand(mod, command, dir, os.Environ(), stdin, stdout, stderr)
 }
 
 var workbenchCmd = &cobra.Command{
@@ -181,17 +182,8 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	// Run the Workbench's before_apply commands for one-time side effects
-	// (repo setup) before any window is realized, with cwd = the session
-	// directory (ADR-0075). They run on every apply, including a reapply over a
-	// live session; the Workbench author owns idempotency.
-	for i, command := range tmpl.BeforeApply {
-		if d.RunBeforeApply == nil {
-			break
-		}
-		if err := d.RunBeforeApply(d.Tmux, command, dir); err != nil {
-			return fmt.Errorf("before_apply[%d] %q failed: %w", i, command, err)
-		}
+	if err := runWorkbenchSetup(d, tmpl.BeforeApply, dir); err != nil {
+		return err
 	}
 
 	// Match target windows to live windows by pop-owned identity (ADR-0075),

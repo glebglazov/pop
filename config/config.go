@@ -415,13 +415,13 @@ type WorkbenchOptions struct {
 // supported; a template with invalid window names is excluded at load time.
 type Workbench struct {
 	Name string `toml:"name" desc:"Workbench name (referenced by preferred_workbench)."`
-	// BeforeApply is an ordered list of shell commands run for one-time
+	// BeforeApply is an ordered list of Setup commands and Setup groups for
 	// side effects (repo setup: pull, decrypt, mkdir) before any window of
 	// this Workbench is realized, with cwd = the session directory (ADR-0075).
 	// They run on every apply, including a reapply over a live session — the
 	// caller owns idempotency. This is side-effecting commands only, not
 	// shell-environment propagation: exported vars would not reach sibling panes.
-	BeforeApply []string          `toml:"before_apply" desc:"Shell commands run in the Human shell before realizing windows, with the human's functions and aliases available (array)."`
+	BeforeApply SetupEntries      `toml:"before_apply" desc:"Ordered Human shell commands before realizing windows: strings or { parallel = [\"command\", \"command\"] } groups. Groups run together without stdin; each group finishes before the next entry."`
 	Windows     []WorkbenchWindow `toml:"windows" desc:"Ordered tmux windows ([[workbenches.windows]] tables)."`
 }
 

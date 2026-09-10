@@ -108,7 +108,7 @@ func blueprintTag(t *testing.T, wbs []Workbench) string {
 		if len(wb.BeforeApply) != 1 {
 			t.Fatalf("blueprint %q carries %v, want one tag", wb.Name, wb.BeforeApply)
 		}
-		return wb.BeforeApply[0]
+		return wb.BeforeApply[0].Command
 	}
 	t.Fatalf("no 'shared' blueprint in %+v", wbs)
 	return ""
@@ -203,12 +203,12 @@ turn_cap = 7
 	declared := 40
 	cfg := namedWorkbenches("overridden", "committed", "declared")
 	cfg.Workbenches = append(cfg.Workbenches, Workbench{
-		Name: "shared", BeforeApply: []string{"global-declaration"},
+		Name: "shared", BeforeApply: SetupEntries{{Command: "global-declaration"}},
 	})
 	cfg.Repo = map[string]RepoOverrideConfig{f.main: {
 		RepoScopeConfig: RepoScopeConfig{
 			PreferredWorkbench: "declared",
-			Workbenches:        []Workbench{{Name: "shared", BeforeApply: []string{"block"}}},
+			Workbenches:        []Workbench{{Name: "shared", BeforeApply: SetupEntries{{Command: "block"}}}},
 		},
 		TurnCap: &declared,
 	}}

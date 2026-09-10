@@ -61,7 +61,7 @@ eval "$2"
 			name: "Workbench setup",
 			want: "setup",
 			run: func() {
-				if err := runBeforeApplyCommand(mod, `configured_only setup`, dir); err != nil {
+				if err := runBeforeApplyCommand(mod, `configured_only setup`, dir, os.Stdin, os.Stdout, os.Stderr); err != nil {
 					t.Fatalf("setup command: %v", err)
 				}
 			},

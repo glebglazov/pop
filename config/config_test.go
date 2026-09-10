@@ -825,7 +825,7 @@ func TestResolveWorkbenchesWithTwoAnchor(t *testing.T) {
 		if len(wb.BeforeApply) != 1 {
 			t.Fatalf("workbench %q before_apply = %v, want one tag", wb.Name, wb.BeforeApply)
 		}
-		return wb.BeforeApply[0]
+		return wb.BeforeApply[0].Command
 	}
 
 	t.Run("worktree .pop/config.toml outranks the trunk anchor, collision warned", func(t *testing.T) {
@@ -912,7 +912,7 @@ func TestRepoScopeResolutionIsScopeFirst(t *testing.T) {
 	globalLibrary := func(tag string) *Config {
 		return &Config{Workbenches: []Workbench{{
 			Name:        "shared",
-			BeforeApply: []string{tag},
+			BeforeApply: SetupEntries{{Command: tag}},
 			Windows: []WorkbenchWindow{{
 				Name:   "main",
 				Layout: &WorkbenchPaneSpec{Name: "editor", Command: "vim"},
@@ -930,7 +930,7 @@ func TestRepoScopeResolutionIsScopeFirst(t *testing.T) {
 	}
 	blockDeclaring := func(checkout, tag string) map[string]RepoOverrideConfig {
 		return map[string]RepoOverrideConfig{checkout: {RepoScopeConfig: RepoScopeConfig{
-			Workbenches: []Workbench{{Name: "shared", BeforeApply: []string{tag}}},
+			Workbenches: []Workbench{{Name: "shared", BeforeApply: SetupEntries{{Command: tag}}}},
 		}}}
 	}
 	tagOf := func(t *testing.T, wbs []Workbench) string {
@@ -938,7 +938,7 @@ func TestRepoScopeResolutionIsScopeFirst(t *testing.T) {
 		if len(wbs) != 1 || wbs[0].Name != "shared" || len(wbs[0].BeforeApply) != 1 {
 			t.Fatalf("workbenches = %+v, want a single tagged 'shared'", wbs)
 		}
-		return wbs[0].BeforeApply[0]
+		return wbs[0].BeforeApply[0].Command
 	}
 	// inForce answers through both entry points and insists they agree.
 	inForce := func(t *testing.T, d *Deps, cfg *Config, checkout string) string {

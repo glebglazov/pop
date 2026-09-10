@@ -888,8 +888,8 @@ func mergeFake(livePanes map[string]string, width, height int) *tmuxtest.Fake {
 	}
 	return &tmuxtest.Fake{
 		CurrentSessionName: "current-session",
-		PaneW:            width,
-		PaneH:            height,
+		PaneW:              width,
+		PaneH:              height,
 		LiveWBWindows:      map[string]map[string]string{"current-session": {"dev": "@1"}},
 		LiveWBPanes:        map[string]map[string]string{"@1": livePanes},
 		LiveWBFallback:     map[string]string{"@1": fallback},
@@ -1124,7 +1124,7 @@ func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name:        "dev",
-			BeforeApply: []string{"git pull", "make decrypt"},
+			BeforeApply: config.SetupEntries{{Command: "git pull"}, {Command: "make decrypt"}},
 			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
 				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
@@ -1146,7 +1146,7 @@ func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string, _ io.Reader, _, _ io.Writer) error {
 			combined = append(combined, "before_apply:"+command)
 			beforeApplyDirs = append(beforeApplyDirs, dir)
 			return nil
@@ -1175,7 +1175,7 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name:        "dev",
-			BeforeApply: []string{"git pull"},
+			BeforeApply: config.SetupEntries{{Command: "git pull"}},
 			Windows: []config.WorkbenchWindow{{
 				Name: "dev",
 				Layout: &config.WorkbenchPaneSpec{
@@ -1196,7 +1196,7 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string, _ io.Reader, _, _ io.Writer) error {
 			ran = append(ran, command)
 			if dir != "/repo" {
 				t.Fatalf("before_apply cwd = %q, want session directory /repo", dir)
@@ -1220,7 +1220,7 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name:        "dev",
-			BeforeApply: []string{"false"},
+			BeforeApply: config.SetupEntries{{Command: "false"}},
 			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
 				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
@@ -1238,7 +1238,7 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string, _ io.Reader, _, _ io.Writer) error {
 			return fmt.Errorf("boom")
 		},
 	}
@@ -1260,7 +1260,7 @@ func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name:        "dev",
-			BeforeApply: []string{"git pull"},
+			BeforeApply: config.SetupEntries{{Command: "git pull"}},
 			Windows: []config.WorkbenchWindow{{
 				Name:   "work",
 				Layout: &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."},
@@ -1279,7 +1279,7 @@ func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 		Tmux:        f,
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string, _ io.Reader, _, _ io.Writer) error {
 			beforeApplyRan = true
 			if dir != "/repo/checkout" {
 				t.Fatalf("before_apply cwd = %q, want session directory %q", dir, "/repo/checkout")
