@@ -6,7 +6,118 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
+
+func TestPickerAnimatedMarkerUsesSharedSpinner(t *testing.T) {
+	p := NewPicker(
+		[]Item{{Name: "removing", Path: "/removing", Marker: "stand-in", Animated: true}},
+		WithItemsProvider(func() ([]Item, error) { return nil, nil }),
+	)
+	cmd := p.Init()
+	if cmd == nil {
+		t.Fatal("Init command is nil with an animated row")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("Init command = %T with %d commands, want spinner and reload ticks", msg, len(batch))
+	}
+	before := p.pickerCell(p.items[0], RowState{})
+	if !strings.Contains(before, SpinnerFrames[0]) {
+		t.Fatalf("initial row = %q, want spinner frame %q", before, SpinnerFrames[0])
+	}
+
+	_, cmd = p.Update(SpinnerTickMsg{})
+	if cmd == nil {
+		t.Fatal("spinner tick did not schedule the next shared tick")
+	}
+	after := p.pickerCell(p.items[0], RowState{})
+	if !strings.Contains(after, SpinnerFrames[1]) {
+		t.Fatalf("ticked row = %q, want spinner frame %q", after, SpinnerFrames[1])
+	}
+	if lipgloss.Width(before) != lipgloss.Width(after) {
+		t.Fatalf("marker frame changed row width from %d to %d", lipgloss.Width(before), lipgloss.Width(after))
+	}
+}
+
+func TestPickerReloadRemovesFinishedRowWithoutInput(t *testing.T) {
+	p := NewPicker(
+		[]Item{
+			{Name: "keep", Path: "/keep"},
+			{Name: "removing", Path: "/removing", Marker: "queued", Animated: true},
+		},
+		WithItemsProvider(func() ([]Item, error) {
+			return []Item{{Name: "keep", Path: "/keep"}}, nil
+		}),
+	)
+	p.list.SetCursorToKey("/keep")
+	p.syncFromList()
+
+	_, cmd := p.Update(pickerReloadTickMsg{})
+	if cmd != nil {
+		t.Fatal("reload kept a timer after the removal finished")
+	}
+	if len(p.items) != 1 || p.items[0].Path != "/keep" {
+		t.Fatalf("items after reload = %+v, want only /keep", p.items)
+	}
+}
+
+func TestPickerReloadPreservesFilterAndSelection(t *testing.T) {
+	items := []Item{
+		{Name: "alpha", Path: "/alpha"},
+		{Name: "bravo", Path: "/bravo", Marker: "queued", Animated: true},
+		{Name: "brisk", Path: "/brisk"},
+	}
+	reloads := 0
+	p := NewPicker(items, WithItemsProvider(func() ([]Item, error) {
+		reloads++
+		return []Item{
+			{Name: "brisk", Path: "/brisk"},
+			{Name: "bravo", Path: "/bravo", Marker: "failed"},
+			{Name: "alpha", Path: "/alpha"},
+		}, nil
+	}))
+	p.input.SetValue("br")
+	p.filter()
+	p.list.SetCursorToKey("/bravo")
+	p.syncFromList()
+
+	_, cmd := p.Update(pickerReloadTickMsg{})
+	if cmd != nil {
+		t.Fatal("reload kept a timer after the animated row became static")
+	}
+	if reloads != 1 {
+		t.Fatalf("provider calls = %d, want 1", reloads)
+	}
+	if p.input.Value() != "br" {
+		t.Fatalf("filter = %q, want br", p.input.Value())
+	}
+	selected, ok := p.list.Selected()
+	if !ok || selected.Path != "/bravo" {
+		t.Fatalf("selected row = %+v, %v; want /bravo", selected, ok)
+	}
+	if selected.Marker != "failed" || selected.Animated {
+		t.Fatalf("rebuilt marker = %+v, want static failed marker", selected)
+	}
+}
+
+func TestPickerHasNoTimersWithoutAnimatedRows(t *testing.T) {
+	p := NewPicker([]Item{{Name: "failed", Path: "/failed", Marker: "failed"}}, WithItemsProvider(func() ([]Item, error) {
+		t.Fatal("static picker called its provider")
+		return nil, nil
+	}))
+	if cmd := p.Init(); cmd != nil {
+		t.Fatal("Init command is non-nil without an animated row")
+	}
+	_, cmd := p.Update(SpinnerTickMsg{})
+	if cmd != nil {
+		t.Fatal("spinner tick restarted without an animated row")
+	}
+	if got := p.pickerCell(p.items[0], RowState{}); !strings.Contains(got, "failed") {
+		t.Fatalf("static marker changed: %q", got)
+	}
+}
 
 func TestPickerGetsListScrollEdgeWithoutAnOption(t *testing.T) {
 	items := make([]Item, 8)

@@ -3,9 +3,11 @@ package ui
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/debug"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
@@ -21,6 +23,7 @@ type Item struct {
 	Context     string // Additional context (e.g., branch name)
 	Icon        string // Optional icon displayed to the left of name
 	Marker      string // Optional leading marker, independent of Icon (e.g. Unbound managed worktree)
+	Animated    bool   // Marker uses the shared working-spinner frames
 	SessionName string // Pre-computed tmux session name
 
 	// Depth is how deep the row sits in a nested list: 0 for a top-level row, 1
@@ -117,6 +120,14 @@ type Picker struct {
 	warnings         []string
 	updateNotice     string
 	header           string
+	itemsProvider    func() ([]Item, error)
+	spinnerFrame     int
+}
+
+type pickerReloadTickMsg struct{}
+
+func pickerReloadTick() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return pickerReloadTickMsg{} })
 }
 
 // iconLegendEntry maps an icon to its description in the help view
@@ -267,6 +278,14 @@ func WithUpdateNotice(text string) PickerOption {
 	}
 }
 
+// WithItemsProvider lets the picker rebuild its rows while an animated item is
+// visible. The picker preserves its query and selected row across each rebuild.
+func WithItemsProvider(provider func() ([]Item, error)) PickerOption {
+	return func(p *Picker) {
+		p.itemsProvider = provider
+	}
+}
+
 // Tree wires nested-list gestures into the picker. The picker owns no tree of its
 // own: it reads a row's place from Item.Depth — a row is expanded when the row
 // below it sits deeper — and asks the caller for rows whenever the shape has to
@@ -373,11 +392,26 @@ func (p *Picker) Init() tea.Cmd {
 		p.list.SetCursor(len(p.filtered) - 1)
 	}
 	p.syncFromList()
-	return nil
+	return p.animatedTicks()
 }
 
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p.syncToList()
+
+	switch msg.(type) {
+	case SpinnerTickMsg:
+		p.spinnerFrame = (p.spinnerFrame + 1) % len(SpinnerFrames)
+		if p.hasAnimatedItems() {
+			return p, SpinnerTick()
+		}
+		return p, nil
+	case pickerReloadTickMsg:
+		p.reloadItems()
+		if p.hasAnimatedItems() && p.itemsProvider != nil {
+			return p, pickerReloadTick()
+		}
+		return p, nil
+	}
 
 	// While the Config modal is open it owns the keyboard outright (ADR-0202
 	// decision 11): no selection, no yank, no delete, not even esc. Nothing below
@@ -556,9 +590,10 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, nil
 
 		case key.Matches(msg, keys.ClearInput):
+			hadAnimated := p.hasAnimatedItems()
 			p.input.SetValue("")
 			p.filter()
-			return p, nil
+			return p, p.ticksForNewAnimation(hadAnimated)
 
 		case p.isQuickAccessKey(msg):
 			n := p.quickAccessDigit(msg)
@@ -579,12 +614,60 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Update text input
+	hadAnimated := p.hasAnimatedItems()
 	p.input.Update(msg)
 
 	// Filter items
 	p.filter()
 
-	return p, nil
+	return p, p.ticksForNewAnimation(hadAnimated)
+}
+
+func (p *Picker) hasAnimatedItems() bool {
+	for _, item := range p.filtered {
+		if item.Animated {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Picker) animatedTicks() tea.Cmd {
+	if !p.hasAnimatedItems() {
+		return nil
+	}
+	cmds := []tea.Cmd{SpinnerTick()}
+	if p.itemsProvider != nil {
+		cmds = append(cmds, pickerReloadTick())
+	}
+	return tea.Batch(cmds...)
+}
+
+func (p *Picker) ticksForNewAnimation(hadAnimated bool) tea.Cmd {
+	if hadAnimated || !p.hasAnimatedItems() {
+		return nil
+	}
+	return p.animatedTicks()
+}
+
+func (p *Picker) reloadItems() {
+	if p.itemsProvider == nil {
+		return
+	}
+	items, err := p.itemsProvider()
+	if err != nil {
+		return
+	}
+	selectedPath := ""
+	if selected, ok := p.list.Selected(); ok {
+		selectedPath = selected.Path
+	}
+	p.items = items
+	p.filter()
+	if selectedPath != "" {
+		p.list.SetCursorToKey(selectedPath)
+	}
+	p.syncFromList()
 }
 
 // resize lays the list out for a terminal of this size, and keeps the raw window
@@ -877,11 +960,23 @@ func (p *Picker) pickerHasIcons() bool {
 
 func (p *Picker) pickerHasMarkers() bool {
 	for j := range p.items {
-		if p.items[j].Marker != "" {
+		if p.items[j].Marker != "" || p.items[j].Animated {
 			return true
 		}
 	}
 	return false
+}
+
+func (p *Picker) pickerMarkerWidth() int {
+	width := 0
+	for _, item := range p.items {
+		marker := item.Marker
+		if item.Animated {
+			marker = SpinnerFrames[0]
+		}
+		width = max(width, lipgloss.Width(marker))
+	}
+	return width
 }
 
 func (p *Picker) pickerMaxContextLen() int {
@@ -927,11 +1022,11 @@ func (p *Picker) pickerCell(item Item, _ RowState) string {
 	// managed-binding state are independent facts that can both apply to the
 	// same row, so one must not overwrite the other.
 	if hasMarkers {
-		if item.Marker != "" {
-			line = " " + item.Marker + line
-		} else {
-			line = "  " + line
+		marker := item.Marker
+		if item.Animated {
+			marker = SpinnerFrames[p.spinnerFrame]
 		}
+		line = " " + marker + strings.Repeat(" ", p.pickerMarkerWidth()-lipgloss.Width(marker)) + line
 	}
 
 	// The indent goes outside every column, so a child row's glyph moves with its

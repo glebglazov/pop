@@ -318,40 +318,50 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 }
 
 func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefinedCommand, quickAccessModifier string, initialCursorIdx int, warnings []string, attentionEnabled, updateNoticeEnabled bool) (ui.Result, error) {
-	worktrees, err := project.ListWorktrees(ctx)
-	if err != nil {
-		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("failed to list worktrees: %w", err)
+	itemsProvider := func() ([]ui.Item, error) {
+		worktrees, err := project.ListWorktrees(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list worktrees: %w", err)
+		}
+
+		// History controls the same oldest-to-newest order on the initial read and
+		// every live rebuild.
+		hist, err := history.LoadWith(cmdHistoryDeps())
+		if err != nil {
+			hist = &history.History{}
+		}
+		projects := make([]project.Project, len(worktrees))
+		pathToWorktree := make(map[string]project.Worktree, len(worktrees))
+		for i, wt := range worktrees {
+			projects[i] = project.Project{Name: wt.Name, Path: wt.Path}
+			pathToWorktree[wt.Path] = wt
+		}
+		projects = hist.SortByRecency(projects)
+		sortedWorktrees := make([]project.Worktree, len(projects))
+		for i, p := range projects {
+			sortedWorktrees[i] = pathToWorktree[p.Path]
+		}
+
+		items := buildWorktreeItems(ctx, sortedWorktrees, history.TmuxSessionActivity(), cmdLayerDeps().tasksDeps())
+		if attentionEnabled {
+			attentionSessions := monitorAttentionSessions()
+			for i := range items {
+				sessionName := project.TmuxSessionNameAt(ctx, items[i].Path, items[i].Name)
+				if attentionSessions != nil && attentionSessions[sessionName] {
+					items[i].Icon = iconAttention
+				}
+			}
+		}
+		return items, nil
 	}
 
-	if len(worktrees) == 0 {
+	items, err := itemsProvider()
+	if err != nil {
+		return ui.Result{Action: ui.ActionCancel}, err
+	}
+	if len(items) == 0 {
 		return ui.Result{Action: ui.ActionCancel}, fmt.Errorf("no worktrees found")
 	}
-
-	// Load history and sort by recency (oldest first, most recent last)
-	hist, err := history.LoadWith(cmdHistoryDeps())
-	if err != nil {
-		hist = &history.History{}
-	}
-
-	// Convert to Project for sorting, then back
-	projects := make([]project.Project, len(worktrees))
-	for i, wt := range worktrees {
-		projects[i] = project.Project{Name: wt.Name, Path: wt.Path}
-	}
-	projects = hist.SortByRecency(projects)
-
-	// Rebuild worktrees list in sorted order
-	pathToWorktree := make(map[string]project.Worktree)
-	for _, wt := range worktrees {
-		pathToWorktree[wt.Path] = wt
-	}
-	sortedWorktrees := make([]project.Worktree, len(projects))
-	for i, p := range projects {
-		sortedWorktrees[i] = pathToWorktree[p.Path]
-	}
-
-	// Convert to UI items with session icons
-	items := buildWorktreeItems(ctx, sortedWorktrees, history.TmuxSessionActivity(), cmdLayerDeps().tasksDeps())
 
 	iconLegends := []ui.IconLegend{
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
@@ -363,18 +373,10 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	}
 	if attentionEnabled {
 		iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
-		// Apply attention icons to worktree items
-		attentionSessions := monitorAttentionSessions()
-		if attentionSessions != nil {
-			for i := range items {
-				sessionName := project.TmuxSessionNameAt(ctx, items[i].Path, items[i].Name)
-				if attentionSessions[sessionName] {
-					items[i].Icon = iconAttention
-				}
-			}
-		}
 	}
-	return ui.Run(items, worktreePickerOptions(customCommands, quickAccessModifier, initialCursorIdx, warnings, iconLegends, updateNoticeEnabled)...)
+	opts := worktreePickerOptions(customCommands, quickAccessModifier, initialCursorIdx, warnings, iconLegends, updateNoticeEnabled)
+	opts = append(opts, ui.WithItemsProvider(itemsProvider))
+	return ui.Run(items, opts...)
 }
 
 // worktreePickerOptions is the worktree picker's key set and chrome, apart from
@@ -463,6 +465,7 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 		switch errands[filepath.Clean(wt.Path)] {
 		case store.ErrandQueued, store.ErrandRunning:
 			items[i].Marker = iconErrandInFlight
+			items[i].Animated = true
 			continue
 		case store.ErrandFailed:
 			items[i].Marker = iconErrandFailed

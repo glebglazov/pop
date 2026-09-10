@@ -492,9 +492,13 @@ func TestBuildWorktreeItemsMarksRemovalErrands(t *testing.T) {
 	}
 	items := buildWorktreeItems(&project.RepoContext{}, worktrees, map[string]int64{}, td)
 	want := []string{iconErrandInFlight, iconErrandInFlight, iconErrandFailed, iconHalfRemoved, ""}
+	wantAnimated := []bool{true, true, false, false, false}
 	for i := range items {
 		if items[i].Marker != want[i] {
 			t.Errorf("%s marker = %q, want %q", items[i].Name, items[i].Marker, want[i])
+		}
+		if items[i].Animated != wantAnimated[i] {
+			t.Errorf("%s animated = %v, want %v", items[i].Name, items[i].Animated, wantAnimated[i])
 		}
 	}
 }
