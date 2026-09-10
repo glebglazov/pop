@@ -104,6 +104,21 @@ func setupWriterIsTerminal(w io.Writer) bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
+// render is one command's piece of the Setup progress line — the same text
+// whether it is drawn beside its siblings on the refreshing line or alone on a
+// plain start or finish line. A command that has finished reports the instant it
+// finished at, so its elapsed time stops while its siblings run on.
+func (c setupCommandProgress) render(started, now time.Time) string {
+	state, at := "running", now
+	if !c.finished.IsZero() {
+		state, at = "finished", c.finished
+		if c.failed {
+			state = "failed"
+		}
+	}
+	return fmt.Sprintf("%s [%s %s]", c.command, state, setupElapsed(at.Sub(started)))
+}
+
 func (p *setupProgress) start() {
 	p.started = p.now()
 	if p.terminal {
@@ -111,37 +126,25 @@ func (p *setupProgress) start() {
 		return
 	}
 	for _, command := range p.commands {
-		fmt.Fprintf(p.out, "Setup: %s [running 0s]\n", command.command)
+		fmt.Fprintf(p.out, "Setup: %s\n", command.render(p.started, p.started))
 	}
 }
 
 func (p *setupProgress) finish(index int, failed bool) {
-	p.commands[index].finished = p.now()
-	p.commands[index].failed = failed
+	command := &p.commands[index]
+	command.finished = p.now()
+	command.failed = failed
 	if p.terminal {
-		p.refresh(p.commands[index].finished, false)
+		p.refresh(command.finished, false)
 		return
 	}
-	state := "finished"
-	if failed {
-		state = "failed"
-	}
-	fmt.Fprintf(p.out, "Setup: %s [%s %s]\n", p.commands[index].command, state, setupElapsed(p.commands[index].finished.Sub(p.started)))
+	fmt.Fprintf(p.out, "Setup: %s\n", command.render(p.started, command.finished))
 }
 
 func (p *setupProgress) refresh(now time.Time, final bool) {
 	parts := make([]string, 0, len(p.commands))
 	for _, command := range p.commands {
-		state := "running"
-		at := now
-		if !command.finished.IsZero() {
-			state = "finished"
-			at = command.finished
-			if command.failed {
-				state = "failed"
-			}
-		}
-		parts = append(parts, fmt.Sprintf("%s [%s %s]", command.command, state, setupElapsed(at.Sub(p.started))))
+		parts = append(parts, command.render(p.started, now))
 	}
 	fmt.Fprintf(p.out, "\r\033[2KSetup: %s", strings.Join(parts, " | "))
 	if final {

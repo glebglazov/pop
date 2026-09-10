@@ -71,6 +71,10 @@ func decodeSetupEntry(v interface{}) (SetupEntry, error) {
 }
 
 // MarshalTOML keeps the mixed array spelling on config show and subsequent loads.
+// The array is spelled here rather than handed to the encoder whole because an
+// array of nothing but tables is written as [[before_apply]] blocks, which is
+// not a value this key can be assigned. Each entry's commands still go through
+// the encoder, so command text is quoted and escaped as TOML requires.
 func (entries SetupEntries) MarshalTOML() ([]byte, error) {
 	values := make([]string, 0, len(entries))
 	for _, entry := range entries {

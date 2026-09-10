@@ -205,6 +205,8 @@ func tomlName(f reflect.StructField) string {
 // struct or array-of-tables, "<name>" for a map keyed by an arbitrary name). It
 // returns (nil, "") for a scalar or array-of-scalar leaf.
 func tableElem(t reflect.Type) (reflect.Type, string) {
+	// SetupEntries decodes and encodes itself as one array of values
+	// (setup_entry.go), so its element struct holds no keys a human writes.
 	if t == reflect.TypeOf(SetupEntries{}) {
 		return nil, ""
 	}
@@ -237,6 +239,7 @@ func derefElem(t reflect.Type) reflect.Type {
 
 // tomlTypeName maps a Go field type to the TOML type a user writes for it.
 func tomlTypeName(t reflect.Type) string {
+	// Its element is a struct, but a human writes the entries as one array.
 	if t == reflect.TypeOf(SetupEntries{}) {
 		return "array"
 	}
