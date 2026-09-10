@@ -143,7 +143,93 @@ func TestFoldConflictExitParksAndALaterFoldResumesIt(t *testing.T) {
 	}
 }
 
-// A scratch branch at preflight is normal. Which of the three things it means is
+func TestFoldRerunAfterCompletedRebaseLandsWithoutRebasingAgain(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	setID := "set-rebased"
+	seedAwaitingApprovalTaskSet(t, td, repo, setID, []map[string]any{
+		{"id": "09-signoff", "title": "Sign off"},
+	})
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: setID,
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+	scratch := foldScratchBranch(b.Branch)
+	trunkBefore := refAt(t, repo, "HEAD")
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	_, err = Fold(td, nil, cfg, setID, FoldOptions{Yes: true, In: strings.NewReader("0\n")}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "rebase still in progress") {
+		t.Fatalf("first fold err = %v, want the parked rebase refusal", err)
+	}
+	if err := os.WriteFile(filepath.Join(b.RuntimePath, "clash.txt"), []byte("resolved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitOutput(t, b.RuntimePath, "add", "clash.txt")
+	runGitOutput(t, b.RuntimePath, "-c", "core.editor=true", "rebase", "--continue")
+
+	if rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("direct rebase continuation did not finish")
+	}
+	if got := currentBranchAt(t, b.RuntimePath); got != scratch {
+		t.Fatalf("checkout branch = %q, want rebased scratch %q", got, scratch)
+	}
+	if got := refAt(t, repo, "HEAD"); got != trunkBefore {
+		t.Fatalf("trunk moved before rerun: %s -> %s", trunkBefore, got)
+	}
+	plan := foldCheckoutPlan{path: b.RuntimePath, trunkPath: repo, branch: b.Branch, trunkBranch: CurrentBranch(td, repo)}
+	if got := classifyFoldScratch(td, false, plan, scratch); got != foldScratchRebased {
+		t.Fatalf("classification = %v, want rebased", got)
+	}
+
+	inner := td.Git
+	var rebases, resets atomic.Int32
+	td.Git = &interceptGit{
+		inner: inner,
+		onCommandInDir: func(dir string, args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "rebase" {
+				rebases.Add(1)
+			}
+			if len(args) >= 3 && args[0] == "checkout" && args[1] == "-B" && args[2] == scratch {
+				resets.Add(1)
+			}
+			return inner.CommandInDir(dir, args...)
+		},
+	}
+	got, err := Fold(td, nil, cfg, setID, FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("rerun rebased fold: %v", err)
+	}
+	if rebases.Load() != 0 || resets.Load() != 0 {
+		t.Fatalf("rerun used rebase %d times and reset scratch %d times, want neither", rebases.Load(), resets.Load())
+	}
+	landed := refAt(t, repo, "HEAD")
+	if landed == trunkBefore {
+		t.Fatal("rerun did not fast-forward trunk")
+	}
+	if tip := refAt(t, b.RuntimePath, b.Branch); tip != landed {
+		t.Fatalf("real branch = %s, want folded tip %s", tip, landed)
+	}
+	if branchExists(t, repo, scratch) {
+		t.Fatalf("rerun left scratch ref %s", scratch)
+	}
+	if status := manifestStatusAt(t, td, repo, setID); status != tasks.StatusDone {
+		t.Fatalf("set status = %q, want DONE after sign-off", status)
+	}
+	if _, _, ok, err := FindBySetID(td, setID); err != nil || ok {
+		t.Fatalf("binding after rerun: present=%v err=%v", ok, err)
+	}
+	if !got.RemovalQueued {
+		t.Fatal("rerun did not continue through teardown scheduling")
+	}
+}
+
+// A scratch branch at preflight is normal. Which state it means is
 // read from git alone, and each reading has its own outcome.
 func TestPreflightClassifiesAnExistingFoldScratchBranch(t *testing.T) {
 	t.Parallel()

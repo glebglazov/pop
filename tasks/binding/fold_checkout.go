@@ -105,6 +105,8 @@ func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, o
 		ctx := plan.rebaseContext(manifest, req.afterLanding)
 		if plan.landedInTrunk {
 			err = landFoldedBranch(td, ctx, foldScratchBranch(plan.branch))
+		} else if plan.rebasedOntoTrunk {
+			err = landRebasedFold(td, ctx, foldScratchBranch(plan.branch))
 		} else {
 			err = foldRebaseAndFastForward(td, cfg, opts, out, ctx)
 		}
@@ -173,6 +175,9 @@ type foldCheckoutPlan struct {
 	// the irreversible fast-forward. The caller resumes the bounded local branch,
 	// checkout, and scratch-ref updates without rebasing or moving trunk again.
 	landedInTrunk bool
+	// rebasedOntoTrunk means the Fold scratch branch already sits on top of trunk.
+	// The caller resumes at the landing edge without resetting or rebasing it.
+	rebasedOntoTrunk bool
 }
 
 // rebaseContext hands the git work what it needs. manifest is the addressing
@@ -293,6 +298,8 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 				return foldCheckoutPlan{}, err
 			}
 		}
+	case foldScratchRebased:
+		plan.rebasedOntoTrunk = true
 	case foldScratchAmbiguous:
 		return foldCheckoutPlan{}, refuseAmbiguousFoldScratch(scratch, branch)
 	}
@@ -300,7 +307,7 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 	// A branch trunk already reaches has nothing to land: the rebase would drop every
 	// commit as already-upstream and the fast-forward would be a no-op, so without
 	// this the fold would report success having changed nothing.
-	if !plan.landedInTrunk && branchContainedInTrunk(td, trunkPath, branch, trunkBranch) {
+	if !plan.landedInTrunk && !plan.rebasedOntoTrunk && branchContainedInTrunk(td, trunkPath, branch, trunkBranch) {
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: %s is already contained in trunk (%s); nothing to fold", branch, trunkBranch)
 	}
 

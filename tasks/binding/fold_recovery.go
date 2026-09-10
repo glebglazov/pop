@@ -28,6 +28,9 @@ const (
 	// already reaches it, or trunk does — so it is the leftover of a fold that died
 	// after the fast-forward. Deleting it loses nothing.
 	foldScratchResidue
+	// foldScratchRebased: the scratch ref sits on top of trunk while the real branch
+	// does not reach it. The rebase finished, but the fast-forward did not.
+	foldScratchRebased
 	// foldScratchAmbiguous: a scratch-named ref carrying commits neither the branch
 	// nor trunk holds. Fold refuses it by name: it cannot say where that ref came
 	// from, and guessing means deleting work.
@@ -152,6 +155,9 @@ func classifyFoldScratch(td *tasks.Deps, parked bool, plan foldCheckoutPlan, scr
 	}
 	if refContains(td, plan.trunkPath, plan.trunkBranch, scratch) {
 		return foldScratchResidue
+	}
+	if refContains(td, plan.trunkPath, scratch, plan.trunkBranch) {
+		return foldScratchRebased
 	}
 	return foldScratchAmbiguous
 }

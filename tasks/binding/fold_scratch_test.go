@@ -291,6 +291,86 @@ func TestFoldRechecksTrunkImmediatelyBeforeTheFastForward(t *testing.T) {
 	}
 }
 
+func TestRebasedFoldRechecksTrunkImmediatelyBeforeTheFastForward(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		disturb func(t *testing.T, td *tasks.Deps, trunkPath string)
+		want    string
+	}{
+		{
+			name: "dirty",
+			disturb: func(t *testing.T, _ *tasks.Deps, trunkPath string) {
+				if err := os.WriteFile(filepath.Join(trunkPath, "trunk-dirt.txt"), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "Trunk worktree is dirty",
+		},
+		{
+			name: "live claim",
+			disturb: func(t *testing.T, td *tasks.Deps, trunkPath string) {
+				seedForeignCheckoutClaim(t, td, trunkPath, "trunk-holder")
+			},
+			want: "live claim",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := initAdoptRepo(t)
+			td := lifecycleTestDeps(t)
+			seedDoneTaskSet(t, td, repo, "set-store-"+strings.ReplaceAll(tc.name, " ", "-"))
+			wt := addLinkedWorktree(t, repo, "human-work")
+			writeFileCommit(t, wt, "feature.txt", "branch work\n", "branch work")
+			writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+			scratch := foldScratchBranch("human-work")
+			trunkBranch := CurrentBranch(td, repo)
+			runGitOutput(t, wt, "checkout", "-b", scratch, "human-work")
+			runGitOutput(t, wt, "rebase", trunkBranch)
+			cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+			trunkPath, _, err := ResolveTrunkPath(td, cfg, wt)
+			if err != nil {
+				t.Fatalf("resolve trunk: %v", err)
+			}
+
+			var disturbed atomic.Bool
+			var fastForwards atomic.Int32
+			inner := td.Git
+			td.Git = &interceptGit{
+				inner: inner,
+				onCommandInDir: func(dir string, args ...string) (string, error) {
+					out, err := inner.CommandInDir(dir, args...)
+					if err == nil && len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor" && args[2] == trunkBranch && args[3] == scratch && disturbed.CompareAndSwap(false, true) {
+						tc.disturb(t, td, trunkPath)
+					}
+					if len(args) >= 2 && args[0] == "merge" && args[1] == "--ff-only" {
+						fastForwards.Add(1)
+					}
+					return out, err
+				},
+			}
+
+			_, err = FoldCheckout(td, cfg, wt, FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want a refusal saying %q", err, tc.want)
+			}
+			if !disturbed.Load() {
+				t.Fatal("test did not reach the recovered landing edge")
+			}
+			if got := fastForwards.Load(); got != 0 {
+				t.Fatalf("fast-forward attempts = %d, want none", got)
+			}
+			if !branchExists(t, repo, scratch) {
+				t.Fatalf("refused recovery deleted scratch branch %s", scratch)
+			}
+		})
+	}
+}
+
 // Trunk moving under a fold costs the rebase, not the work: the scratch branch is
 // reset to the recorded tip and rebased again, so what lands is one copy of the
 // branch replayed onto the trunk that actually exists.

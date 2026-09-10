@@ -224,6 +224,42 @@ func fastForwardTrunk(td *tasks.Deps, trunkPath, branch string) error {
 	return err
 }
 
+// landRebasedFold resumes a fold whose scratch branch already sits on top of
+// trunk. It starts at the same trunk read and landing checks that follow a
+// first-run rebase, then crosses the Fold boundary and runs the shared tail.
+func landRebasedFold(td *tasks.Deps, ctx foldRebaseContext, scratch string) error {
+	trunkBefore, err := revParseHEAD(td, ctx.trunkPath)
+	if err != nil {
+		return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
+	}
+	if err := refuseTrunkUnfitToLand(td, ctx.trunkPath); err != nil {
+		return err
+	}
+	trunkStillBelowScratch, err := refContainsKnown(td, ctx.trunkPath, scratch, ctx.trunkBranch)
+	if err != nil {
+		return fmt.Errorf("fold refused: check whether %s is still rebased onto trunk: %w", scratch, err)
+	}
+	if !trunkStillBelowScratch {
+		return errTrunkMovedDuringFold
+	}
+
+	foldedTip, err := revParseRef(td, ctx.setPath, scratch)
+	if err != nil {
+		return fmt.Errorf("fold refused: read folded tip %s: %w", scratch, err)
+	}
+	if err := fastForwardTrunk(td, ctx.trunkPath, scratch); err != nil {
+		state, recoveryErr := classifyFailedFastForward(td, ctx, scratch, foldedTip, trunkBefore)
+		if recoveryErr != nil {
+			return fmt.Errorf("fold stopped after git could not report whether the failed fast-forward landed; the fold scratch branch %s is preserved so trunk is not unwound — retry when git can read the repository: %w", scratch, recoveryErr)
+		}
+		if state == failedFastForwardLanded {
+			return landFoldedBranch(td, ctx, scratch)
+		}
+		return fmt.Errorf("fold refused: could not fast-forward trunk onto %s; the rebased fold scratch branch %s is preserved: %w", ctx.setBranch, scratch, err)
+	}
+	return landFoldedBranch(td, ctx, scratch)
+}
+
 // refuseTrunkUnfitToLand is trunk's half of preflight, asked again on the edge of
 // the fast-forward. It refuses in preflight's own words, because a trunk that went
 // dirty or got claimed mid-fold is the same situation preflight already names.
