@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	runtimedebug "runtime/debug"
 	"sort"
@@ -946,15 +945,15 @@ func killTmuxSessionWith(mod tmuxmod.Tmux, name string) {
 }
 
 func executeProjectCustomCommand(command string, item *ui.Item) {
-	cmd := exec.Command("sh", "-c", command)
-	cmd.Env = append(os.Environ(),
+	executeProjectCustomCommandWith(defaultTmuxMod, command, item)
+}
+
+func executeProjectCustomCommandWith(mod tmuxmod.Tmux, command string, item *ui.Item) {
+	env := append(os.Environ(),
 		"POP_PATH="+item.Path,
 		"POP_NAME="+item.Name,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
+	if err := runHumanShellCommand(mod, command, "", env, os.Stdin, os.Stdout, os.Stderr); err != nil {
 		debug.Error("project: custom command %q: %v", command, err)
 		fmt.Fprintf(os.Stderr, "Custom command failed: %v\n", err)
 	}

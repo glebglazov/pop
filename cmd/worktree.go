@@ -878,10 +878,11 @@ func removeFromHistoryWith(d *history.Deps, path string) {
 }
 
 func executeCustomCommand(command string, item *ui.Item, ctx *project.RepoContext) {
-	cmd := exec.Command("sh", "-c", command)
+	executeCustomCommandWith(defaultTmuxMod, command, item, ctx)
+}
 
-	// Set environment variables
-	cmd.Env = append(os.Environ(),
+func executeCustomCommandWith(mod tmuxmod.Tmux, command string, item *ui.Item, ctx *project.RepoContext) {
+	env := append(os.Environ(),
 		"POP_PATH="+item.Path,
 		"POP_NAME="+filepath.Base(item.Path),
 		"POP_WORKTREE_PATH="+item.Path,
@@ -890,11 +891,7 @@ func executeCustomCommand(command string, item *ui.Item, ctx *project.RepoContex
 		"POP_REPO_ROOT="+ctx.GitRoot,
 	)
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	if err := cmd.Run(); err != nil {
+	if err := runHumanShellCommand(mod, command, "", env, os.Stdin, os.Stdout, os.Stderr); err != nil {
 		debug.Error("worktree: custom command %q: %v", command, err)
 		fmt.Fprintf(os.Stderr, "Custom command failed: %v\n", err)
 	}

@@ -63,6 +63,9 @@ cat "$FAKE_GRADE_REPLY"
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// Objective gate output is parsed. The gate must keep its bare shell even
+	// when the human's configured shell is unusable.
+	t.Setenv("SHELL", filepath.Join(root, "must-not-run-human-shell"))
 	for _, tc := range []struct{ name, reply, gate, status string }{
 		{"pass", "ITEM 1 MET: The file changes.\nITEM 2 NOT_MET: Compatibility was removed.\nQUALITY 4: Clear implementation.", "true", "graded"},
 		{"fail", "must not run", "printf 'gate failed'; exit 7", "gate_failed"},

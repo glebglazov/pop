@@ -41,6 +41,8 @@ type Tmux interface {
 	// With no socket configured it is whether $TMUX is set, identical to
 	// pre-socket-key pop.
 	InTmux() bool
+	// DefaultShell returns tmux's global default-shell option.
+	DefaultShell() (string, error)
 
 	// --- Work sessions (@pop_work_kind / @pop_work_id; glossary: Work session) ---
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/conventions"
+	shellcmd "github.com/glebglazov/pop/internal/shell"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -1702,7 +1702,7 @@ var taskOpenPager = func() (io.WriteCloser, func() error, error) {
 	if pager == "" {
 		pager = "less -F -R"
 	}
-	cmd := exec.Command("sh", "-c", pager)
+	cmd := shellcmd.Bare(pager)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	pw, err := cmd.StdinPipe()

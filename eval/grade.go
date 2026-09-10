@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	shellcmd "github.com/glebglazov/pop/internal/shell"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -216,7 +217,7 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	for i, command := range manifest.GateCommands {
 		opts.progress.line("Trial %s Objective gate started: %s", label, command)
 		stopWaiting = opts.progress.wait(label, fmt.Sprintf("Objective gate %d/%d", i+1, len(manifest.GateCommands)), 0)
-		cmd := exec.Command("sh", "-c", command)
+		cmd := shellcmd.Bare(command)
 		cmd.Dir = clone
 		output, err := cmd.CombinedOutput()
 		stopWaiting()

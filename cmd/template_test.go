@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
@@ -1145,7 +1146,7 @@ func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
 			combined = append(combined, "before_apply:"+command)
 			beforeApplyDirs = append(beforeApplyDirs, dir)
 			return nil
@@ -1195,7 +1196,7 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
 			ran = append(ran, command)
 			if dir != "/repo" {
 				t.Fatalf("before_apply cwd = %q, want session directory /repo", dir)
@@ -1237,7 +1238,7 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
 			return fmt.Errorf("boom")
 		},
 	}
@@ -1246,8 +1247,8 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from failing before_apply")
 	}
-	if !strings.Contains(err.Error(), "before_apply[0]") {
-		t.Fatalf("error = %q, want before_apply context", err.Error())
+	if got, want := err.Error(), `before_apply[0] "false" failed: boom`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
 	}
 	if windowCreated {
 		t.Fatal("no window should be realized after a before_apply failure")
@@ -1278,7 +1279,7 @@ func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 		Tmux:        f,
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
-		RunBeforeApply: func(command, dir string) error {
+		RunBeforeApply: func(_ tmuxmod.Tmux, command, dir string) error {
 			beforeApplyRan = true
 			if dir != "/repo/checkout" {
 				t.Fatalf("before_apply cwd = %q, want session directory %q", dir, "/repo/checkout")

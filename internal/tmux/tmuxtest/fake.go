@@ -31,6 +31,10 @@ type Fake struct {
 	// InTmux; it drives SwitchTarget's switch-vs-attach choice (ADR-0199).
 	Inside bool
 
+	// Shell and ShellErr are the arranged result of DefaultShell.
+	Shell    string
+	ShellErr error
+
 	// Switched, Attached and Killed record verb targets in call order so
 	// tests can assert which path ran.
 	Switched []string
@@ -210,6 +214,10 @@ func (f *Fake) Sessions() ([]tmux.SessionActivity, error) {
 func (f *Fake) HasSession(name string) bool {
 	_, ok := f.Live[name]
 	return ok
+}
+
+func (f *Fake) DefaultShell() (string, error) {
+	return f.Shell, f.ShellErr
 }
 
 func (f *Fake) NewSession(name, dir string) error {

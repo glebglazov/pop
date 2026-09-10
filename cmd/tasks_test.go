@@ -1686,6 +1686,22 @@ func TestTaskStreamRawNonTTYBypassesPager(t *testing.T) {
 	}
 }
 
+func TestTaskOpenPagerIgnoresHumanShell(t *testing.T) {
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "must-not-run-human-shell"))
+	t.Setenv("PAGER", "cat >/dev/null")
+
+	pager, done, err := taskOpenPager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(pager, "parsed document output"); err != nil {
+		t.Fatal(err)
+	}
+	if err := done(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTaskStreamTTYPipesThroughPager(t *testing.T) {
 	_, _ = setupStreamCmdFixture(t)
 	resetTaskFlags()

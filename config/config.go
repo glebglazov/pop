@@ -41,7 +41,7 @@ var defaultDeps = DefaultDeps()
 type UserDefinedCommand struct {
 	Key     string `toml:"key" desc:"Key binding that triggers this command (e.g. \"ctrl-l\")."`
 	Label   string `toml:"label" desc:"Display label shown in the picker hint bar."`
-	Command string `toml:"command" desc:"Shell command to execute."`
+	Command string `toml:"command" desc:"Shell command to execute in the Human shell, with the human's functions and aliases available."`
 	Exit    bool   `toml:"exit" desc:"Exit the picker after running the command."`
 }
 
@@ -421,7 +421,7 @@ type Workbench struct {
 	// They run on every apply, including a reapply over a live session — the
 	// caller owns idempotency. This is side-effecting commands only, not
 	// shell-environment propagation: exported vars would not reach sibling panes.
-	BeforeApply []string          `toml:"before_apply" desc:"Shell commands run once before realizing windows (array)."`
+	BeforeApply []string          `toml:"before_apply" desc:"Shell commands run in the Human shell before realizing windows, with the human's functions and aliases available (array)."`
 	Windows     []WorkbenchWindow `toml:"windows" desc:"Ordered tmux windows ([[workbenches.windows]] tables)."`
 }
 

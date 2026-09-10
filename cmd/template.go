@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -23,7 +22,7 @@ type templateRuntimeDeps struct {
 	ErrOut      io.Writer
 	// RunBeforeApply runs one before_apply shell command with cwd = dir
 	// (the session directory). Injected so tests can observe ordering and cwd.
-	RunBeforeApply func(command, dir string) error
+	RunBeforeApply func(mod tmuxmod.Tmux, command, dir string) error
 }
 
 func defaultTemplateRuntimeDeps() templateRuntimeDeps {
@@ -47,13 +46,8 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 // runBeforeApplyCommand runs a single before_apply shell command synchronously
 // with cwd = dir (the session directory), streaming its output to the user's
 // terminal. It is the production implementation of templateRuntimeDeps.RunBeforeApply.
-func runBeforeApplyCommand(command, dir string) error {
-	cmd := exec.Command("sh", "-c", command)
-	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
+func runBeforeApplyCommand(mod tmuxmod.Tmux, command, dir string) error {
+	return runHumanShellCommand(mod, command, dir, os.Environ(), os.Stdin, os.Stdout, os.Stderr)
 }
 
 var workbenchCmd = &cobra.Command{
@@ -195,7 +189,7 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 		if d.RunBeforeApply == nil {
 			break
 		}
-		if err := d.RunBeforeApply(command, dir); err != nil {
+		if err := d.RunBeforeApply(d.Tmux, command, dir); err != nil {
 			return fmt.Errorf("before_apply[%d] %q failed: %w", i, command, err)
 		}
 	}

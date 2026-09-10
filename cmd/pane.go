@@ -17,6 +17,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
+	shellcmd "github.com/glebglazov/pop/internal/shell"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
@@ -964,7 +965,7 @@ func ollamaRecipe(model string) topicRecipe {
 func shellRecipe(command string) topicRecipe {
 	return topicRecipe{
 		build: func(_ string, payload []byte, args []string) ([]string, []byte) {
-			return append([]string{"sh", "-c", command}, args...), payload
+			return append(shellcmd.BareArgs(command), args...), payload
 		},
 		parse: plainTopicResult,
 	}
