@@ -684,6 +684,48 @@ func TestFoldConflictVerifyFailStopsFold(t *testing.T) {
 	_ = trunkBefore
 }
 
+func TestFoldConflictVerifyInterruptStillStopsFold(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-vinterrupt")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-vinterrupt",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-vinterrupt", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil {
+		t.Fatal("want conflict")
+	}
+
+	err = tasks.HandleFoldConflict(td, cfg, tasks.FoldConflictContext{
+		SetID:       "set-vinterrupt",
+		RuntimePath: b.RuntimePath,
+		SetBranch:   b.Branch,
+		TrunkBranch: CurrentBranch(td, repo),
+		TrunkPath:   repo,
+	}, tasks.FoldConflictAssistanceOptions{
+		In:  strings.NewReader("4\n"),
+		Out: io.Discard,
+		RunVerifier: func(string) (string, error) {
+			return "", &tasks.ExitError{Code: tasks.ExitInterrupted, Err: errors.New("interrupted")}
+		},
+	})
+	var exit *tasks.ExitError
+	if !errors.As(err, &exit) || exit.Code != tasks.ExitInterrupted {
+		t.Fatalf("interrupt outside the landing gate = %v, want ExitInterrupted", err)
+	}
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("interrupt outside the landing gate must leave the rebase parked")
+	}
+}
+
 func TestFoldConflictInteractiveDeclineLeavesRebaseInProgress(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)

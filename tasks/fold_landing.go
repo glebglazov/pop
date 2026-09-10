@@ -59,6 +59,10 @@ func runFoldLandingGate(d *Deps, gate *AttendedSession, ctx FoldConflictContext,
 			return nil
 		case "2":
 			if err := runFoldSetVerify(d, gate.Value(), ctx, opts, out); err != nil {
+				if isInterrupted(err) {
+					reportTreeStableRefusal(out, "Verify set", err)
+					continue
+				}
 				fmt.Fprintf(outputFor(out), "Verify set: %v\n", err)
 			}
 		case "3":

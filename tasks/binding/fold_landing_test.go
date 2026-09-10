@@ -140,6 +140,105 @@ func TestFoldLandingVerifyReturnsWithBadge(t *testing.T) {
 	}
 }
 
+func TestFoldLandingInterruptedVerifyReturnsToFreshGateAndReleasesClaim(t *testing.T) {
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-interrupted-verify")
+	wt := addLinkedWorktree(t, repo, "human-work")
+	writeFileCommit(t, wt, "feature.txt", "work\n", "branch work")
+	writeFileCommit(t, repo, "trunk.txt", "trunk\n", "trunk work")
+	scratch := foldScratchBranch("human-work")
+	trunkBranch := CurrentBranch(td, repo)
+	runGitOutput(t, wt, "checkout", "-b", scratch)
+	runGitOutput(t, wt, "rebase", trunkBranch)
+	branchBefore := refAt(t, wt, "human-work")
+	trunkBefore := refAt(t, repo, "HEAD")
+
+	var out strings.Builder
+	var claimDuringVerify bool
+	err := tasks.HandleFoldLanding(td, &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}, tasks.FoldConflictContext{
+		SetID: "set-interrupted-verify", RuntimePath: wt, TrunkPath: repo,
+		SetBranch: "human-work", TrunkBranch: trunkBranch, ScratchBranch: scratch,
+	}, tasks.FoldConflictAssistanceOptions{In: strings.NewReader("2\n\n"), Out: &out,
+		RunVerifier: func(string) (string, error) {
+			claim, claimErr := tasks.ReadCheckoutClaim(td, wt)
+			claimDuringVerify = claimErr == nil && claim != nil
+			return "", &tasks.ExitError{Code: tasks.ExitInterrupted, Err: errors.New("interrupted")}
+		},
+	})
+	if err != nil {
+		t.Fatalf("interrupt then land: %v\n%s", err, &out)
+	}
+	if !claimDuringVerify {
+		t.Fatal("the interrupted Verifier did not hold the Checkout claim")
+	}
+	if claim, claimErr := tasks.ReadCheckoutClaim(td, wt); claimErr != nil || claim != nil {
+		t.Fatalf("the interrupted Verifier left its Checkout claim behind: claim=%#v err=%v", claim, claimErr)
+	}
+	if strings.Count(out.String(), "Fold landing gate:") != 2 || !strings.Contains(out.String(), "Verify set cancelled — back to the menu.") {
+		t.Fatalf("interrupt did not return to the landing gate:\n%s", &out)
+	}
+	if refAt(t, repo, "HEAD") != trunkBefore || refAt(t, wt, "human-work") != branchBefore || !branchExists(t, repo, scratch) {
+		t.Fatal("the interrupted verification did not leave the fold in hand")
+	}
+
+	ctx := foldRebaseContext{
+		setID: "set-interrupted-verify", setPath: wt, trunkPath: repo,
+		setBranch: "human-work", trunkBranch: trunkBranch,
+	}
+	if err := landRebasedFold(td, nil, FoldOptions{In: tasks.NonInteractiveReader{}}, io.Discard, ctx, scratch); err != nil {
+		t.Fatalf("land after interrupted verification: %v", err)
+	}
+	if refAt(t, repo, "HEAD") != refAt(t, wt, "human-work") || branchExists(t, repo, scratch) {
+		t.Fatal("landing after interrupted verification did not complete the fold")
+	}
+}
+
+func TestFoldLandingInterruptedVerifyRedrawsMovedTipAndRechecksTrunk(t *testing.T) {
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-interrupted-move")
+	wt := addLinkedWorktree(t, repo, "human-work")
+	writeFileCommit(t, wt, "feature.txt", "work\n", "branch work")
+	writeFileCommit(t, repo, "trunk.txt", "trunk\n", "trunk work")
+	scratch := foldScratchBranch("human-work")
+	trunkBranch := CurrentBranch(td, repo)
+	runGitOutput(t, wt, "checkout", "-b", scratch)
+	runGitOutput(t, wt, "rebase", trunkBranch)
+
+	var movedTrunk string
+	var out strings.Builder
+	err := tasks.HandleFoldLanding(td, &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}, tasks.FoldConflictContext{
+		SetID: "set-interrupted-move", RuntimePath: wt, TrunkPath: repo,
+		SetBranch: "human-work", TrunkBranch: trunkBranch, ScratchBranch: scratch,
+	}, tasks.FoldConflictAssistanceOptions{In: strings.NewReader("2\n\n"), Out: &out,
+		RunVerifier: func(string) (string, error) {
+			writeFileCommit(t, repo, "moved.txt", "moved\n", "trunk moved during verify")
+			movedTrunk = refAt(t, repo, "HEAD")
+			return "", &tasks.ExitError{Code: tasks.ExitInterrupted, Err: errors.New("interrupted")}
+		},
+	})
+	if err != nil {
+		t.Fatalf("interrupt then choose land: %v\n%s", err, &out)
+	}
+	movedEvidence := strings.TrimSpace(runGitOutput(t, repo, "log", "-1", "--format=%h %s", movedTrunk))
+	if !strings.Contains(out.String(), trunkBranch+" — "+movedEvidence) {
+		t.Fatalf("redrawn gate did not re-read moved trunk evidence:\n%s", &out)
+	}
+
+	ctx := foldRebaseContext{
+		setID: "set-interrupted-move", setPath: wt, trunkPath: repo,
+		setBranch: "human-work", trunkBranch: trunkBranch,
+	}
+	err = landRebasedFold(td, nil, FoldOptions{In: tasks.NonInteractiveReader{}}, io.Discard, ctx, scratch)
+	if !errors.Is(err, errTrunkMovedDuringFold) {
+		t.Fatalf("landing did not re-check moved trunk: %v", err)
+	}
+	if refAt(t, repo, "HEAD") != movedTrunk || !branchExists(t, repo, scratch) {
+		t.Fatal("moved-trunk refusal did not preserve trunk and the fold scratch branch")
+	}
+}
+
 func TestCleanFoldHasNoLandingGate(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
