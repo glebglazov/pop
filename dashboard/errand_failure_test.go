@@ -25,7 +25,7 @@ func TestDashboardShowsErrandFailurePointerAndVerbs(t *testing.T) {
 	}
 	checkout := filepath.Join(t.TempDir(), "feature")
 	outputPath := filepath.Join(t.TempDir(), "removal-20260909T120000Z.md")
-	if err := s.QueueCheckoutRemoval(store.CheckoutRemoval{Path: checkout, WorkingPath: filepath.Dir(checkout)}, time.Now()); err != nil {
+	if _, err := s.QueueCheckoutRemoval(store.CheckoutRemoval{Path: checkout, WorkingPath: filepath.Dir(checkout)}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if started, err := s.StartErrand(checkout, outputPath); err != nil || !started {

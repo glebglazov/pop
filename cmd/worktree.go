@@ -355,6 +355,8 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 
 	iconLegends := []ui.IconLegend{
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
+		{Icon: iconErrandInFlight, Desc: "Checkout removal in flight"},
+		{Icon: iconErrandFailed, Desc: "Checkout removal failed"},
 		{Icon: iconBoundManaged, Desc: "Managed worktree (Task set bound)"},
 		{Icon: iconUnboundManaged, Desc: "Unbound managed worktree (no Task set bound)"},
 		{Icon: iconHalfRemoved, Desc: "Half-removed checkout"},
@@ -440,14 +442,14 @@ func launchWorktreeFold(mod tmuxmod.Tmux, item *ui.Item) error {
 }
 
 // buildWorktreeItems converts worktrees to picker items, applying the session
-// icon and the managed-worktree marker. The marker renders all three states the
-// classifier reports — bound managed, unbound managed, and (as a blank column)
-// an ordinary human worktree — so the picker never conflates a live managed
-// checkout with one a human made. The classification is the one binding-store
-// read this surface makes (ADR-0152) — bounded to here; it never runs during
-// project expansion.
+// icon and marker. Errands are read once and indexed before the loop. Their
+// marker outranks the managed-worktree classification and the half-removed
+// marker because the removal is repairing those states. The managed marker
+// renders bound, unbound, and ordinary states, so the picker never conflates a
+// live managed checkout with one a human made (ADR-0152).
 func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, sessionActivity map[string]int64, td *tasks.Deps) []ui.Item {
 	items := make([]ui.Item, len(worktrees))
+	errands := worktreeErrandStates(td)
 	for i, wt := range worktrees {
 		items[i] = ui.Item{
 			Name:    wt.Name,
@@ -457,6 +459,14 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 		sessionName := project.TmuxSessionNameAt(ctx, wt.Path, wt.Name)
 		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
+		}
+		switch errands[filepath.Clean(wt.Path)] {
+		case store.ErrandQueued, store.ErrandRunning:
+			items[i].Marker = iconErrandInFlight
+			continue
+		case store.ErrandFailed:
+			items[i].Marker = iconErrandFailed
+			continue
 		}
 		if wt.Prunable {
 			items[i].Marker = iconHalfRemoved
@@ -474,6 +484,22 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 		}
 	}
 	return items
+}
+
+func worktreeErrandStates(td *tasks.Deps) map[string]string {
+	states := make(map[string]string)
+	s, ok, err := td.Store(false)
+	if err != nil || !ok {
+		return states
+	}
+	errands, err := s.ListErrands()
+	if err != nil {
+		return states
+	}
+	for _, e := range errands {
+		states[filepath.Clean(e.Path)] = e.State
+	}
+	return states
 }
 
 // createWorktree runs the interactive create flow (ADR-0076): pick a branch,
@@ -778,25 +804,31 @@ func switchTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
 
 func deleteWorktree(workingPath, path string) {
 	hd := cmdHistoryDeps()
-	if err := deleteWorktreeWith(hd, workingPath, path, ensureErrandHalf); err != nil {
+	queued, err := deleteWorktreeWith(hd, workingPath, path, ensureErrandHalf)
+	if err != nil {
 		debug.Error("deleteWorktree %s: %v", path, err)
 		fmt.Fprintf(os.Stderr, "Failed to queue or start checkout removal: %s\n%v\n", path, err)
+		return
+	}
+	if !queued {
+		fmt.Fprintf(os.Stderr, "Checkout removal already in flight: %s\n", path)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "Queued checkout removal: %s\n", path)
 }
 
-// deleteWorktreeWith records the request before starting the half that performs
-// it, so a half that starts and reads the queue immediately still finds it.
-func deleteWorktreeWith(hd *history.Deps, workingPath, path string, ensure func(*tasks.Deps) error) error {
+// deleteWorktreeWith reports whether it recorded a request before starting the
+// half that performs it. A half that starts immediately still finds the row.
+func deleteWorktreeWith(hd *history.Deps, workingPath, path string, ensure func(*tasks.Deps) error) (bool, error) {
 	subject := store.CheckoutRemoval{Path: path, WorkingPath: workingPath}
-	if err := errand.QueueCheckoutRemoval(hd.Tasks, subject); err != nil {
-		return err
+	queued, err := errand.QueueCheckoutRemoval(hd.Tasks, subject)
+	if err != nil || !queued {
+		return queued, err
 	}
 	if err := ensure(hd.Tasks); err != nil {
-		return fmt.Errorf("start Errand half: %w", err)
+		return false, fmt.Errorf("start Errand half: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // ensureErrandHalf starts the picker-authorized half through the same detached

@@ -24,7 +24,7 @@ func TestErrandFailureWorkKindRetriesAndDismissesWithoutCarryingOutput(t *testin
 	}
 	checkout := "/repo/feature"
 	subject := store.CheckoutRemoval{Path: checkout, WorkingPath: "/repo", Branch: "feature", Force: true}
-	if err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
+	if _, err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	outputPath := filepath.Join(t.TempDir(), "removal.md")
@@ -102,7 +102,7 @@ func TestSuccessfulErrandHasNoWorkContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := store.CheckoutRemoval{Path: "/repo/feature", WorkingPath: "/repo"}
-	if err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
+	if _, err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if started, err := s.StartErrand(subject.Path, "/output.md"); err != nil || !started {

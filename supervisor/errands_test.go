@@ -75,7 +75,7 @@ func TestRunningDaemonWakesForRemovalAndKeepsJournal(t *testing.T) {
 		t.Fatalf("full daemon liveness = %+v, want both halves", live)
 	}
 	// A one-hour Work interval must not delay a human-requested Errand.
-	if err := errand.QueueCheckoutRemoval(td, store.CheckoutRemoval{Path: checkout, WorkingPath: repo}); err != nil {
+	if _, err := errand.QueueCheckoutRemoval(td, store.CheckoutRemoval{Path: checkout, WorkingPath: repo}); err != nil {
 		t.Fatal(err)
 	}
 	waitNotice(fmt.Sprintf("errand: removed checkout %s", checkout))
@@ -129,7 +129,7 @@ func TestErrandHalfRunsRemovalWithoutStartingWorkHalf(t *testing.T) {
 	if live := ReadLiveness(td); !live.Errands || live.Work {
 		t.Fatalf("liveness = %+v, want only Errands", live)
 	}
-	if err := errand.QueueCheckoutRemoval(td, store.CheckoutRemoval{Path: checkout, WorkingPath: repo}); err != nil {
+	if _, err := errand.QueueCheckoutRemoval(td, store.CheckoutRemoval{Path: checkout, WorkingPath: repo}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor("errand: removed checkout")

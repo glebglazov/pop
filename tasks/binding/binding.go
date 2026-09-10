@@ -423,9 +423,10 @@ func ProvisionWorktree(d *tasks.Deps, worktreesRoot, projectPath, setID, startPo
 // TeardownWorktree queues removal of a provisioned checkout and its branch.
 // force permits deletion of an unmerged branch. Adopted checkouts stay intact.
 func TeardownWorktree(d *tasks.Deps, workingPath, runtimePath, branch string, force bool) error {
-	return errand.QueueCheckoutRemoval(d, store.CheckoutRemoval{
+	_, err := errand.QueueCheckoutRemoval(d, store.CheckoutRemoval{
 		Path: runtimePath, WorkingPath: workingPath, Branch: branch, Force: force,
 	})
+	return err
 }
 
 // SafeComponent sanitises a Task set identifier into a filesystem-safe path

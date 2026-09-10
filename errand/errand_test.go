@@ -25,7 +25,7 @@ func TestRemovalFailureRetryAndJournal(t *testing.T) {
 		t.Fatalf("worktree: %v: %s", err, out)
 	}
 	subject := store.CheckoutRemoval{Path: checkout, WorkingPath: repo, Branch: "feature", Force: true}
-	if err := errand.QueueCheckoutRemoval(td, subject); err != nil {
+	if _, err := errand.QueueCheckoutRemoval(td, subject); err != nil {
 		t.Fatal(err)
 	}
 	s, _, err := td.Store(false)
@@ -64,10 +64,10 @@ func TestRemovalFailureRetryAndJournal(t *testing.T) {
 	if attempts != firstAttempts {
 		t.Fatal("failed removal retried automatically")
 	}
-	if err := errand.QueueCheckoutRemoval(td, subject); err != nil {
+	if _, err := errand.QueueCheckoutRemoval(td, subject); err != nil {
 		t.Fatal(err)
 	}
-	if err := errand.QueueCheckoutRemoval(td, subject); err != nil {
+	if _, err := errand.QueueCheckoutRemoval(td, subject); err != nil {
 		t.Fatal(err)
 	}
 	rows, err = s.ListErrands()
@@ -109,7 +109,7 @@ func TestInterruptedRemovalIsNotRetried(t *testing.T) {
 	td := queuetest.DataDeps(t)
 	checkout := t.TempDir()
 	subject := store.CheckoutRemoval{Path: checkout, WorkingPath: t.TempDir()}
-	if err := errand.QueueCheckoutRemoval(td, subject); err != nil {
+	if _, err := errand.QueueCheckoutRemoval(td, subject); err != nil {
 		t.Fatal(err)
 	}
 	s, _, err := td.Store(false)

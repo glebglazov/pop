@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
+	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
 )
 
@@ -30,6 +31,8 @@ const (
 	iconUnboundManaged = "U"
 	iconBoundManaged   = "M"
 	iconHalfRemoved    = "!"
+	iconErrandInFlight = work.LiveDrainGlyph
+	iconErrandFailed   = "×"
 	// Work-session badges, one per Work kind. A session hosting a Work container
 	// is a different animal from a project's session — you are in it to decide,
 	// drain or fire something, not to sit in a checkout — so it gets its own

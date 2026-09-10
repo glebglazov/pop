@@ -8,14 +8,14 @@ import (
 func TestErrandRunningClaimSurvivesDuplicateRequest(t *testing.T) {
 	s := openTestStore(t)
 	subject := CheckoutRemoval{Path: "/checkout", WorkingPath: "/repo", Branch: "feature", Force: true}
-	if err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
+	if _, err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if started, err := s.StartErrand(subject.Path, "/output.md"); err != nil || !started {
 		t.Fatalf("start: %v, %v", started, err)
 	}
-	if err := s.QueueCheckoutRemoval(CheckoutRemoval{Path: subject.Path, WorkingPath: "/different"}, time.Now()); err != nil {
-		t.Fatal(err)
+	if queued, err := s.QueueCheckoutRemoval(CheckoutRemoval{Path: subject.Path, WorkingPath: "/different"}, time.Now()); err != nil || queued {
+		t.Fatalf("duplicate queue = %v, %v", queued, err)
 	}
 	rows, err := s.ListErrands()
 	if err != nil || len(rows) != 1 || rows[0].State != ErrandRunning || rows[0].CheckoutRemoval != subject || rows[0].OutputPath != "/output.md" {
@@ -40,7 +40,7 @@ func TestFailedErrandCanBeRetriedOrDismissed(t *testing.T) {
 	s := openTestStore(t)
 	subject := CheckoutRemoval{Path: "/checkout", WorkingPath: "/repo"}
 	fail := func() {
-		if err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
+		if _, err := s.QueueCheckoutRemoval(subject, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		if started, err := s.StartErrand(subject.Path, "/output.md"); err != nil || !started {

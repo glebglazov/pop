@@ -19,6 +19,7 @@ import (
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
@@ -381,6 +382,17 @@ func TestBuildWorktreeItemsMarksUnboundManagedWorktree(t *testing.T) {
 	if items[0].Marker != iconUnboundManaged {
 		t.Errorf("Marker = %q, want %q", items[0].Marker, iconUnboundManaged)
 	}
+	s, _, err := td.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueCheckoutRemoval(store.CheckoutRemoval{Path: b.RuntimePath, WorkingPath: repo}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	items = buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, map[string]int64{}, td)
+	if items[0].Marker != iconErrandInFlight {
+		t.Errorf("queued removal marker = %q, want %q", items[0].Marker, iconErrandInFlight)
+	}
 }
 
 // TestBuildWorktreeItemsDistinguishesBoundManagedWorktree pins the third marker
@@ -420,6 +432,17 @@ func TestBuildWorktreeItemsDistinguishesBoundManagedWorktree(t *testing.T) {
 	if items[1].Marker != "" {
 		t.Errorf("ordinary worktree: Marker = %q, want empty", items[1].Marker)
 	}
+	s, _, err := td.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueCheckoutRemoval(store.CheckoutRemoval{Path: b.RuntimePath, WorkingPath: repo}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	items = buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, map[string]int64{}, td)
+	if items[0].Marker != iconErrandInFlight {
+		t.Errorf("bound removal marker = %q, want %q", items[0].Marker, iconErrandInFlight)
+	}
 }
 
 func TestBuildWorktreeItemsMarksHalfRemovedCheckout(t *testing.T) {
@@ -432,6 +455,47 @@ func TestBuildWorktreeItemsMarksHalfRemovedCheckout(t *testing.T) {
 
 	if items[0].Marker != iconHalfRemoved {
 		t.Errorf("Marker = %q, want %q", items[0].Marker, iconHalfRemoved)
+	}
+}
+
+func TestBuildWorktreeItemsMarksRemovalErrands(t *testing.T) {
+	t.Parallel()
+	td := isolatedWorktreeTestTasksDeps(t)
+	s, _, err := td.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := "/repo/queued"
+	running := "/repo/running"
+	failed := "/repo/failed"
+	for _, path := range []string{queued, running, failed} {
+		if _, err := s.QueueCheckoutRemoval(store.CheckoutRemoval{Path: path, WorkingPath: "/repo"}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if started, err := s.StartErrand(running, "/tmp/running.md"); err != nil || !started {
+		t.Fatalf("start running removal: %v, %v", started, err)
+	}
+	if started, err := s.StartErrand(failed, "/tmp/failed.md"); err != nil || !started {
+		t.Fatalf("start failed removal: %v, %v", started, err)
+	}
+	if err := s.FailErrand(failed); err != nil {
+		t.Fatal(err)
+	}
+
+	worktrees := []project.Worktree{
+		{Name: "queued", Path: queued, Prunable: true},
+		{Name: "running", Path: running},
+		{Name: "failed", Path: failed},
+		{Name: "half-removed", Path: "/repo/half-removed", Prunable: true},
+		{Name: "ordinary", Path: "/repo/ordinary"},
+	}
+	items := buildWorktreeItems(&project.RepoContext{}, worktrees, map[string]int64{}, td)
+	want := []string{iconErrandInFlight, iconErrandInFlight, iconErrandFailed, iconHalfRemoved, ""}
+	for i := range items {
+		if items[i].Marker != want[i] {
+			t.Errorf("%s marker = %q, want %q", items[i].Name, items[i].Marker, want[i])
+		}
 	}
 }
 
@@ -496,7 +560,7 @@ func TestDeleteWorktreeWithRemovesDirectoryAdministrationAndHistory(t *testing.T
 			return "", nil
 		}},
 	}
-	if err := deleteWorktreeWith(hd, "/repo", checkout, func(*tasks.Deps) error { return nil }); err != nil {
+	if _, err := deleteWorktreeWith(hd, "/repo", checkout, func(*tasks.Deps) error { return nil }); err != nil {
 		t.Fatalf("delete checkout: %v", err)
 	}
 
@@ -543,11 +607,52 @@ func TestPickerRemovalQueuesBeforeStartingErrandHalf(t *testing.T) {
 		}
 		return nil
 	}
-	if err := deleteWorktreeWith(hd, "/repo", checkout, ensure); err != nil {
+	if _, err := deleteWorktreeWith(hd, "/repo", checkout, ensure); err != nil {
 		t.Fatal(err)
 	}
 	if !started {
 		t.Fatal("picker did not start the Errand half")
+	}
+}
+
+func TestPickerRemovalReportsDuplicateAndRetriesFailure(t *testing.T) {
+	t.Parallel()
+	hd := historyTestDeps(t)
+	checkout := "/repo/feature"
+	starts := 0
+	ensure := func(*tasks.Deps) error {
+		starts++
+		return nil
+	}
+	queued, err := deleteWorktreeWith(hd, "/repo", checkout, ensure)
+	if err != nil || !queued {
+		t.Fatalf("first queue = %v, %v", queued, err)
+	}
+	queued, err = deleteWorktreeWith(hd, "/repo", checkout, ensure)
+	if err != nil || queued {
+		t.Fatalf("duplicate queue = %v, %v", queued, err)
+	}
+	if starts != 1 {
+		t.Fatalf("Errand half starts = %d, want 1", starts)
+	}
+
+	s, ok, err := hd.Tasks.Store(false)
+	if err != nil || !ok {
+		t.Fatalf("open store = %v, %v", ok, err)
+	}
+	if started, err := s.StartErrand(checkout, "/tmp/removal.md"); err != nil || !started {
+		t.Fatalf("start removal: %v, %v", started, err)
+	}
+	if err := s.FailErrand(checkout); err != nil {
+		t.Fatal(err)
+	}
+	queued, err = deleteWorktreeWith(hd, "/repo", checkout, ensure)
+	if err != nil || !queued {
+		t.Fatalf("failed retry = %v, %v", queued, err)
+	}
+	rows, err := s.ListErrands()
+	if err != nil || len(rows) != 1 || rows[0].State != store.ErrandQueued {
+		t.Fatalf("retried removal = %+v, %v", rows, err)
 	}
 }
 

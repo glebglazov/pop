@@ -24,17 +24,21 @@ type Errand struct {
 	OutputPath string
 }
 
-// QueueCheckoutRemoval replaces a failed request. Repeated requests while the
-// subject is queued or running cannot schedule a second destructive attempt.
-func (s *Store) QueueCheckoutRemoval(subject CheckoutRemoval, at time.Time) error {
-	_, err := s.db.Exec(`INSERT INTO errands(path, working_path, branch, force, state, queued_at)
+// QueueCheckoutRemoval reports whether it queued the subject. It replaces a
+// failed request, while repeated queued or running requests change nothing.
+func (s *Store) QueueCheckoutRemoval(subject CheckoutRemoval, at time.Time) (bool, error) {
+	result, err := s.db.Exec(`INSERT INTO errands(path, working_path, branch, force, state, queued_at)
 		VALUES (?, ?, ?, ?, 'queued', ?)
 		ON CONFLICT(path) DO UPDATE SET working_path=excluded.working_path,
 		branch=excluded.branch, force=excluded.force, state='queued',
 		queued_at=excluded.queued_at, output_path=''
 		WHERE errands.state='failed'`, subject.Path, subject.WorkingPath, subject.Branch,
 		boolToInt(subject.Force), at.UTC().Format(timeLayout))
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
 }
 
 func (s *Store) ListErrands() ([]Errand, error) {

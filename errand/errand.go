@@ -16,24 +16,29 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-func QueueCheckoutRemoval(td *tasks.Deps, subject store.CheckoutRemoval) error {
+// QueueCheckoutRemoval reports whether it queued and woke the Errand half.
+func QueueCheckoutRemoval(td *tasks.Deps, subject store.CheckoutRemoval) (bool, error) {
 	if !filepath.IsAbs(subject.Path) || !filepath.IsAbs(subject.WorkingPath) {
-		return fmt.Errorf("checkout removal requires absolute paths")
+		return false, fmt.Errorf("checkout removal requires absolute paths")
 	}
 	subject.Path = filepath.Clean(subject.Path)
 	subject.WorkingPath = filepath.Clean(subject.WorkingPath)
 	if subject.Path == subject.WorkingPath || subject.Path == string(filepath.Separator) {
-		return fmt.Errorf("checkout removal requires a separate Git working path")
+		return false, fmt.Errorf("checkout removal requires a separate Git working path")
 	}
 	s, _, err := td.Store(true)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := s.QueueCheckoutRemoval(subject, td.Now()); err != nil {
-		return err
+	queued, err := s.QueueCheckoutRemoval(subject, td.Now())
+	if err != nil {
+		return false, err
+	}
+	if !queued {
+		return false, nil
 	}
 	wake(td)
-	return nil
+	return true, nil
 }
 
 // Recover runs only after the daemon holds its exclusive lock. A running row
