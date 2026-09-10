@@ -31,6 +31,8 @@ const (
 	iconUnboundManaged = "U"
 	iconBoundManaged   = "M"
 	iconHalfRemoved    = "!"
+	// The in-flight marker is the working spinner's stand-in frame: the picker
+	// animates that column, so this static form is what the legend shows.
 	iconErrandInFlight = work.LiveDrainGlyph
 	iconErrandFailed   = "×"
 	// Work-session badges, one per Work kind. A session hosting a Work container

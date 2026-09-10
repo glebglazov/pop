@@ -820,8 +820,10 @@ func deleteWorktree(workingPath, path string) {
 	fmt.Fprintf(os.Stderr, "Queued checkout removal: %s\n", path)
 }
 
-// deleteWorktreeWith reports whether it recorded a request before starting the
-// half that performs it. A half that starts immediately still finds the row.
+// deleteWorktreeWith records the request before starting the half that performs
+// it, so a half that starts and reads the queue immediately still finds it. It
+// reports whether the request was newly recorded: a removal already queued or
+// running is left alone rather than started a second time.
 func deleteWorktreeWith(hd *history.Deps, workingPath, path string, ensure func(*tasks.Deps) error) (bool, error) {
 	subject := store.CheckoutRemoval{Path: path, WorkingPath: workingPath}
 	queued, err := errand.QueueCheckoutRemoval(hd.Tasks, subject)

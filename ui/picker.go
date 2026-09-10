@@ -23,7 +23,7 @@ type Item struct {
 	Context     string // Additional context (e.g., branch name)
 	Icon        string // Optional icon displayed to the left of name
 	Marker      string // Optional leading marker, independent of Icon (e.g. Unbound managed worktree)
-	Animated    bool   // Marker uses the shared working-spinner frames
+	Animated    bool   // Run the marker column as the shared working-spinner frames, in place of Marker
 	SessionName string // Pre-computed tmux session name
 
 	// Depth is how deep the row sits in a nested list: 0 for a top-level row, 1

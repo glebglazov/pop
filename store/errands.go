@@ -25,7 +25,8 @@ type Errand struct {
 }
 
 // QueueCheckoutRemoval reports whether it queued the subject. It replaces a
-// failed request, while repeated queued or running requests change nothing.
+// failed request; a request repeated while the subject is queued or running
+// changes nothing, so it cannot schedule a second destructive attempt.
 func (s *Store) QueueCheckoutRemoval(subject CheckoutRemoval, at time.Time) (bool, error) {
 	result, err := s.db.Exec(`INSERT INTO errands(path, working_path, branch, force, state, queued_at)
 		VALUES (?, ?, ?, ?, 'queued', ?)
