@@ -58,6 +58,9 @@ type GateMenuSpec struct {
 	Preamble []string
 	Items    []GateMenuItem
 	FocusKey string
+	// RequireTypedChoice disables Enter selection. Use it when no action may be
+	// inferred from the highlighted row.
+	RequireTypedChoice bool
 	// Footnote is an optional dim line under the choices (e.g. force-quit hint).
 	Footnote string
 	// AttendedLabel is the shared one-line render of the attended entry the
@@ -181,6 +184,9 @@ func (m *GateMenu) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.moveCursor(1)
 		return nil
 	case key.Matches(msg, gateMenuKeys.Submit):
+		if m.spec.RequireTypedChoice {
+			return nil
+		}
 		return m.selectIndex(m.cursor)
 	case m.currentPickable() && key.Matches(msg, gateMenuKeys.PickAttended):
 		it := m.spec.Items[m.cursor]
@@ -296,9 +302,13 @@ func (m *GateMenu) viewHelp() string {
 }
 
 func (m *GateMenu) helpEntries() []HelpEntry {
+	enterHelp := "Select the highlighted (default) option"
+	if m.spec.RequireTypedChoice {
+		enterHelp = "No default; type an option number"
+	}
 	entries := []HelpEntry{
 		{"1-9 / 0", "Select that option"},
-		{"Enter", "Select the highlighted (default) option"},
+		{"Enter", enterHelp},
 		{"↑/↓ j/k", "Move highlight"},
 		{"Esc", "Exit (option 0)"},
 		{"C-h", "Toggle this help"},
@@ -592,6 +602,11 @@ func runGateMenuLine(m *GateMenu, in io.Reader, out io.Writer, cfg GateMenuRunCo
 			return GateMenuResult{}, nil
 		}
 		if choice == "" {
+			if m.spec.RequireTypedChoice {
+				fmt.Fprintln(out, invalidGateChoiceHint(m.spec.Items))
+				fmt.Fprint(out, m.ViewContent())
+				continue
+			}
 			for _, it := range m.spec.Items {
 				if it.Default {
 					return GateMenuResult{Key: it.Key}, nil

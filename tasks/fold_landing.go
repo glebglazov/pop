@@ -73,6 +73,62 @@ func runFoldLandingGate(d *Deps, gate *AttendedSession, ctx FoldConflictContext,
 	}
 }
 
+// FoldAmbiguousScratchChoice is the explicit act selected for a scratch ref
+// that git cannot account for.
+type FoldAmbiguousScratchChoice int
+
+const (
+	FoldAmbiguousScratchExit FoldAmbiguousScratchChoice = iota
+	FoldAmbiguousScratchDiscard
+	FoldAmbiguousScratchReset
+)
+
+// HandleFoldAmbiguousScratch offers only acts that leave the decision with the
+// human. offered is false when this input cannot prompt or --yes supplied no
+// typed choice; callers then keep their existing flat refusal.
+func HandleFoldAmbiguousScratch(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, refusal string) (choice FoldAmbiguousScratchChoice, offered bool, err error) {
+	if d == nil {
+		d = defaultDeps
+	}
+	in, out := opts.In, opts.Out
+	if in == nil {
+		in = os.Stdin
+	}
+	if out == nil {
+		out = os.Stdout
+	}
+	if opts.Yes || !canPrompt(in) {
+		return FoldAmbiguousScratchExit, false, nil
+	}
+	preamble, err := foldLandingEvidence(d, cfg, ctx)
+	if err != nil {
+		return FoldAmbiguousScratchExit, true, err
+	}
+	preamble = append(preamble, "", refusal)
+	selected, _, err := promptGateMenu(out, in, newPromptReader(in), ui.GateMenuSpec{
+		Headline: fmt.Sprintf("Fold scratch branch %s needs a decision.", ctx.ScratchBranch),
+		Tone:     ui.GateMenuToneWarn,
+		Preamble: preamble,
+		Items: []ui.GateMenuItem{
+			{Key: "1", Label: "Discard as residue", Details: []string{"delete the fold scratch branch and stop"}},
+			{Key: "2", Label: "Reset and fold from scratch", Details: []string{"replace the fold scratch branch from the real branch and continue"}},
+			{Key: "0", Label: "Exit", Details: []string{"leave every ref unchanged"}},
+		},
+		RequireTypedChoice: true,
+	}, nil, NewAttendedSession(cfg, opts.AgentPreset))
+	if err != nil {
+		return FoldAmbiguousScratchExit, true, err
+	}
+	switch selected {
+	case "1":
+		return FoldAmbiguousScratchDiscard, true, nil
+	case "2":
+		return FoldAmbiguousScratchReset, true, nil
+	default:
+		return FoldAmbiguousScratchExit, true, nil
+	}
+}
+
 func foldLandingEvidence(d *Deps, cfg *config.Config, ctx FoldConflictContext) ([]string, error) {
 	var lines []string
 	for _, tip := range []struct{ label, ref string }{

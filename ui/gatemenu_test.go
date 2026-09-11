@@ -224,6 +224,21 @@ func TestGateMenuEnterSelectsDefault(t *testing.T) {
 	}
 }
 
+func TestGateMenuCanRequireATypedChoice(t *testing.T) {
+	m := NewGateMenu(GateMenuSpec{
+		Items:              []GateMenuItem{{Key: "1", Label: "Act"}, {Key: "0", Label: "Exit"}},
+		RequireTypedChoice: true,
+	})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil || m.Chosen() != "" {
+		t.Fatalf("Enter chose %q; want no choice", m.Chosen())
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	if cmd == nil || m.Chosen() != "1" {
+		t.Fatalf("typed choice = %q, want 1", m.Chosen())
+	}
+}
+
 func TestGateMenuArrowMovesCursorThenEnter(t *testing.T) {
 	m := NewGateMenu(sampleHITLSpec())
 	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})

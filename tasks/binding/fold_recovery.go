@@ -179,10 +179,21 @@ func discardFoldScratchResidue(td *tasks.Deps, plan foldCheckoutPlan, scratch st
 	return nil
 }
 
-// refuseAmbiguousFoldScratch names the ref and stops. Everything else fold does to a
-// scratch branch is safe because fold created it; this one it cannot vouch for.
+// ambiguousFoldScratchError keeps the classified state available to the
+// interactive fold path while remaining the flat refusal PreflightFold returns.
+type ambiguousFoldScratchError struct {
+	scratch string
+	branch  string
+}
+
+func (e *ambiguousFoldScratchError) Error() string {
+	return fmt.Sprintf("fold refused: %s exists with commits neither %s nor trunk holds; no fold is in progress, so pop cannot tell what it is — inspect it, then delete or rename it and fold again", e.scratch, e.branch)
+}
+
+// refuseAmbiguousFoldScratch names the ref and stops. Everything else fold does
+// to a scratch branch is safe because fold created it; this one it cannot vouch for.
 func refuseAmbiguousFoldScratch(scratch, branch string) error {
-	return fmt.Errorf("fold refused: %s exists with commits neither %s nor trunk holds; no fold is in progress, so pop cannot tell what it is — inspect it, then delete or rename it and fold again", scratch, branch)
+	return &ambiguousFoldScratchError{scratch: scratch, branch: branch}
 }
 
 func localBranchExists(td *tasks.Deps, path, branch string) bool {

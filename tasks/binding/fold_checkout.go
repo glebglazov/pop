@@ -81,7 +81,28 @@ func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, o
 	for {
 		plan, err := preflightFoldCheckout(td, cfg, req)
 		if err != nil {
-			return FoldCheckoutResult{}, err
+			var ambiguous *ambiguousFoldScratchError
+			if !errors.As(err, &ambiguous) {
+				return FoldCheckoutResult{}, err
+			}
+			choice, offered, promptErr := tasks.HandleFoldAmbiguousScratch(td, cfg, tasks.FoldConflictContext{
+				SetID: req.setID, RuntimePath: plan.path, TrunkPath: plan.trunkPath,
+				SetBranch: plan.branch, TrunkBranch: plan.trunkBranch, ScratchBranch: ambiguous.scratch,
+			}, tasks.FoldConflictAssistanceOptions{
+				Yes: opts.Yes, AgentPreset: opts.AgentPreset, In: opts.In, Out: out,
+			}, err.Error())
+			if promptErr != nil {
+				return FoldCheckoutResult{}, promptErr
+			}
+			if !offered || choice == tasks.FoldAmbiguousScratchExit {
+				return FoldCheckoutResult{}, err
+			}
+			if choice == tasks.FoldAmbiguousScratchDiscard {
+				if discardErr := discardFoldScratchResidue(td, plan, ambiguous.scratch); discardErr != nil {
+					return FoldCheckoutResult{}, discardErr
+				}
+				return FoldCheckoutResult{}, fmt.Errorf("fold stopped: discarded fold scratch branch %s as residue; fold again to start from %s", ambiguous.scratch, plan.branch)
+			}
 		}
 		if !confirmed {
 			ask := req.confirm
@@ -301,7 +322,7 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 	case foldScratchRebased:
 		plan.rebasedOntoTrunk = true
 	case foldScratchAmbiguous:
-		return foldCheckoutPlan{}, refuseAmbiguousFoldScratch(scratch, branch)
+		return plan, refuseAmbiguousFoldScratch(scratch, branch)
 	}
 
 	// A branch trunk already reaches has nothing to land: the rebase would drop every

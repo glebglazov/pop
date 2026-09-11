@@ -327,9 +327,13 @@ func TestPreflightClassifiesAnExistingFoldScratchBranch(t *testing.T) {
 		cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 		rec := &recordingGit{inner: td.Git}
 		td.Git = rec
-		_, err := FoldCheckout(td, cfg, wt, FoldOptions{In: tasks.NonInteractiveReader{}}, io.Discard)
+		var out strings.Builder
+		_, err := FoldCheckout(td, cfg, wt, FoldOptions{In: tasks.NonInteractiveReader{}}, &out)
 		if err == nil || !strings.Contains(err.Error(), scratch) {
 			t.Fatalf("err = %v, want a refusal naming %s", err, scratch)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("non-interactive refusal printed a menu:\n%s", &out)
 		}
 		if rec.ran("rebase") {
 			t.Fatal("an ambiguous scratch ref must be refused before any rebase")
@@ -344,6 +348,103 @@ func TestPreflightClassifiesAnExistingFoldScratchBranch(t *testing.T) {
 			t.Fatalf("trunk moved: %s -> %s", trunkBefore, got)
 		}
 	})
+}
+
+func TestAmbiguousFoldScratchOffersExplicitRecoveryChoices(t *testing.T) {
+	for _, choice := range []string{"exit", "discard", "reset"} {
+		t.Run(choice, func(t *testing.T) {
+			t.Parallel()
+			repo := initAdoptRepo(t)
+			td := lifecycleTestDeps(t)
+			wt := addLinkedWorktree(t, repo, "human-work")
+			writeFileCommit(t, wt, "feature.txt", "branch work\n", "branch work")
+			writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+			scratch := foldScratchBranch("human-work")
+			tree := strings.TrimSpace(runGitOutput(t, wt, "rev-parse", "HEAD^{tree}"))
+			stray := strings.TrimSpace(runGitOutput(t, wt, "commit-tree", tree, "-p", "HEAD", "-m", "stray"))
+			runGitOutput(t, wt, "branch", scratch, stray)
+			branchBefore := refAt(t, wt, "human-work")
+			trunkBefore := refAt(t, repo, "HEAD")
+			input := map[string]string{"exit": "\n0\n", "discard": "1\n", "reset": "2\n"}[choice]
+			var out strings.Builder
+
+			_, err := FoldCheckout(td, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, wt, FoldOptions{In: strings.NewReader(input)}, &out)
+			for _, want := range []string{
+				"1. Discard as residue", "2. Reset and fold from scratch", "0. Exit",
+				"Trunk:", "Pre-fold branch:", "Rebased scratch:",
+			} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("missing %q (fold error: %v):\n%s", want, err, &out)
+				}
+			}
+			evidenceAt, refusalAt := strings.Index(out.String(), "  Trunk:"), strings.Index(out.String(), "fold refused:")
+			if evidenceAt < 0 || refusalAt < 0 || evidenceAt > refusalAt {
+				t.Fatalf("tip evidence must precede the refusal:\n%s", &out)
+			}
+
+			switch choice {
+			case "exit":
+				if err == nil || !strings.Contains(err.Error(), scratch) {
+					t.Fatalf("exit err = %v, want the flat refusal", err)
+				}
+				if !strings.Contains(out.String(), "Choose 1, 2, or 0.") {
+					t.Fatalf("empty input chose a default:\n%s", &out)
+				}
+				if refAt(t, wt, scratch) != stray {
+					t.Fatal("exit changed the ambiguous scratch ref")
+				}
+			case "discard":
+				if err == nil || !strings.Contains(err.Error(), "discarded fold scratch branch") {
+					t.Fatalf("discard err = %v, want a stopped fold", err)
+				}
+				if branchExists(t, repo, scratch) {
+					t.Fatal("discard kept the ambiguous scratch ref")
+				}
+			case "reset":
+				if err != nil {
+					t.Fatalf("reset and fold: %v\n%s", err, &out)
+				}
+				if branchExists(t, repo, scratch) {
+					t.Fatal("completed fold kept the reset scratch ref")
+				}
+				if got := refAt(t, repo, "HEAD"); got == trunkBefore || got != refAt(t, wt, "human-work") {
+					t.Fatalf("reset fold trunk = %s, branch = %s, prior trunk = %s", got, refAt(t, wt, "human-work"), trunkBefore)
+				}
+			}
+			if choice != "reset" {
+				if got := refAt(t, wt, "human-work"); got != branchBefore {
+					t.Fatalf("%s moved the real branch: %s -> %s", choice, branchBefore, got)
+				}
+				if got := refAt(t, repo, "HEAD"); got != trunkBefore {
+					t.Fatalf("%s moved trunk: %s -> %s", choice, trunkBefore, got)
+				}
+			}
+		})
+	}
+}
+
+func TestPreflightFoldKeepsAmbiguousScratchRefAsAFlatRefusal(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	setID := "set-ambiguous-preflight"
+	seedDoneTaskSet(t, td, repo, setID)
+	wt := addLinkedWorktree(t, repo, "human-work")
+	writeFileCommit(t, wt, "feature.txt", "branch work\n", "branch work")
+	writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+	scratch := foldScratchBranch("human-work")
+	tree := strings.TrimSpace(runGitOutput(t, wt, "rev-parse", "HEAD^{tree}"))
+	stray := strings.TrimSpace(runGitOutput(t, wt, "commit-tree", tree, "-p", "HEAD", "-m", "stray"))
+	runGitOutput(t, wt, "branch", scratch, stray)
+	seedLifecycleBinding(t, td, repo, setID, Binding{RuntimePath: wt, Branch: "human-work"})
+
+	err := PreflightFold(td, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, setID)
+	if err == nil || err.Error() != refuseAmbiguousFoldScratch(scratch, "human-work").Error() {
+		t.Fatalf("PreflightFold err = %v, want the flat ambiguous-ref refusal", err)
+	}
+	if refAt(t, wt, scratch) != stray {
+		t.Fatal("PreflightFold changed the ambiguous scratch ref")
+	}
 }
 
 // After the fast-forward the work is landed, so the remaining ref updates are worth
