@@ -81,27 +81,8 @@ func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, o
 	for {
 		plan, err := preflightFoldCheckout(td, cfg, req)
 		if err != nil {
-			var ambiguous *ambiguousFoldScratchError
-			if !errors.As(err, &ambiguous) {
+			if err = resolveAmbiguousFoldScratch(td, cfg, opts, out, plan, err); err != nil {
 				return FoldCheckoutResult{}, err
-			}
-			choice, offered, promptErr := tasks.HandleFoldAmbiguousScratch(td, cfg, tasks.FoldConflictContext{
-				SetID: req.setID, RuntimePath: plan.path, TrunkPath: plan.trunkPath,
-				SetBranch: plan.branch, TrunkBranch: plan.trunkBranch, ScratchBranch: ambiguous.scratch,
-			}, tasks.FoldConflictAssistanceOptions{
-				Yes: opts.Yes, AgentPreset: opts.AgentPreset, In: opts.In, Out: out,
-			}, err.Error())
-			if promptErr != nil {
-				return FoldCheckoutResult{}, promptErr
-			}
-			if !offered || choice == tasks.FoldAmbiguousScratchExit {
-				return FoldCheckoutResult{}, err
-			}
-			if choice == tasks.FoldAmbiguousScratchDiscard {
-				if discardErr := discardFoldScratchResidue(td, plan, ambiguous.scratch); discardErr != nil {
-					return FoldCheckoutResult{}, discardErr
-				}
-				return FoldCheckoutResult{}, fmt.Errorf("fold stopped: discarded fold scratch branch %s as residue; fold again to start from %s", ambiguous.scratch, plan.branch)
 			}
 		}
 		if !confirmed {
@@ -144,6 +125,37 @@ func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, o
 			TrunkPath:   plan.trunkPath,
 		}, nil
 	}
+}
+
+// resolveAmbiguousFoldScratch offers the human the acts fold will not choose for
+// itself when preflight met a scratch ref it cannot account for. It answers nil
+// only when they reset that ref, which is fold's licence to carry this attempt
+// on; every other answer — including a refusal that is about something else
+// entirely — is what the fold stops on.
+func resolveAmbiguousFoldScratch(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, plan foldCheckoutPlan, refusal error) error {
+	var ambiguous *ambiguousFoldScratchError
+	if !errors.As(refusal, &ambiguous) {
+		return refusal
+	}
+	choice, offered, err := tasks.HandleFoldAmbiguousScratch(td, cfg, tasks.FoldConflictContext{
+		SetID: plan.setID, RuntimePath: plan.path, TrunkPath: plan.trunkPath,
+		SetBranch: plan.branch, TrunkBranch: plan.trunkBranch, ScratchBranch: ambiguous.scratch,
+	}, tasks.FoldConflictAssistanceOptions{
+		Yes: opts.Yes, AgentPreset: opts.AgentPreset, In: opts.In, Out: out,
+	}, refusal.Error())
+	if err != nil {
+		return err
+	}
+	if !offered || choice == tasks.FoldAmbiguousScratchExit {
+		return refusal
+	}
+	if choice == tasks.FoldAmbiguousScratchDiscard {
+		if err := discardFoldScratchResidue(td, plan, ambiguous.scratch); err != nil {
+			return err
+		}
+		return fmt.Errorf("fold stopped: discarded fold scratch branch %s as residue; fold again to start from %s", ambiguous.scratch, plan.branch)
+	}
+	return nil
 }
 
 // plainCheckoutConfirm is the question a fold asks when the checkout has nothing

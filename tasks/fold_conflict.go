@@ -51,6 +51,23 @@ type FoldConflictAssistanceOptions struct {
 	RunVerifier func(prompt string) (string, error)
 }
 
+// foldSessionIO settles what an attended Fold prompt runs over: the process
+// seams, and the streams the human is on when the caller named none. Every Fold
+// gate opens the same way, so they open it in one place.
+func foldSessionIO(d *Deps, opts FoldConflictAssistanceOptions) (*Deps, io.Reader, io.Writer) {
+	if d == nil {
+		d = defaultDeps
+	}
+	in, out := opts.In, opts.Out
+	if in == nil {
+		in = os.Stdin
+	}
+	if out == nil {
+		out = os.Stdout
+	}
+	return d, in, out
+}
+
 // HandleFoldConflict runs when rebasing the set branch onto trunk left a
 // conflict with the rebase in progress — including when Fold re-enters a parked
 // operation. It loops the Fold conflict prompt until the rebase completes, the
@@ -60,17 +77,7 @@ type FoldConflictAssistanceOptions struct {
 // asked to restart Fold from preflight, and ErrFoldAbandon when they abandoned
 // the fold outright.
 func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions) error {
-	if d == nil {
-		d = defaultDeps
-	}
-	out := opts.Out
-	if out == nil {
-		out = os.Stdout
-	}
-	in := opts.In
-	if in == nil {
-		in = os.Stdin
-	}
+	d, in, out := foldSessionIO(d, opts)
 
 	if !canPrompt(in) {
 		return foldConflictRefusal(d, ctx.RuntimePath)

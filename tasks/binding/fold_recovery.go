@@ -162,11 +162,12 @@ func classifyFoldScratch(td *tasks.Deps, parked bool, plan foldCheckoutPlan, scr
 	return foldScratchAmbiguous
 }
 
-// discardFoldScratchResidue removes the scratch ref a fold left behind after its
-// work had already landed. The checkout may still be standing on that ref — going
-// back to the branch is precisely the step such a fold did not reach — and the
-// delete is forced, because `-d` measures against HEAD and residue whose only home
-// is trunk was never merged into the branch.
+// discardFoldScratchResidue removes a scratch ref whose commits fold may drop:
+// the leftover of a fold that died after its work had already landed, or a ref
+// fold cannot account for that the human chose to discard. The checkout may still
+// be standing on that ref — going back to the branch is precisely the step such a
+// fold did not reach — and the delete is forced, because `-d` measures against
+// HEAD and residue whose only home is trunk was never merged into the branch.
 func discardFoldScratchResidue(td *tasks.Deps, plan foldCheckoutPlan, scratch string) error {
 	if CurrentBranch(td, plan.path) == scratch {
 		if _, err := td.Git.CommandInDir(plan.path, "checkout", plan.branch); err != nil {

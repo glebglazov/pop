@@ -3,7 +3,6 @@ package tasks
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -13,16 +12,7 @@ import (
 // HandleFoldLanding resumes the attended choice for an already rebased Fold.
 // The caller owns landing and rollback; an exit leaves the scratch ref intact.
 func HandleFoldLanding(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions) error {
-	if d == nil {
-		d = defaultDeps
-	}
-	in, out := opts.In, opts.Out
-	if in == nil {
-		in = os.Stdin
-	}
-	if out == nil {
-		out = os.Stdout
-	}
+	d, in, out := foldSessionIO(d, opts)
 	return runFoldLandingGate(d, NewAttendedSession(cfg, opts.AgentPreset), ctx, opts, out, in, newPromptReader(in))
 }
 
@@ -87,16 +77,7 @@ const (
 // human. offered is false when this input cannot prompt or --yes supplied no
 // typed choice; callers then keep their existing flat refusal.
 func HandleFoldAmbiguousScratch(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, refusal string) (choice FoldAmbiguousScratchChoice, offered bool, err error) {
-	if d == nil {
-		d = defaultDeps
-	}
-	in, out := opts.In, opts.Out
-	if in == nil {
-		in = os.Stdin
-	}
-	if out == nil {
-		out = os.Stdout
-	}
+	d, in, out := foldSessionIO(d, opts)
 	if opts.Yes || !canPrompt(in) {
 		return FoldAmbiguousScratchExit, false, nil
 	}
