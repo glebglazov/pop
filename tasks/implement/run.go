@@ -45,6 +45,8 @@ type WholeSetOptions struct {
 	// for the drain's verify phase (ADR-0227); forwarded verbatim to the task-set
 	// executor, which hands it to the Verifier as its mandate.
 	VerificationConvention tasks.VerificationConvention
+	// PlanningSourcesConvention tells the Verifier how to read declared sources.
+	PlanningSourcesConvention tasks.PlanningSourcesConvention
 	// SkipExplore drains a set carrying the Explore directive once without
 	// exploring it (`--skip-explore`, ADR-0262); forwarded verbatim to the
 	// task-set executor.
@@ -90,32 +92,33 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		return nil, err
 	}
 	result, err := tasks.RunTaskSetWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, tasks.RunTaskSetOptions{
-		ResolveInput:           resolveInput,
-		DrainHeader:            header,
-		TaskSetOverride:        opts.TaskSetOverride,
-		AgentPreset:            opts.AgentPreset,
-		AgentPresets:           opts.AgentPresets,
-		AgentExplicit:          opts.AgentExplicit,
-		AgentCmd:               opts.AgentCmd,
-		AgentOutput:            opts.AgentOutput,
-		AllowDirty:             opts.AllowDirty,
-		MaxTries:               opts.MaxTries,
-		MaxTriesExplicit:       opts.MaxTriesExplicit,
-		Timeout:                opts.Timeout,
-		VerifyAgents:           opts.VerifyAgents,
-		VerifyEffort:           opts.VerifyEffort,
-		ImplementationConvention:       opts.ImplementationConvention,
-		DocumentOverlay:                opts.DocumentOverlay,
-		VerificationConvention: opts.VerificationConvention,
-		SkipExplore:            opts.SkipExplore,
-		Yes:                    opts.Yes,
-		Wait:                   opts.Wait,
-		ConfirmIn:              opts.ConfirmIn,
-		ConfirmOut:             opts.ConfirmOut,
-		Output:                 opts.Output,
-		BindCheckout:           bindCheckout(d),
-		RefreshManagedCheckout: refreshManagedCheckout(d),
-		PreSeedTopic:           opts.PreSeedTopic,
+		ResolveInput:              resolveInput,
+		DrainHeader:               header,
+		TaskSetOverride:           opts.TaskSetOverride,
+		AgentPreset:               opts.AgentPreset,
+		AgentPresets:              opts.AgentPresets,
+		AgentExplicit:             opts.AgentExplicit,
+		AgentCmd:                  opts.AgentCmd,
+		AgentOutput:               opts.AgentOutput,
+		AllowDirty:                opts.AllowDirty,
+		MaxTries:                  opts.MaxTries,
+		MaxTriesExplicit:          opts.MaxTriesExplicit,
+		Timeout:                   opts.Timeout,
+		VerifyAgents:              opts.VerifyAgents,
+		VerifyEffort:              opts.VerifyEffort,
+		ImplementationConvention:  opts.ImplementationConvention,
+		DocumentOverlay:           opts.DocumentOverlay,
+		VerificationConvention:    opts.VerificationConvention,
+		PlanningSourcesConvention: opts.PlanningSourcesConvention,
+		SkipExplore:               opts.SkipExplore,
+		Yes:                       opts.Yes,
+		Wait:                      opts.Wait,
+		ConfirmIn:                 opts.ConfirmIn,
+		ConfirmOut:                opts.ConfirmOut,
+		Output:                    opts.Output,
+		BindCheckout:              bindCheckout(d),
+		RefreshManagedCheckout:    refreshManagedCheckout(d),
+		PreSeedTopic:              opts.PreSeedTopic,
 	})
 	if err != nil {
 		return result, err

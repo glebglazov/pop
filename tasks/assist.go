@@ -30,6 +30,8 @@ type AssistOptions struct {
 	// print it. A nil seam hides the fold action.
 	Fold                   AssistFold
 	VerificationConvention VerificationConvention
+	// PlanningSourcesConvention tells the Verifier how to read declared sources.
+	PlanningSourcesConvention PlanningSourcesConvention
 	// RefineOptions supplies agents, effort, timeout, convention and overlay.
 	// The Assist session owns the target, streams, choice and admission.
 	RefineOptions RefineOptions
@@ -103,7 +105,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		taskSetID:      setID,
 		cfg:            NewAttendedSession(cfg, agentOverride),
 		fold:           opts.Fold,
-		reverify:       &reverifyGateContext{cfg: cfg, convention: opts.VerificationConvention},
+		reverify:       &reverifyGateContext{cfg: cfg, convention: opts.VerificationConvention, planningSourcesConvention: opts.PlanningSourcesConvention},
 		treeStable:     assistTreeStable(d, target.runtimePath, setID),
 	}
 

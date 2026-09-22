@@ -113,7 +113,8 @@ type VerifyOptions struct {
 	Note string
 	// Convention resolves the `verification` convention that is the Verifier's
 	// mandate for the checkout.
-	Convention VerificationConvention
+	Convention                VerificationConvention
+	PlanningSourcesConvention PlanningSourcesConvention
 	// Wait is the `--wait` / `--no-wait` tri-state for admission to the checkout
 	// (ADR-0239). The unset default waits at a terminal and refuses elsewhere.
 	Wait AdmissionWaitChoice
@@ -160,7 +161,8 @@ type verifyCoreOptions struct {
 	runVerifier   func(prompt string) (string, error)
 	// Convention resolves the `verification` convention handed to the Verifier as
 	// its mandate.
-	Convention VerificationConvention
+	Convention                VerificationConvention
+	PlanningSourcesConvention PlanningSourcesConvention
 	// probeMemo shares availability-probe results across Implement implement and
 	// verify phases within one run; nil constructs a fresh memo for standalone verify.
 	probeMemo *agentAvailabilityProbeMemo
@@ -204,22 +206,23 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 	}
 	cfg, _ := loadConfig(config.DefaultConfigPath())
 	return verifyResolvedSet(d, cfg, verifyCoreOptions{
-		Repo:          id.CommonDir,
-		DefPath:       resolved.DefinitionPath,
-		RuntimePath:   runtimePath,
-		SetID:         strings.TrimSpace(opts.TaskSetID),
-		Agents:        opts.Agents,
-		PhaseChoice:   opts.PhaseChoice,
-		Effort:        opts.Effort,
-		Timeout:       opts.Timeout,
-		Output:        opts.Output,
-		Accept:        opts.Accept,
-		AcceptNote:    opts.Note,
-		Remediate:     opts.Remediate,
-		RemediateNote: opts.Note,
-		Convention:    opts.Convention,
-		admission:     opts.Wait.Policy(opts.ConfirmIn),
-		confirmIn:     opts.ConfirmIn,
+		Repo:                      id.CommonDir,
+		DefPath:                   resolved.DefinitionPath,
+		RuntimePath:               runtimePath,
+		SetID:                     strings.TrimSpace(opts.TaskSetID),
+		Agents:                    opts.Agents,
+		PhaseChoice:               opts.PhaseChoice,
+		Effort:                    opts.Effort,
+		Timeout:                   opts.Timeout,
+		Output:                    opts.Output,
+		Accept:                    opts.Accept,
+		AcceptNote:                opts.Note,
+		Remediate:                 opts.Remediate,
+		RemediateNote:             opts.Note,
+		Convention:                opts.Convention,
+		PlanningSourcesConvention: opts.PlanningSourcesConvention,
+		admission:                 opts.Wait.Policy(opts.ConfirmIn),
+		confirmIn:                 opts.ConfirmIn,
 	})
 }
 
@@ -309,7 +312,7 @@ func handleForcedVerifyFailedGate(d *Deps, cfg *config.Config, opts verifyCoreOp
 		statePath:      StatePathFor(opts.DefPath),
 		taskSetID:      opts.SetID,
 		treeStable:     assistTreeStable(d, opts.RuntimePath, opts.SetID),
-		reverify:       &reverifyGateContext{cfg: cfg, agents: opts.Agents, effort: opts.Effort, timeout: opts.Timeout, runVerifier: opts.runVerifier, convention: opts.Convention},
+		reverify:       &reverifyGateContext{cfg: cfg, agents: opts.Agents, effort: opts.Effort, timeout: opts.Timeout, runVerifier: opts.runVerifier, convention: opts.Convention, planningSourcesConvention: opts.PlanningSourcesConvention},
 	}
 	return handleInteractiveVerifyFailedGate(env, opts.Repo, m, workSHA, findings)
 }
@@ -490,15 +493,16 @@ func priorAcceptedNote(d *Deps, repo, setID string) string {
 // overrides so the gate re-check honours the same agent/effort precedence, and
 // keeps the test-only runVerifier seam so gate tests never spawn a real agent.
 type reverifyGateContext struct {
-	cfg         *config.Config
-	agents      []string
-	effort      string
-	timeout     time.Duration
-	runVerifier func(prompt string) (string, error)
-	probeMemo   *agentAvailabilityProbeMemo
-	choice      *AgentGroupEntry
-	convention  VerificationConvention
-	admission   AdmissionPolicy
+	cfg                       *config.Config
+	agents                    []string
+	effort                    string
+	timeout                   time.Duration
+	runVerifier               func(prompt string) (string, error)
+	probeMemo                 *agentAvailabilityProbeMemo
+	choice                    *AgentGroupEntry
+	convention                VerificationConvention
+	planningSourcesConvention PlanningSourcesConvention
+	admission                 AdmissionPolicy
 }
 
 // reverifyAtGate force-runs the Verifier against the set's current work SHA
@@ -526,17 +530,18 @@ func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runti
 		}
 	}
 	opts := verifyCoreOptions{
-		Repo:        repo,
-		RuntimePath: runtimePath,
-		SetID:       setID,
-		Agents:      rv.agents,
-		PhaseChoice: rv.choice,
-		Convention:  rv.convention,
-		Effort:      rv.effort,
-		Timeout:     rv.timeout,
-		Output:      out,
-		runVerifier: rv.runVerifier,
-		probeMemo:   rv.probeMemo,
+		Repo:                      repo,
+		RuntimePath:               runtimePath,
+		SetID:                     setID,
+		Agents:                    rv.agents,
+		PhaseChoice:               rv.choice,
+		Convention:                rv.convention,
+		PlanningSourcesConvention: rv.planningSourcesConvention,
+		Effort:                    rv.effort,
+		Timeout:                   rv.timeout,
+		Output:                    out,
+		runVerifier:               rv.runVerifier,
+		probeMemo:                 rv.probeMemo,
 	}
 	workSHA := verifyWorkSHA(d, runtimePath)
 	v, err := runAndStoreVerdict(d, rv.cfg, opts, m, workSHA, priorAcceptedNote(d, repo, setID))
@@ -592,7 +597,7 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 			ComputedAt: time.Now().UTC(),
 		})
 	}
-	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote, resolveVerificationConvention(opts))
+	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote, resolveVerificationConvention(opts), resolvePlanningSourcesConvention(m, opts))
 
 	// The agent that answers is a fact the report carries, so it is captured
 	// where the walk resolves it. A test seam standing in for the walk names no
@@ -1282,7 +1287,7 @@ func resolveVerificationConvention(opts verifyCoreOptions) string {
 // at that spot must still fail. Done Remediation history is folded in the same
 // way when present (ADR-0154): unverified claims with the diff authoritative;
 // verdict scope remains done AFK work judged against the criteria and the diff.
-func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView, priorNote, verification string) string {
+func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView, priorNote, verification, planningSourcesConvention string) string {
 	view := verifierPromptView{
 		TaskSet:     m.Stem,
 		WorkSHALine: optionalLine("Work SHA: ", workSHA),
@@ -1291,6 +1296,12 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView
 		WorkStat:    work.Stat,
 		WorkEmpty:   work.Empty(),
 		WorkPresent: !work.Empty(),
+	}
+	if len(m.PlanningSources) > 0 {
+		view.PlanningSourcesRecorded = true
+		view.PlanningSources = verifierPlanningSourceRows(m)
+		view.PlanningSourcesConvention = strings.TrimSpace(planningSourcesConvention)
+		view.PlanningSourcesConventionRecorded = view.PlanningSourcesConvention != ""
 	}
 	if workSHA != "" {
 		view.WorkSHAClause = " (at " + workSHA + ")"
@@ -1324,8 +1335,12 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView
 // spec, the remediation history, each judged task body) and the done-AFK filter
 // happen here.
 type verifierPromptView struct {
-	TaskSet     string
-	WorkSHALine string
+	PlanningSourcesRecorded           bool
+	PlanningSources                   []verifierPlanningSourceRow
+	PlanningSourcesConventionRecorded bool
+	PlanningSourcesConvention         string
+	TaskSet                           string
+	WorkSHALine                       string
 	// WorkSHAClause is the parenthetical the work-diff heading carries when the
 	// verification knows the SHA under judgment.
 	WorkSHAClause              string

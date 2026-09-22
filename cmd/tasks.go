@@ -1245,6 +1245,16 @@ func verificationConvention(d *tasks.Deps) tasks.VerificationConvention {
 	}
 }
 
+func planningSourcesConvention(d *tasks.Deps) tasks.PlanningSourcesConvention {
+	return func(cwd string) (string, error) {
+		stack, err := conventions.Resolve(&conventions.Deps{FS: d.FS, Tasks: d}, conventions.KindPlanningSources, cwd)
+		if err != nil {
+			return "", err
+		}
+		return conventions.StackProse(stack), nil
+	}
+}
+
 func runTaskAssist(cmd *cobra.Command, args []string) error {
 	return runTaskAssistWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin, args[0])
 }
@@ -1255,15 +1265,16 @@ func runTaskAssistWith(d *tasks.Deps, w io.Writer, stdin io.Reader, taskSetID st
 		return fmt.Errorf("tasks assist: %w", err)
 	}
 	if err := tasks.AssistTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.AssistOptions{
-		ResolveInput:           resolveInput,
-		TaskSetID:              taskSetID,
-		AgentPreset:            selectedTaskAgentPreset(),
-		AgentCmd:               taskAgentCmd,
-		Output:                 w,
-		Input:                  stdin,
-		Fold:                   assistFold(d),
-		VerificationConvention: verificationConvention(d),
-		RefineOptions:          tasks.RefineOptions{Convention: implementationConvention(d), Overlay: refineOverlay(d)},
+		ResolveInput:              resolveInput,
+		TaskSetID:                 taskSetID,
+		AgentPreset:               selectedTaskAgentPreset(),
+		AgentCmd:                  taskAgentCmd,
+		Output:                    w,
+		Input:                     stdin,
+		Fold:                      assistFold(d),
+		VerificationConvention:    verificationConvention(d),
+		PlanningSourcesConvention: planningSourcesConvention(d),
+		RefineOptions:             tasks.RefineOptions{Convention: implementationConvention(d), Overlay: refineOverlay(d)},
 	}); err != nil {
 		return fmt.Errorf("tasks assist: %w", err)
 	}
@@ -1312,18 +1323,19 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool
 		return fmt.Errorf("tasks verify: %w", err)
 	}
 	if _, err := tasks.VerifyTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.VerifyOptions{
-		ResolveInput: resolveInput,
-		TaskSetID:    taskSetID,
-		Agents:       append([]string(nil), taskVerifyAgents...),
-		Effort:       taskVerifyEffort,
-		Timeout:      timeout,
-		Output:       w,
-		Accept:       accept,
-		Remediate:    remediate,
-		Note:         note,
-		Convention:   verificationConvention(d),
-		Wait:         admissionWaitChoice(taskVerifyWait, taskVerifyNoWait),
-		ConfirmIn:    os.Stdin,
+		ResolveInput:              resolveInput,
+		TaskSetID:                 taskSetID,
+		Agents:                    append([]string(nil), taskVerifyAgents...),
+		Effort:                    taskVerifyEffort,
+		Timeout:                   timeout,
+		Output:                    w,
+		Accept:                    accept,
+		Remediate:                 remediate,
+		Note:                      note,
+		Convention:                verificationConvention(d),
+		PlanningSourcesConvention: planningSourcesConvention(d),
+		Wait:                      admissionWaitChoice(taskVerifyWait, taskVerifyNoWait),
+		ConfirmIn:                 os.Stdin,
 	}); err != nil {
 		return fmt.Errorf("tasks verify: %w", err)
 	}
@@ -1442,24 +1454,24 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
 	result, err := tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
-		ResolveInput:     taskResolveInput(),
-		TaskPathOverride: taskPath,
-		AgentPreset:      selectedTaskAgentPreset(),
-		AgentPresets:     selectedTaskAgentPresets(),
-		AgentExplicit:    agentExplicit,
-		AgentCmd:         taskAgentCmd,
-		AgentOutput:      taskAgentOutput,
-		AllowDirty:       taskAllowDirty,
-		MaxTries:         taskMaxTries,
-		MaxTriesExplicit: maxTriesExplicit,
-		Timeout:          timeout,
-		Yes:              taskRunYes,
-		Wait:             taskImplementWaitChoice(),
-		ConfirmIn:        stdin,
-		ConfirmOut:       stderr,
-		Output:           stdout,
-		BindCheckout:     taskBindCheckout(d),
-		PreSeedTopic:     taskPreSeedTopic(),
+		ResolveInput:             taskResolveInput(),
+		TaskPathOverride:         taskPath,
+		AgentPreset:              selectedTaskAgentPreset(),
+		AgentPresets:             selectedTaskAgentPresets(),
+		AgentExplicit:            agentExplicit,
+		AgentCmd:                 taskAgentCmd,
+		AgentOutput:              taskAgentOutput,
+		AllowDirty:               taskAllowDirty,
+		MaxTries:                 taskMaxTries,
+		MaxTriesExplicit:         maxTriesExplicit,
+		Timeout:                  timeout,
+		Yes:                      taskRunYes,
+		Wait:                     taskImplementWaitChoice(),
+		ConfirmIn:                stdin,
+		ConfirmOut:               stderr,
+		Output:                   stdout,
+		BindCheckout:             taskBindCheckout(d),
+		PreSeedTopic:             taskPreSeedTopic(),
 		ImplementationConvention: implementationConvention(d),
 	})
 	if err != nil {
@@ -1479,31 +1491,32 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	impl.LoadConfig = taskConfigLoad
 	impl.StdinInteractive = taskStdinInteractive
 	_, err = implement.RunWholeSetWith(impl, implement.WholeSetOptions{
-		ResolveInput:           taskResolveInput(),
-		TaskSetOverride:        taskSetPath,
-		InWorktree:             taskInWorktree,
-		ForceRebind:            taskForceRebind,
-		AgentPreset:            selectedTaskAgentPreset(),
-		AgentPresets:           selectedTaskAgentPresets(),
-		AgentExplicit:          agentExplicit,
-		AgentCmd:               taskAgentCmd,
-		AgentOutput:            taskAgentOutput,
-		AllowDirty:             taskAllowDirty,
-		MaxTries:               taskMaxTries,
-		MaxTriesExplicit:       maxTriesExplicit,
-		Timeout:                timeout,
-		VerifyAgents:           append([]string(nil), taskImplementVerifyAgents...),
-		VerifyEffort:           taskImplementVerifyEffort,
-		ImplementationConvention:       implementationConvention(d),
-		DocumentOverlay:                refineOverlay(d),
-		VerificationConvention: verificationConvention(d),
-		SkipExplore:            taskImplementSkipExplore,
-		Yes:                    taskRunYes,
-		Wait:                   taskImplementWaitChoice(),
-		ConfirmIn:              stdin,
-		ConfirmOut:             stderr,
-		Output:                 stdout,
-		PreSeedTopic:           taskPreSeedTopic(),
+		ResolveInput:              taskResolveInput(),
+		TaskSetOverride:           taskSetPath,
+		InWorktree:                taskInWorktree,
+		ForceRebind:               taskForceRebind,
+		AgentPreset:               selectedTaskAgentPreset(),
+		AgentPresets:              selectedTaskAgentPresets(),
+		AgentExplicit:             agentExplicit,
+		AgentCmd:                  taskAgentCmd,
+		AgentOutput:               taskAgentOutput,
+		AllowDirty:                taskAllowDirty,
+		MaxTries:                  taskMaxTries,
+		MaxTriesExplicit:          maxTriesExplicit,
+		Timeout:                   timeout,
+		VerifyAgents:              append([]string(nil), taskImplementVerifyAgents...),
+		VerifyEffort:              taskImplementVerifyEffort,
+		ImplementationConvention:  implementationConvention(d),
+		DocumentOverlay:           refineOverlay(d),
+		VerificationConvention:    verificationConvention(d),
+		PlanningSourcesConvention: planningSourcesConvention(d),
+		SkipExplore:               taskImplementSkipExplore,
+		Yes:                       taskRunYes,
+		Wait:                      taskImplementWaitChoice(),
+		ConfirmIn:                 stdin,
+		ConfirmOut:                stderr,
+		Output:                    stdout,
+		PreSeedTopic:              taskPreSeedTopic(),
 	})
 	return err
 }

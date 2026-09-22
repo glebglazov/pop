@@ -302,10 +302,10 @@ func TestVerifierPromptGoldens(t *testing.T) {
 		buildVerifierPrompt(goldenFixtureDeps(t), full, "shaHEAD",
 			workDiffView{Range: "base000..HEAD", Stat: " tasks/prompt.go | 12 ++++----\n 1 file changed"},
 			"the retry cap is deliberate — it bounds one attempt, not the drain.",
-			"Run `make test` before believing the work.\n\nfrom pop's shipped answer (nobody wrote one above it)"))
+			"Run `make test` before believing the work.\n\nfrom pop's shipped answer (nobody wrote one above it)", ""))
 
 	prompttest.Assert(t, goldenPath("verifier.bare.md"),
-		buildVerifierPrompt(bareDeps(), goldenBareManifest(), "", workDiffView{}, "", ""))
+		buildVerifierPrompt(bareDeps(), goldenBareManifest(), "", workDiffView{}, "", "", ""))
 }
 
 func TestRefinerPromptGoldens(t *testing.T) {

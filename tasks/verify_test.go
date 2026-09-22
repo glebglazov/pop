@@ -1061,7 +1061,7 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
-	withNote := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "the retry cap is deliberate", "")
+	withNote := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "the retry cap is deliberate", "", "")
 	if !strings.Contains(withNote, "Prior human note") {
 		t.Fatalf("prompt must carry a prior-human-note section:\n%s", withNote)
 	}
@@ -1072,7 +1072,7 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 		t.Fatalf("prompt must frame the note as context, not suppression:\n%s", withNote)
 	}
 
-	withoutNote := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "")
+	withoutNote := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "", "")
 	if strings.Contains(withoutNote, "Prior human note") {
 		t.Fatalf("prompt must omit the note section when no note is given:\n%s", withoutNote)
 	}
@@ -1081,7 +1081,7 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 func TestBuildVerifierPromptAsksForOptionalSummary(t *testing.T) {
 	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
-	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "")
+	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "", "")
 	for _, want := range []string{
 		"SUMMARY:",
 		"what needs fixing",

@@ -135,13 +135,14 @@ func (r *implementRun) terminalStatus(currentRefresh *RefreshResult, row *Row, s
 func (r *implementRun) hitlGate(m *Manifest, hitl *Task) (bool, error) {
 	r.parkAtGate(m, hitl, false)
 	rv := &reverifyGateContext{
-		cfg:         r.plan.cfg,
-		convention:  r.opts.VerificationConvention,
-		agents:      r.opts.VerifyAgents,
-		effort:      r.opts.VerifyEffort,
-		timeout:     r.timeout,
-		runVerifier: r.opts.verifyRunner,
-		probeMemo:   r.agentProbeMemo,
+		cfg:                       r.plan.cfg,
+		convention:                r.opts.VerificationConvention,
+		planningSourcesConvention: r.opts.PlanningSourcesConvention,
+		agents:                    r.opts.VerifyAgents,
+		effort:                    r.opts.VerifyEffort,
+		timeout:                   r.timeout,
+		runVerifier:               r.opts.verifyRunner,
+		probeMemo:                 r.agentProbeMemo,
 	}
 	handled, err := handleInteractiveHITLGate(r.newGateEnv(), m, hitl, rv)
 	r.releaseGateHold()

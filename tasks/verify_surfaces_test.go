@@ -113,7 +113,7 @@ func TestVerifyPointerStaysOutOfAgentPrompts(t *testing.T) {
 		{"verify-failed assistance", BuildVerifyFailedAssistancePrompt(d, "demo", m, "abc123abc123", "findings", "/rt")},
 		{"interrupt assistance", BuildInterruptAssistancePrompt(d, "demo", m, hitl, "/rt")},
 		{"assist", BuildAssistPrompt(d, nil, "demo", m, StatusAwaitingApproval, "/rt", "")},
-		{"verifier", buildVerifierPrompt(d, m, "abc123abc123", work, "", "")},
+		{"verifier", buildVerifierPrompt(d, m, "abc123abc123", work, "", "", "")},
 	} {
 		if strings.Contains(s.text, path) || strings.Contains(s.text, VerifyDirName+"/verify-") {
 			t.Fatalf("%s prompt gained the verify pointer:\n%s", s.surface, s.text)

@@ -81,17 +81,18 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 		phaseChoice = r.attended.verifyChoice
 	}
 	effective, verdict, verr := drainVerifyPhase(d, cfg, verifyCoreOptions{
-		Repo:        repo,
-		RuntimePath: runtimePath,
-		SetID:       taskSetID,
-		Agents:      opts.VerifyAgents,
-		PhaseChoice: phaseChoice,
-		Effort:      opts.VerifyEffort,
-		Timeout:     timeout,
-		Output:      out,
-		Convention:  opts.VerificationConvention,
-		runVerifier: opts.verifyRunner,
-		probeMemo:   r.agentProbeMemo,
+		Repo:                      repo,
+		RuntimePath:               runtimePath,
+		SetID:                     taskSetID,
+		Agents:                    opts.VerifyAgents,
+		PhaseChoice:               phaseChoice,
+		Effort:                    opts.VerifyEffort,
+		Timeout:                   timeout,
+		Output:                    out,
+		Convention:                opts.VerificationConvention,
+		PlanningSourcesConvention: opts.PlanningSourcesConvention,
+		runVerifier:               opts.verifyRunner,
+		probeMemo:                 r.agentProbeMemo,
 	}, m, row.Status)
 	if verr != nil {
 		if qp, ok := AsVerifyQuotaPause(verr); ok {

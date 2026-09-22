@@ -88,7 +88,7 @@ func TestVerifierPromptCarriesTheRepositorysVerificationConvention(t *testing.T)
 func TestVerifierPromptWithoutConventionKeepsTheFrame(t *testing.T) {
 	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
-	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "")
+	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "", "")
 	if strings.Contains(prompt, "How work is checked in this repository") {
 		t.Fatalf("no convention means no body section:\n%s", prompt)
 	}
@@ -107,7 +107,7 @@ func TestVerifierCommitsConventionStaysALabelledBlock(t *testing.T) {
 	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	m.CommitConvention = "feat(scope): imperative subject, no trailing period."
-	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "Run the repository's own gates.")
+	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "", "Run the repository's own gates.", "")
 	for _, want := range []string{
 		"## This repository's commit convention",
 		"feat(scope): imperative subject, no trailing period.",
