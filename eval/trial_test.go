@@ -40,7 +40,7 @@ func TestBareTrialCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	manifest := caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"false"}}
+	manifest := caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"test ! -e new.txt"}}
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ esac
 				t.Fatalf("waiting reporters: started=%d stopped=%d", len(waits), stopped)
 			}
 			if tc.mode == "success" {
-				if got := strings.Join(waitPhases(waits), ","); got != "repository preparation,Bare-agent invocation,grading repository preparation,Objective gate 1/1" {
+				if got := strings.Join(waitPhases(waits), ","); got != "repository preparation,Bare-agent invocation,grading repository preparation,Baseline gate 1/1,Objective gate 1/1" {
 					t.Fatalf("waiting phases = %s", got)
 				}
 				if waits[1].ceiling != time.Minute || waits[0].ceiling != 0 || waits[2].ceiling != 0 || waits[3].ceiling != 0 {
@@ -149,7 +149,7 @@ esac
 					"Arm execution started", "Arm execution finished: outcome=completed",
 					"patch saving started", "patch saving finished:",
 					"work cleanup started", "work cleanup finished",
-					"Objective gate started: false", "Objective gate finished: failed exit=1 command=false",
+					"Objective gate started: test ! -e new.txt", "Objective gate finished: failed exit=1 command=test ! -e new.txt",
 					"Grader execution skipped: one or more Objective gates failed",
 					"finished: outcome=completed grade=gate_failed acceptance=0 quality=0/5 result=",
 					"Eval Matrix finished:", "Read the Rollup:")

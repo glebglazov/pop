@@ -68,12 +68,15 @@ cat "$FAKE_GRADE_REPLY"
 	t.Setenv("SHELL", filepath.Join(root, "must-not-run-human-shell"))
 	for _, tc := range []struct{ name, reply, gate, status string }{
 		{"pass", "ITEM 1 MET: The file changes.\nITEM 2 NOT_MET: Compatibility was removed.\nQUALITY 4: Clear implementation.", "true", "graded"},
-		{"fail", "must not run", "printf 'gate failed'; exit 7", "gate_failed"},
+		{"fail", "must not run", "test \"$(cat feature.txt)\" = parent || { printf 'gate failed'; exit 7; }", "gate_failed"},
+		// The parent already fails this gate, so its failure says nothing about
+		// the Arm: the Trial must not be scored at all.
+		{"baseline", "must not run", "test \"$(cat feature.txt)\" = changed || { printf 'parent fails'; exit 5; }", "baseline_failed"},
 		{"unparseable", "This is the whole unparseable reply.\nNo scores here.", "true", "ungraded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifest := caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", Scope: []string{"feature.txt"}, GateCommands: []string{
-				"test \"$(cat feature.txt)\" = changed && test -f binary.dat && test -f outside.txt", tc.gate, "printf 'last gate ran' > gate-output.txt; cat gate-output.txt",
+				"cat feature.txt; if [ -f binary.dat ] && [ -f outside.txt ]; then echo restored; fi", tc.gate, "printf 'last gate ran' > gate-output.txt; cat gate-output.txt",
 			}}
 			data, _ := json.Marshal(manifest)
 			writeFile(t, filepath.Join(caseDir, caseManifestName), string(data))
@@ -103,7 +106,7 @@ cat "$FAKE_GRADE_REPLY"
 				t.Fatalf("waiting reporters: started=%d stopped=%d", len(waits), stopped)
 			}
 			if tc.status == "graded" {
-				want := "grading repository preparation,Objective gate 1/3,Objective gate 2/3,Objective gate 3/3,Grader repository preparation,Grader invocation"
+				want := "grading repository preparation,Baseline gate 1/3,Baseline gate 2/3,Baseline gate 3/3,Objective gate 1/3,Objective gate 2/3,Objective gate 3/3,Grader repository preparation,Grader invocation"
 				if got := strings.Join(waitPhases(waits), ","); got != want || waits[len(waits)-1].ceiling != time.Hour {
 					t.Fatalf("waiting phases = %s, waits = %+v", got, waits)
 				}
@@ -111,11 +114,24 @@ cat "$FAKE_GRADE_REPLY"
 			var got trialRecord
 			decodeJSONFile(t, filepath.Join(resultDir, "trial.json"), &got)
 			g := got.Grade
-			if g == nil || g.Status != tc.status || len(g.Gates) != 3 || g.Gates[0].ExitCode != 0 || g.Gates[2].Output != "last gate ran" {
+			if g == nil || g.Status != tc.status || len(g.BaselineGates) != 3 || g.BaselineGates[0].Output != "parent\n" || g.BaselineGates[2].Output != "last gate ran" {
 				t.Fatalf("grade = %+v", g)
 			}
 			if got.Spend.Tokens.Input != 999 {
 				t.Fatalf("Arm spend changed: %+v", got.Spend)
+			}
+			if tc.status == "baseline_failed" {
+				assertProgressOrder(t, progress.String(), "Baseline gate finished: failed exit=5", "Objective gates and Grader execution skipped:", "finished: outcome=completed grade=baseline_failed acceptance=n/a quality=n/a")
+				if g.BaselineGates[1].ExitCode != 5 || len(g.Gates) != 0 || g.Scores != nil || g.Grader != nil {
+					t.Fatalf("baseline failure = %+v", g)
+				}
+				if _, err := os.Stat(promptPath); !os.IsNotExist(err) {
+					t.Fatal("Grader ran after baseline failure")
+				}
+				return
+			}
+			if len(g.Gates) != 3 || g.Gates[0].Output != "changed\nrestored\n" || g.Gates[2].Output != "last gate ran" {
+				t.Fatalf("Trial-tree gates = %+v", g.Gates)
 			}
 			if tc.status == "gate_failed" {
 				assertProgressOrder(t, progress.String(), "grading preparation started", "grading preparation finished", "Objective gate started:", "Objective gate finished:", "Grader execution skipped:", "finished: outcome=completed grade=gate_failed acceptance=0 quality=0/5")

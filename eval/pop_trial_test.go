@@ -31,7 +31,7 @@ func TestPopTrialCommand(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(caseDir, "tasks"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"false"}})
+	raw, _ := json.Marshal(caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"test ! -e new.txt"}})
 	writeFile(t, filepath.Join(caseDir, caseManifestName), string(raw))
 	writeFile(t, filepath.Join(caseDir, "spec.md"), "Change the file.\n")
 	writeFile(t, filepath.Join(caseDir, acceptanceName), "Status: approved\n\n1. File changes.\n")
@@ -137,10 +137,10 @@ esac
 				t.Fatalf("waiting reporters: started=%d stopped=%d", len(waits), stopped)
 			}
 			if status == "DONE" {
-				if !strings.Contains(strings.Join(waitPhases(waits), ","), "repository preparation,Pop drain,grading repository preparation,Objective gate 1/1") {
+				if !strings.Contains(strings.Join(waitPhases(waits), ","), "repository preparation,Pop drain,grading repository preparation,Baseline gate 1/1,Objective gate 1/1") {
 					t.Fatalf("waiting phases = %+v", waits)
 				}
-				assertProgressOrder(t, progress.String(), "Arm=pop repeat=1 attempt=1", "preparation started", "Arm execution started", "Arm execution finished: outcome=completed", "patch saving finished:", "Objective gate started: false", "Grader execution skipped:", "finished: outcome=completed grade=gate_failed")
+				assertProgressOrder(t, progress.String(), "Arm=pop repeat=1 attempt=1", "preparation started", "Arm execution started", "Arm execution finished: outcome=completed", "patch saving finished:", "Objective gate started: test ! -e new.txt", "Grader execution skipped:", "finished: outcome=completed grade=gate_failed")
 			}
 			if status == "TIMEOUT" && !strings.Contains(progress.String(), "grading skipped: Trial ceiling reached; zero scores recorded") {
 				t.Fatalf("Trial ceiling progress:\n%s", progress.String())

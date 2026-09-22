@@ -43,7 +43,7 @@ func TestEvalWorkRootUsesHomeFallback(t *testing.T) {
 
 func TestCleanEvalWork(t *testing.T) {
 	root := t.TempDir()
-	for _, dir := range []string{"trial-one", "example-acceptance-two", "unrelated"} {
+	for _, dir := range []string{"trial-one", "example-acceptance-two", "prepare-three", "unrelated"} {
 		if err := os.Mkdir(filepath.Join(root, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +53,7 @@ func TestCleanEvalWork(t *testing.T) {
 	if err := cleanEvalWork(root, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{"trial-one", "example-acceptance-two"} {
+	for _, dir := range []string{"trial-one", "example-acceptance-two", "prepare-three"} {
 		if _, err := os.Stat(filepath.Join(root, dir)); !os.IsNotExist(err) {
 			t.Fatalf("disposable work directory %s remains: %v", dir, err)
 		}
@@ -61,7 +61,7 @@ func TestCleanEvalWork(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "unrelated")); err != nil {
 		t.Fatalf("unrelated work directory was removed: %v", err)
 	}
-	if !strings.Contains(out.String(), "Cleaned 2 Eval work directories") || !strings.Contains(out.String(), "reclaimed ") || strings.Contains(out.String(), "reclaimed 0 bytes") {
+	if !strings.Contains(out.String(), "Cleaned 3 Eval work directories") || !strings.Contains(out.String(), "reclaimed ") || strings.Contains(out.String(), "reclaimed 0 bytes") {
 		t.Fatalf("clean report = %q", out.String())
 	}
 }
@@ -92,6 +92,8 @@ func TestPrepareCaseFromHistoricalTaskSet(t *testing.T) {
 	runGit(t, repo, "remote", "add", "origin", "https://example.test/project.git")
 	writeFile(t, filepath.Join(repo, "go.mod"), "module example.test/project\n\ngo 1.23\n")
 	writeFile(t, filepath.Join(repo, "AGENTS.md"), "# Standards\n")
+	// The default gates build and test the parent, which needs one package.
+	writeFile(t, filepath.Join(repo, "doc.go"), "package project\n")
 	runGit(t, repo, "add", ".")
 	runGit(t, repo, "commit", "-qm", "initial")
 	parent := runGit(t, repo, "rev-parse", "HEAD")
@@ -134,7 +136,17 @@ func TestPrepareCaseFromHistoricalTaskSet(t *testing.T) {
 	last := runGit(t, repo, "rev-parse", "HEAD")
 
 	outputRoot := filepath.Join(t.TempDir(), "cases")
-	caseDir, err := prepareCase(prepareOptions{repositoryPath: repo, setID: setID, outputRoot: outputRoot})
+	work := filepath.Join(t.TempDir(), "work")
+	// one.go first appears in the Task set's own commits, so this gate passes on
+	// the final tree and fails only on the parent commit the Case starts from.
+	_, err = prepareCase(prepareOptions{repositoryPath: repo, setID: setID, outputRoot: outputRoot, work: work, gates: []string{"test -f one.go"}})
+	if err == nil || !strings.Contains(err.Error(), "test -f one.go") || !strings.Contains(err.Error(), "--gate") {
+		t.Fatalf("prepare with a gate the parent fails: err = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outputRoot, setID)); !os.IsNotExist(statErr) {
+		t.Fatalf("Case written despite a failing baseline gate: %v", statErr)
+	}
+	caseDir, err := prepareCase(prepareOptions{repositoryPath: repo, setID: setID, outputRoot: outputRoot, work: work})
 	if err != nil {
 		t.Fatal(err)
 	}

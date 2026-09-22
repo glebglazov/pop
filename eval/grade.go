@@ -39,13 +39,17 @@ type gradeScores struct {
 }
 
 type gradeRecord struct {
-	Status       string             `json:"status"`
-	Reason       string             `json:"reason,omitempty"`
-	Gates        []gateResult       `json:"gates"`
-	OutsideScope []string           `json:"outside_scope"`
-	Scores       *gradeScores       `json:"scores,omitempty"`
-	Grader       *capturedRunRecord `json:"grader,omitempty"`
-	Reply        string             `json:"reply"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+	// BaselineGates are the Objective gates run on the untouched parent tree.
+	// Gates says whether the Trial tree passes only when every one of these
+	// passed: a gate the parent already fails cannot tell the Arm's work apart.
+	BaselineGates []gateResult       `json:"baseline_gates"`
+	Gates         []gateResult       `json:"gates"`
+	OutsideScope  []string           `json:"outside_scope"`
+	Scores        *gradeScores       `json:"scores,omitempty"`
+	Grader        *capturedRunRecord `json:"grader,omitempty"`
+	Reply         string             `json:"reply"`
 }
 
 func runGradeCommand(args []string) error {
@@ -112,7 +116,7 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	if record.Case != manifest.Name || record.Arm != flags.Arg(1) || record.Repeat != repeat {
 		return errors.New("Trial record identity does not match requested Trial")
 	}
-	grade := &gradeRecord{Status: "ungraded", Gates: []gateResult{}, OutsideScope: []string{}}
+	grade := &gradeRecord{Status: "ungraded", BaselineGates: []gateResult{}, Gates: []gateResult{}, OutsideScope: []string{}}
 	record.Grade = grade
 	label := trialLabel(record.Case, record.Arm, record.Repeat)
 	gradeErr := gradeOneTrial(manifest, acceptance, behaviourCount, &record, gradeOptions{
@@ -211,32 +215,25 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 			grade.OutsideScope = append(grade.OutsideScope, file)
 		}
 	}
+	baselineTree := filepath.Join(dir, "baseline")
+	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, baselineTree); err != nil {
+		stopWaiting()
+		opts.progress.line("Trial %s grading preparation failed: %v", label, err)
+		return err
+	}
 	stopWaiting()
 	opts.progress.line("Trial %s grading preparation finished", label)
-	failed := false
-	for i, command := range manifest.GateCommands {
-		opts.progress.line("Trial %s Objective gate started: %s", label, command)
-		stopWaiting = opts.progress.wait(label, fmt.Sprintf("Objective gate %d/%d", i+1, len(manifest.GateCommands)), 0)
-		cmd := shellcmd.Bare(command)
-		cmd.Dir = clone
-		output, err := cmd.CombinedOutput()
-		stopWaiting()
-		gate := gateResult{Command: command, Output: string(output), ExitCode: -1}
-		if cmd.ProcessState != nil {
-			gate.ExitCode = cmd.ProcessState.ExitCode()
-		}
-		if err != nil {
-			gate.Error = err.Error()
-			failed = true
-		}
-		grade.Gates = append(grade.Gates, gate)
-		if err != nil {
-			opts.progress.line("Trial %s Objective gate finished: failed exit=%d command=%s", label, gate.ExitCode, command)
-		} else {
-			opts.progress.line("Trial %s Objective gate finished: passed exit=%d command=%s", label, gate.ExitCode, command)
-		}
+	var baselinePassed bool
+	grade.BaselineGates, baselinePassed = runGatesWithProgress(baselineTree, manifest.GateCommands, "Baseline gate", label, opts.progress)
+	if !baselinePassed {
+		grade.Status = "baseline_failed"
+		grade.Reason = "an Objective gate fails on the untouched parent tree"
+		opts.progress.line("Trial %s Objective gates and Grader execution skipped: an Objective gate fails on the parent tree", label)
+		return nil
 	}
-	if failed {
+	var passed bool
+	grade.Gates, passed = runGatesWithProgress(clone, manifest.GateCommands, "Objective gate", label, opts.progress)
+	if !passed {
 		grade.Status = "gate_failed"
 		grade.Scores = &gradeScores{}
 		opts.progress.line("Trial %s Grader execution skipped: one or more Objective gates failed", label)
@@ -331,6 +328,44 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	grade.Status, grade.Scores = "graded", scores
 	opts.progress.line("Trial %s Grader execution finished: outcome=completed grade=graded", label)
 	return nil
+}
+
+// runGatesWithProgress runs every gate in dir, in manifest order, and reports
+// whether all of them passed. phase names the gates in progress lines, so the
+// baseline and the Trial tree read apart.
+func runGatesWithProgress(dir string, commands []string, phase, label string, progress evalProgress) ([]gateResult, bool) {
+	results := make([]gateResult, 0, len(commands))
+	passed := true
+	for i, command := range commands {
+		progress.line("Trial %s %s started: %s", label, phase, command)
+		stopWaiting := progress.wait(label, fmt.Sprintf("%s %d/%d", phase, i+1, len(commands)), 0)
+		gate := runGate(dir, command)
+		stopWaiting()
+		results = append(results, gate)
+		if gate.Error != "" {
+			passed = false
+			progress.line("Trial %s %s finished: failed exit=%d command=%s", label, phase, gate.ExitCode, command)
+		} else {
+			progress.line("Trial %s %s finished: passed exit=%d command=%s", label, phase, gate.ExitCode, command)
+		}
+	}
+	return results, passed
+}
+
+// runGate runs one Objective gate through a bare shell in dir, so the human's
+// configured shell cannot change a result that is parsed.
+func runGate(dir, command string) gateResult {
+	cmd := shellcmd.Bare(command)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	gate := gateResult{Command: command, Output: string(output), ExitCode: -1}
+	if cmd.ProcessState != nil {
+		gate.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	if err != nil {
+		gate.Error = err.Error()
+	}
+	return gate
 }
 
 func withinScope(file string, scope []string) bool {

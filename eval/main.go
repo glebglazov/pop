@@ -72,6 +72,7 @@ type prepareOptions struct {
 	setID          string
 	name           string
 	outputRoot     string
+	work           string
 	gates          []string
 	scope          []string
 	standards      []string
@@ -133,6 +134,7 @@ func runPrepareCommand(args []string) error {
 	var gates, scope, standards stringList
 	name := flags.String("name", "", "Case name (defaults to the Task-set identifier)")
 	output := flags.String("output", defaultCasesRoot, "Case directory root")
+	work := flags.String("work", defaultWorkRoot, "Eval work directory")
 	flags.Var(&gates, "gate", "Objective gate command; repeat for more than one")
 	flags.Var(&scope, "scope", "Allowed repository path; repeat for more than one")
 	flags.Var(&standards, "standard", "Repository standard document; repeat for more than one")
@@ -147,6 +149,7 @@ func runPrepareCommand(args []string) error {
 		setID:          flags.Arg(1),
 		name:           *name,
 		outputRoot:     *output,
+		work:           *work,
 		gates:          gates,
 		scope:          scope,
 		standards:      standards,
@@ -216,6 +219,10 @@ func prepareCase(opts prepareOptions) (string, error) {
 		return "", err
 	}
 
+	if err := checkBaselineGates(repoPath, parent, opts.work, opts.gates); err != nil {
+		return "", err
+	}
+
 	manifest := caseManifest{
 		Name:              opts.name,
 		RepositoryURL:     repositoryURL,
@@ -258,6 +265,30 @@ func prepareCase(opts prepareOptions) (string, error) {
 		return "", fmt.Errorf("publish Case: %w", err)
 	}
 	return destination, nil
+}
+
+// checkBaselineGates refuses a Case whose Objective gates already fail on its
+// parent commit. Such a gate would score every Trial as a gate failure, whatever
+// the Arm did, so the Case cannot compare Arms on it.
+func checkBaselineGates(repoPath, parent, work string, gates []string) error {
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		return fmt.Errorf("create Eval work root: %w", err)
+	}
+	dir, err := os.MkdirTemp(work, "prepare-*")
+	if err != nil {
+		return fmt.Errorf("create baseline directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	clone := filepath.Join(dir, "repository")
+	if err := cloneAtCommit(repoPath, parent, clone); err != nil {
+		return err
+	}
+	for _, command := range gates {
+		if gate := runGate(clone, command); gate.Error != "" {
+			return fmt.Errorf("Objective gate fails on the parent commit %s: %s (exit %d)\n%s\nFix the parent tree, or select gates that pass there with --gate", parent, command, gate.ExitCode, strings.TrimSpace(gate.Output))
+		}
+	}
+	return nil
 }
 
 func validateRepositoryPaths(kind string, paths []string) error {

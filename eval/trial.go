@@ -239,7 +239,7 @@ func runMatrix(cases, arms []string, repeats []int, results string, redo bool, p
 			}
 		}
 	}
-	progress.line("Eval Matrix finished: completed=%d timed_out=%d invalid=%d lost=%d graded=%d gate_failed=%d ungraded=%d", counts[outcomeCompleted], counts[outcomeTimedOut], counts[outcomeInvalid], counts[outcomeLost], grades["graded"], grades["gate_failed"], grades["ungraded"])
+	progress.line("Eval Matrix finished: completed=%d timed_out=%d invalid=%d lost=%d graded=%d gate_failed=%d baseline_failed=%d ungraded=%d", counts[outcomeCompleted], counts[outcomeTimedOut], counts[outcomeInvalid], counts[outcomeLost], grades["graded"], grades["gate_failed"], grades["baseline_failed"], grades["ungraded"])
 	progress.line("Read the Rollup: go run ./eval rollup --results %s", resolvedResults)
 	return nil
 }

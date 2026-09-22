@@ -60,7 +60,7 @@ func cleanEvalWork(root string, out io.Writer) error {
 }
 
 func disposableEvalWorkDir(name string) bool {
-	return strings.HasPrefix(name, "trial-") || strings.Contains(name, "-acceptance-")
+	return strings.HasPrefix(name, "trial-") || strings.HasPrefix(name, "prepare-") || strings.Contains(name, "-acceptance-")
 }
 
 func directorySize(root string) (int64, error) {

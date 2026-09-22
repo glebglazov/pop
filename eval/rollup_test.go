@@ -187,6 +187,7 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 		{Case: "case-a", Arm: "bare", Repeat: 4, Outcome: "invalid", Grade: &gradeRecord{Status: "ungraded"}},
 		known(5, 500, 5, 10, 250, 50, graded("graded", 1, 5), "lost"),
 		{Case: "case-b", Arm: "pop", Repeat: 1, Outcome: "completed", StartedAt: start, EndedAt: start.Add(time.Second)},
+		{Case: "case-b", Arm: "pop", Repeat: 2, Outcome: "completed", StartedAt: start, EndedAt: start.Add(3 * time.Second), Grade: &gradeRecord{Status: "baseline_failed"}},
 	}
 	for _, record := range records {
 		dir := filepath.Join(root, record.Case, record.Arm, fmt.Sprintf("%02d", record.Repeat))
@@ -213,8 +214,14 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 	blind := rollup.Rows[1]
-	if blind.TotalTokens.Median != nil || blind.TotalTokens.Blind != 1 || blind.Ungraded != 1 {
+	if blind.TotalTokens.Median != nil || blind.TotalTokens.Blind != 2 || blind.Ungraded != 1 {
 		t.Fatalf("blind row = %+v", blind)
+	}
+	// A Trial whose parent tree already fails a gate keeps its work-shape
+	// figures but contributes no quality figure.
+	assertMetric(t, "baseline wall", blind.WallClockSeconds, 2, 2, 0)
+	if blind.Counted != 2 || blind.BaselineFailures != 1 || blind.GateFailures != 0 || blind.AcceptanceRatio != nil || blind.QualityScore != nil {
+		t.Fatalf("baseline-failed row = %+v", blind)
 	}
 	var human strings.Builder
 	renderEvalRollup(&human, rollup)
@@ -225,7 +232,7 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"median":300`) || !strings.Contains(string(data), `"lost":1`) || !strings.Contains(string(data), `"blind":1`) {
+	if !strings.Contains(string(data), `"median":300`) || !strings.Contains(string(data), `"lost":1`) || !strings.Contains(string(data), `"baseline_failures":1`) || !strings.Contains(string(data), `"blind":1`) {
 		t.Fatalf("JSON Rollup: %s", data)
 	}
 	var machine bytes.Buffer

@@ -75,6 +75,12 @@ documents default to `docs/agents/implementation.md` and `AGENTS.md` when each
 exists at the parent commit. Repeat `--gate`, `--scope`, or `--standard` to set
 explicit values. Use `--name` to select another Case name.
 
+Before it writes the Case, `prepare` clones the parent commit under the Eval
+work root and runs every Objective gate there. If a gate fails on the parent
+tree, `prepare` writes no Case and names the gate. That gate would give every
+Trial a gate failure, whatever the Arm did. Repair the parent tree, or select
+gates that pass on it with `--gate`. `--work <path>` selects another work root.
+
 ## Arms
 
 The Bare arm gives the Case spec to one headless agent invocation. It does not
@@ -148,12 +154,14 @@ Trial Case=example Arm=bare repeat=1 attempt=1 work cleanup started
 Trial Case=example Arm=bare repeat=1 attempt=1 work cleanup finished
 Trial Case=example Arm=bare repeat=1 grading preparation started
 Trial Case=example Arm=bare repeat=1 grading preparation finished
+Trial Case=example Arm=bare repeat=1 Baseline gate started: go test ./...
+Trial Case=example Arm=bare repeat=1 Baseline gate finished: passed exit=0 command=go test ./...
 Trial Case=example Arm=bare repeat=1 Objective gate started: go test ./...
 Trial Case=example Arm=bare repeat=1 Objective gate finished: passed exit=0 command=go test ./...
 Trial Case=example Arm=bare repeat=1 Grader execution started
 Trial Case=example Arm=bare repeat=1 Grader execution finished: outcome=completed grade=graded
 Trial 1/1 Case=example Arm=bare repeat=1 finished: outcome=completed grade=graded acceptance=3/3 quality=4/5 result=eval/results/example/bare/01
-Eval Matrix finished: completed=1 timed_out=0 invalid=0 lost=0 graded=1 gate_failed=0 ungraded=0
+Eval Matrix finished: completed=1 timed_out=0 invalid=0 lost=0 graded=1 gate_failed=0 baseline_failed=0 ungraded=0
 Read the Rollup: go run ./eval rollup --results /path/to/repository/eval/results
 ```
 
@@ -252,7 +260,7 @@ commit.
 go run ./eval clean
 ```
 
-The command removes leftover `trial-*` and Acceptance-drafting directories
+The command removes leftover `trial-*`, `prepare-*` and Acceptance-drafting directories
 under the Eval work root, then reports how many directories and bytes it
 reclaimed. `--work <path>` selects another work root. An empty or absent root is
 a successful no-op with a message. The command does not remove unrelated
@@ -265,10 +273,17 @@ go run ./eval grade <case> <arm> <repeat>
 ```
 
 Grading restores `diff.patch` in a fresh detached clone at the Case parent SHA.
-Every Objective gate runs through `sh -c` in that clone, in manifest order. The
-Trial record's `grade.gates` stores each command, exit code, output, and error.
-Any gate failure sets `grade.status` to `gate_failed`, gives zero list ratio and
-quality, and skips the Grader. Invalid Trials remain ungraded and excluded;
+Every Objective gate runs through `sh -c`, in manifest order, first in another
+fresh clone of the parent tree without the patch, and then in the Trial clone.
+Both runs use the same environment. The Trial record's `grade.baseline_gates`
+and `grade.gates` store each command, exit code, output, and error.
+
+A gate that fails on the parent tree cannot show what the Arm did. Any such
+failure sets `grade.status` to `baseline_failed`, records no scores, and skips
+the Trial-clone gates and the Grader. Repair the Case, then grade the Trial
+again. When every gate passes on the parent tree, any gate failure in the Trial
+clone sets `grade.status` to `gate_failed`, gives zero list ratio and quality,
+and skips the Grader. Invalid Trials remain ungraded and excluded;
 Trials that reached the Trial ceiling receive zero without a Grader.
 
 Scope entries are repository paths: a file or a directory and its descendants.
@@ -324,9 +339,10 @@ The Rollup reads every `trial.json` below `eval/results` and prints one row per
 Case and Arm. Each spend and work-shape cell is `median/spread`; spread is the
 maximum minus the minimum. The cells cover total tokens, notional cost, turns,
 peak input, and wall-clock seconds. The row also shows median Acceptance-list
-ratio and quality score, plus gate-failure, Trial-ceiling, Invalid, Lost, and
-ungraded counts. Invalid Trials do not contribute figures. Lost Trials
-contribute their spend and work-shape figures but no quality figures. An absent
+ratio and quality score, plus gate-failure, baseline-failure (`base`),
+Trial-ceiling, Invalid, Lost, and ungraded counts. Invalid Trials do not
+contribute figures. Lost Trials and baseline-failed Trials contribute their
+spend and work-shape figures but no quality figures. An absent
 figure is `—`; the final column counts token-, rate-, turn-, peak-, and
 wall-clock-blind Trials. `--json` emits these same rows and uses `null` for
 absent medians and spreads. Use `--results` to read another Trial record root.
