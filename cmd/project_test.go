@@ -1438,7 +1438,7 @@ extreme = [{ model = "opencode/claude-opus-4-8" }]
 	}
 
 	d := testProjectDeps(t)
-	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.LoadConfig = func() (*config.Config, error) { return loadConfig(configPath) }
 
 	var capturedItems []ui.Item
 	var capturedOpts []ui.PickerOption
@@ -1483,7 +1483,7 @@ queue_base = true
 	}
 
 	d := testProjectDeps(t)
-	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.LoadConfig = func() (*config.Config, error) { return loadConfig(configPath) }
 
 	var capturedItems []ui.Item
 	var capturedOpts []ui.PickerOption
@@ -1520,7 +1520,7 @@ func TestRunProject_InvalidDisplayDepthRendersWithBanner(t *testing.T) {
 	}
 
 	d := testProjectDeps(t)
-	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.LoadConfig = func() (*config.Config, error) { return loadConfig(configPath) }
 
 	var capturedItems []ui.Item
 	var capturedOpts []ui.PickerOption
@@ -1560,7 +1560,7 @@ func TestRunProject_MalformedGlobRendersResolvedAndWarns(t *testing.T) {
 	}
 
 	d := testProjectDeps(t)
-	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.LoadConfig = func() (*config.Config, error) { return loadConfig(configPath) }
 
 	var capturedItems []ui.Item
 	var capturedOpts []ui.PickerOption
@@ -1603,7 +1603,7 @@ func TestRunProject_ZeroUsableDirectoriesAborts(t *testing.T) {
 	}
 
 	d := testProjectDeps(t)
-	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.LoadConfig = func() (*config.Config, error) { return loadConfig(configPath) }
 	d.RunConfigure = func() error { t.Fatal("RunConfigure should not run for an existing config"); return nil }
 
 	err := RunProject(d)
@@ -1625,7 +1625,7 @@ func TestRunProject_UnparseableTOMLAborts(t *testing.T) {
 	}
 
 	d := testProjectDeps(t)
-	d.LoadConfig = func() (*config.Config, error) { return config.Load(configPath) }
+	d.LoadConfig = func() (*config.Config, error) { return loadConfig(configPath) }
 	d.RunConfigure = func() error { t.Fatal("RunConfigure should not run for unparseable TOML"); return nil }
 
 	err := RunProject(d)

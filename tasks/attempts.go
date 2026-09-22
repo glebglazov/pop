@@ -45,12 +45,12 @@ func turnCapExhaustedReason(turnCap int) string {
 // implementation attempt, so the repository's turnCap rides along — 0 when the
 // repository declares none, and ignored by a preset that cannot be told to cap
 // turns (ADR-0190).
-func buildAgentInvocationFactory(loadConfig func(string) (*config.Config, error), runtimePath, baseAgentPreset, agentCmd string, agentOutput, optAgentOutput AgentOutputMode, turnCap int) func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
+func buildAgentInvocationFactory(d *Deps, loadConfig func(string) (*config.Config, error), runtimePath, baseAgentPreset, agentCmd string, agentOutput, optAgentOutput AgentOutputMode, turnCap int) func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
 	return func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
 		attemptOutput := agentOutput
 		if agentSpec != baseAgentPreset {
 			var err error
-			attemptOutput, err = resolveAgentOutputMode(loadConfig, agentSpec, optAgentOutput)
+			attemptOutput, err = resolveAgentOutputMode(d, loadConfig, agentSpec, optAgentOutput)
 			if err != nil {
 				return nil, err
 			}

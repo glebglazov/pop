@@ -18,11 +18,7 @@ func resolveRepoTurnCap(d *Deps, cfg *config.Config, checkoutPath string) int {
 	if cfg == nil || checkoutPath == "" {
 		return 0
 	}
-	cd := config.DefaultDeps()
-	if d != nil && d.FS != nil {
-		cd = &config.Deps{FS: d.FS}
-	}
-	repoCfg, err := cfg.ResolveRepoConfig(cd, checkoutPath)
+	repoCfg, err := cfg.ResolveRepoConfig(d.ConfigDeps(), checkoutPath)
 	if err != nil {
 		debug.Error("tasks: resolve turn cap for %s: %v", checkoutPath, err)
 		return 0

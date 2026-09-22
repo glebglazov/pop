@@ -165,6 +165,21 @@ func (d *Deps) configDeps() *config.Deps {
 	return cd
 }
 
+// cmdConfigDeps, defaultConfigPath and loadConfig are how a command reaches the
+// machine's config: through the cmd-layer Deps a test registered, so a command
+// driven by a test reads the test's config and never the developer's own.
+func cmdConfigDeps() *config.Deps {
+	return cmdLayerDeps().configDeps()
+}
+
+func defaultConfigPath() string {
+	return config.DefaultConfigPathWith(cmdConfigDeps())
+}
+
+func loadConfig(path string) (*config.Config, error) {
+	return config.LoadWith(cmdConfigDeps(), path)
+}
+
 func (d *Deps) projectDeps() *project.Deps {
 	if d != nil && d.Project != nil {
 		return d.Project

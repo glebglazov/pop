@@ -174,7 +174,7 @@ func handleShutdown() monitor.Response {
 // handleSetStatus applies the set-status business logic. Extracted from
 // buildMonitorHandler so each command is independently testable.
 func handleSetStatus(tmux tmuxmod.Tmux, statePath string, req monitor.Request) monitor.Response {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("handler set-status: load config: %v", err)
 	}
@@ -317,7 +317,7 @@ func monitorAddr(cfg *config.Config) string {
 // loadConfigQuietly loads config, logging (not surfacing) errors and never
 // returning nil — callers in non-interactive paths just need defaults.
 func loadConfigQuietly() *config.Config {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("load config: %v", err)
 	}

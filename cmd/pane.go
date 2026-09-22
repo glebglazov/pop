@@ -487,7 +487,7 @@ Special behavior:
 }
 
 func runPaneSetStatus(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("pane set-status: load config: %v", err)
 	}
@@ -640,7 +640,7 @@ mark it machine-derived. A user-authored note always overrides it.`,
 }
 
 func runPaneSetTopic(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("pane set-topic: load config: %v", err)
 	}
@@ -724,7 +724,7 @@ func runPaneSetTopicDerive(r io.Reader, args []string, cfg *config.Config, label
 // daemon. The dispatcher's single-flight does not apply here — this is a
 // one-shot synchronous run, and the hook process exits right after.
 func enqueueTopicDerivationForeground(parent context.Context, job topicDeriveJob) {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("pane set-topic --derive: load config: %v", err)
 	}
@@ -1378,7 +1378,7 @@ behavior. Unfollowing an untracked pane is a no-op.`,
 }
 
 func runPaneSetFollow(arg string, follow bool) error {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("pane follow: load config: %v", err)
 	}
@@ -1443,7 +1443,7 @@ If pane_id is omitted, uses $TMUX_PANE from the environment.`,
 }
 
 func runPaneVisit(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("pane visit: load config: %v", err)
 	}

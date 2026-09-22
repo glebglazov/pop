@@ -87,7 +87,7 @@ func TestShippedWorkViewPresetsVocabulary(t *testing.T) {
 // config edge (ADR-0210): `status` decodes into the preset, and an unknown value
 // is still refused with the whole vocabulary named.
 func TestStatusSortIsAcceptedByPresetValidation(t *testing.T) {
-	cfg, err := Load(writeConfig(t, `
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, `
 [[work.dashboard.tasks.presets]]
 name = "old-ranking"
 sort = "status"
@@ -114,7 +114,7 @@ sort = "by-vibes"
 }
 
 func TestResolveWorkViewPresetsDefaultShipped(t *testing.T) {
-	cfg, err := Load(writeConfig(t, ""))
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestResolveWorkViewPresetsDefaultShipped(t *testing.T) {
 }
 
 func TestResolveWorkViewPresetsUserListReplacesShipped(t *testing.T) {
-	cfg, err := Load(writeConfig(t, `
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, `
 [[work.dashboard.tasks.presets]]
 name = "mine"
 status = ["ready"]
@@ -157,7 +157,7 @@ status = ["ready"]
 }
 
 func TestResolveWorkViewPresetsSystemReference(t *testing.T) {
-	cfg, err := Load(writeConfig(t, `
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, `
 [[work.dashboard.tasks.presets]]
 name = "front"
 status = ["ready"]
@@ -221,7 +221,7 @@ name = "p10"
 [[work.dashboard.tasks.presets]]
 name = "p11"
 `
-	cfg, err := Load(writeConfig(t, body))
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, body))
 	if err != nil {
 		t.Fatalf("Load must not fail on bad presets: %v", err)
 	}
@@ -248,7 +248,7 @@ name = "p11"
 
 func TestWorkViewPresetsVisibleInEffectiveTOML(t *testing.T) {
 	path := writeConfig(t, "")
-	out, err := EffectiveTOML(path, nil)
+	out, err := EffectiveTOMLWith(isolatedDeps(t), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestParsePresetDuration(t *testing.T) {
 }
 
 func TestWorkViewPresetEmptyUserListReplaces(t *testing.T) {
-	cfg, err := Load(writeConfig(t, `
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, `
 [work.dashboard.tasks]
 presets = []
 `))
@@ -304,7 +304,7 @@ name = "from-include"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(writeConfig(t, `
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, `
 includes = ["`+includePath+`"]
 
 [[work.dashboard.tasks.presets]]
@@ -347,7 +347,7 @@ pin = "yes"
 name = "nested"
 hide = { pin = true }
 `
-	cfg, err := Load(writeConfig(t, body))
+	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, body))
 	if err != nil {
 		t.Fatalf("Load must not fail on a bad pin: %v", err)
 	}

@@ -190,7 +190,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	quickAccessModifier := "alt"
 	attentionEnabled := false
 	updateNoticeEnabled := true
-	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
+	if cfg, err := loadConfig(defaultConfigPath()); err == nil {
 		quickAccessModifier = cfg.GetQuickAccessModifier()
 		configWarnings = cfg.Warnings
 		attentionEnabled = cfg.UnreadNotificationsEnabled("worktree")
@@ -207,7 +207,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		// global/machine-only or [repo]-only key committed to .pop/config.toml is ignored
 		// but warned about here. The error is deliberately dropped — findings are
 		// carried regardless and this flow degrades rather than aborts (ADR-0054).
-		if rc, _ := cfg.ResolveRepoConfig(config.DefaultDeps(), ctx.GitRoot); len(rc.Findings) > 0 {
+		if rc, _ := cfg.ResolveRepoConfig(cmdConfigDeps(), ctx.GitRoot); len(rc.Findings) > 0 {
 			for _, f := range rc.Findings {
 				configWarnings = append(configWarnings, f.Message)
 			}
@@ -549,7 +549,7 @@ func createManagedWorktree(ctx *project.RepoContext) error {
 		ui.WithHeader("Pick a base ref for the managed worktree"),
 		ui.WithCursorAtEnd(),
 	}
-	cfg, _ := config.Load(config.DefaultConfigPathWith(cmdLayerDeps().configDeps()))
+	cfg, _ := loadConfig(defaultConfigPath())
 	if idx := trunkBranchCursorIndex(td, cmdLayerDeps().configDeps(), cfg, ctx.GitRoot, items); idx >= 0 {
 		opts = append(opts, ui.WithInitialCursorIndex(idx))
 	}
@@ -640,13 +640,13 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 		LoadConfig: func() (*config.Config, error) {
 			path := cfgFile
 			if path == "" {
-				path = config.DefaultConfigPath()
+				path = defaultConfigPath()
 			}
-			return config.Load(path)
+			return loadConfig(path)
 		},
 		PickOnCreate: func(cfg *config.Config) bool { return cfg.WorkbenchPickOnCreate() },
 		ResolveWorkbenches: func(cfg *config.Config, path string) []config.Workbench {
-			templates, _ := cfg.ResolveWorkbenchesWith(config.DefaultDeps(), path)
+			templates, _ := cfg.ResolveWorkbenchesWith(cmdConfigDeps(), path)
 			return templates
 		},
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) {

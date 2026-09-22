@@ -70,7 +70,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 
 	origLoad := taskCompletionConfigLoad
 	taskCompletionConfigLoad = func(path string) (*config.Config, error) {
-		return config.Load(cfgPath)
+		return loadConfig(cfgPath)
 	}
 	t.Cleanup(func() { taskCompletionConfigLoad = origLoad })
 

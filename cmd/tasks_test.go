@@ -1263,7 +1263,7 @@ func setupRunTaskCmdFixture(t *testing.T) (root string, td *tasks.Deps) {
 	cfgPath := filepath.Join(configDir, "config.toml")
 	origLoad := taskConfigLoad
 	taskConfigLoad = func(path string) (*config.Config, error) {
-		return config.Load(cfgPath)
+		return loadConfig(cfgPath)
 	}
 	t.Cleanup(func() { taskConfigLoad = origLoad })
 

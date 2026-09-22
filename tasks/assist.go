@@ -88,7 +88,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return err
 	}
 
-	cfg, _ := loadConfig(config.DefaultConfigPath())
+	cfg, _ := loadConfig(d.defaultConfigPath())
 	// `pop tasks assist --agent` is the human naming their own attended agent for
 	// this session; empty resolves to the attended group (ADR-0195).
 	agentOverride := strings.TrimSpace(opts.AgentPreset)

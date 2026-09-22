@@ -52,7 +52,7 @@ func ProvisionManagedBinding(req ProvisionManagedBindingRequest) (Binding, error
 	if trunkPath == "" {
 		cd := req.ConfigDeps
 		if cd == nil {
-			cd = config.DefaultDeps()
+			cd = req.TD.ConfigDeps()
 		}
 		var bare bool
 		trunkPath, bare, err = ResolveTrunkPathWith(cd, req.TD, req.Config, checkoutPath)

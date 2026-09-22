@@ -685,13 +685,13 @@ func warnDeprecatedManifestKeys(w io.Writer, result *tasks.RefreshResult) {
 }
 
 var taskConfigLoad = func(path string) (*config.Config, error) {
-	return config.Load(path)
+	return loadConfig(path)
 }
 
 // taskConfigPath returns the global config.toml path using cmd-layer deps so
 // tests with isolated XDG_CONFIG_HOME route consistently.
 func taskConfigPath() string {
-	return config.DefaultConfigPathWith(cmdLayerDeps().configDeps())
+	return defaultConfigPath()
 }
 
 func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
@@ -717,7 +717,7 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	// the current checkout.
 	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
 	if runtimeErr == nil {
-		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+		cfg, _ := taskConfigLoad(defaultConfigPath())
 		applyBindingFirstVerifyVerdicts(d, result, cfg, runtimePath)
 	}
 
@@ -768,7 +768,7 @@ func renderTaskRefresh(d *tasks.Deps, w io.Writer, result *tasks.RefreshResult) 
 // directive sentinels become a config error; incidental resolution failures are
 // ignored so status still renders.
 func attachWorktreeDirectiveErrors(d *tasks.Deps, checkout string, rows []tasks.Row) {
-	cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+	cfg, _ := taskConfigLoad(defaultConfigPath())
 	for i := range rows {
 		if rows[i].Status != tasks.StatusReady {
 			continue
@@ -792,8 +792,10 @@ func runTaskArchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 }
 
 func runTaskArchiveWithConfirm(d *tasks.Deps, w io.Writer, stdin io.Reader, yes bool, taskSetID string) error {
-	cfg, err := taskConfigLoad(config.DefaultConfigPath())
-	if err != nil {
+	cfg, err := taskConfigLoad(defaultConfigPath())
+	// No config.toml means defaults, not a refusal: the config only tunes how a
+	// managed checkout is torn down.
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := binding.PrepareManagedWorktreesForArchive(d, taskProjectDeps(), cfg, []string{taskSetID}, binding.ArchiveConfirmOptions{
@@ -856,8 +858,8 @@ func runTaskArchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader, ye
 		}
 	}
 
-	cfg, err := taskConfigLoad(config.DefaultConfigPath())
-	if err != nil {
+	cfg, err := taskConfigLoad(defaultConfigPath())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("tasks archive: %w", err)
 	}
 	if err := binding.PrepareManagedWorktreesForArchive(d, taskProjectDeps(), cfg, selectedIDs, binding.ArchiveConfirmOptions{
@@ -1163,7 +1165,7 @@ func assistFold(d *tasks.Deps) tasks.AssistFold {
 	return func(setID string, in io.Reader, out io.Writer) error {
 		cfgPath := cfgFile
 		if cfgPath == "" {
-			cfgPath = config.DefaultConfigPath()
+			cfgPath = defaultConfigPath()
 		}
 		cfg, err := taskConfigLoad(cfgPath)
 		if err != nil {
@@ -1278,7 +1280,7 @@ func isTaskFileTarget(target string) bool {
 // stays the Queue's path.
 func taskBindCheckout(d *tasks.Deps) func(setID, projectPath, runtimePath string) error {
 	return func(setID, projectPath, runtimePath string) error {
-		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+		cfg, _ := taskConfigLoad(defaultConfigPath())
 		_, err := binding.AdoptCurrentCheckout(d, taskProjectDeps(), cfg, projectPath, runtimePath, setID)
 		return err
 	}
@@ -1291,7 +1293,7 @@ func taskBindCheckout(d *tasks.Deps) func(setID, projectPath, runtimePath string
 // accurate Topic with no model call.
 func taskPreSeedTopic() func(taskTitle string) {
 	maxWords := config.DefaultTopicWords
-	if cfg, err := taskConfigLoad(config.DefaultConfigPath()); err == nil && cfg != nil {
+	if cfg, err := taskConfigLoad(defaultConfigPath()); err == nil && cfg != nil {
 		maxWords = cfg.PaneMonitoringTopicWords()
 	}
 	return preSeedTopicFromTitle(defaultTmuxMod, maxWords)
@@ -1874,7 +1876,7 @@ func runTaskAgents(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskAgentsWith(d *tasks.Deps, w io.Writer, models bool) error {
-	cfg, err := taskConfigLoad(config.DefaultConfigPath())
+	cfg, err := taskConfigLoad(defaultConfigPath())
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("tasks agents: load config: %w", err)
 	}
@@ -1996,7 +1998,7 @@ func handleTaskExit(err error) {
 func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := taskConfigLoad(cfgPath)
 	if err != nil {
@@ -2028,7 +2030,7 @@ func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 func runTaskUnbindWorktree(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := taskConfigLoad(cfgPath)
 	if err != nil {
@@ -2043,7 +2045,7 @@ func runTaskUnbindWorktree(cmd *cobra.Command, args []string) error {
 func runTaskFold(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := taskConfigLoad(cfgPath)
 	if err != nil {
