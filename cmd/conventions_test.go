@@ -292,6 +292,24 @@ func TestConventionsGetUnwrittenKindResolvesToTheShippedRank(t *testing.T) {
 	}
 }
 
+func TestConventionsGetPlanningSourcesByName(t *testing.T) {
+	f := newConventionFixture(t)
+
+	out, err := f.get(t, f.repo, "planning-sources")
+	if err != nil {
+		t.Fatalf("get planning-sources: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"CONVENTION planning-sources",
+		"No external source of truth is configured",
+		"Provenance: planning-sources resolved to shipped",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("planning-sources output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // A document written at any rank stands pop's own answer down: the shipped rank
 // is last, not a floor laid under whatever answered.
 func TestConventionsGetDocumentOutranksTheShippedRank(t *testing.T) {

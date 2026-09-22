@@ -21,13 +21,20 @@ func TestEveryKindDeclaresAConsumptionShape(t *testing.T) {
 // pop's own.
 func TestConsumptionShapesAsDecided(t *testing.T) {
 	for kind, want := range map[Kind]Shape{
-		KindVerification:   ShapeRoleDriving,
-		KindImplementation: ShapeStepInforming,
-		KindCommits:        ShapeStepInforming,
-		KindIssueTracker:   ShapeStepInforming,
+		KindVerification:    ShapeRoleDriving,
+		KindImplementation:  ShapeStepInforming,
+		KindCommits:         ShapeStepInforming,
+		KindIssueTracker:    ShapeStepInforming,
+		KindPlanningSources: ShapeStepInforming,
 	} {
 		if got := kind.Shape(); got != want {
 			t.Errorf("kind %s declares shape %q, want %q", kind, got, want)
 		}
+	}
+}
+
+func TestPlanningSourcesKindDescribesItsRepositoryFact(t *testing.T) {
+	if got := KindPlanningSources.Desc(); got != "Where this repository's work originates, and how an agent reads a Planning source." {
+		t.Errorf("planning-sources description = %q", got)
 	}
 }

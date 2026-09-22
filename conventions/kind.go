@@ -26,6 +26,10 @@ const (
 	// KindIssueTracker is which Work store a repository files issues in and how
 	// a planning skill publishes into it.
 	KindIssueTracker Kind = "issue-tracker"
+	// KindPlanningSources is where this repository's work originates and how an
+	// agent reads one of those sources. It is separate from KindIssueTracker:
+	// work can originate in one system and be filed in another (ADR-0276).
+	KindPlanningSources Kind = "planning-sources"
 	// KindVerification is how work is checked in a repository: the build and
 	// test invocation, which gate is whole-tree and which is scoped, and what
 	// counts as evidence that one was run. It is a fact about a repository's
@@ -64,7 +68,7 @@ func (k Kind) Shape() Shape {
 	switch k {
 	case KindVerification:
 		return ShapeRoleDriving
-	case KindImplementation, KindCommits, KindIssueTracker:
+	case KindImplementation, KindCommits, KindIssueTracker, KindPlanningSources:
 		return ShapeStepInforming
 	}
 	return ""
@@ -74,7 +78,7 @@ func (k Kind) Shape() Shape {
 // the order `get` with no kind walks, and the order an unknown kind is refused
 // with.
 func Kinds() []Kind {
-	return []Kind{KindImplementation, KindCommits, KindIssueTracker, KindVerification}
+	return []Kind{KindImplementation, KindCommits, KindIssueTracker, KindPlanningSources, KindVerification}
 }
 
 // Desc is the one-line description of what a kind answers, for a surface that
@@ -89,6 +93,8 @@ func (k Kind) Desc() string {
 		return "How this repository writes commits — types, scopes, subject and body style."
 	case KindIssueTracker:
 		return "Which Work store this repository files issues in, and how a skill publishes into it."
+	case KindPlanningSources:
+		return "Where this repository's work originates, and how an agent reads a Planning source."
 	case KindVerification:
 		return "How work is checked in this repository — the build and test gates, and what counts as having run them."
 	}

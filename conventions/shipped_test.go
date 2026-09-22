@@ -107,6 +107,19 @@ func TestIssueTrackerShippedAnswerIsPopsTrackerDoc(t *testing.T) {
 	}
 }
 
+func TestPlanningSourcesShippedAnswerConfiguresNoExternalSource(t *testing.T) {
+	answer := Shipped(KindPlanningSources)
+	for what, want := range map[string]string{
+		"the absence of an external source": "No external source of truth is configured",
+		"the written replacement":           "written `planning-sources` convention",
+		"whole-document displacement":       "displaces it whole",
+	} {
+		if !strings.Contains(answer, want) {
+			t.Errorf("planning-sources shipped answer does not carry %s (%q):\n%s", what, want, answer)
+		}
+	}
+}
+
 // TestVerificationShippedAnswerIsHowWorkIsChecked: the kind's whole point is to
 // hold a fact about a repository's toolchain that every pop-spawned agent used
 // to rediscover — so its shipped answer has to say how to find the invocation,
