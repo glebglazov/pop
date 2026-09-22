@@ -861,7 +861,9 @@ func runTaskArchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 
 func runTaskArchiveWithConfirm(d *tasks.Deps, w io.Writer, stdin io.Reader, yes bool, taskSetID string) error {
 	cfg, err := taskConfigLoad(config.DefaultConfigPath())
-	if err != nil {
+	// No config.toml means defaults, not a refusal: the config only tunes how a
+	// managed checkout is torn down.
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := binding.PrepareManagedWorktreesForArchive(d, taskProjectDeps(), cfg, []string{taskSetID}, binding.ArchiveConfirmOptions{
@@ -925,7 +927,7 @@ func runTaskArchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader, ye
 	}
 
 	cfg, err := taskConfigLoad(config.DefaultConfigPath())
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("tasks archive: %w", err)
 	}
 	if err := binding.PrepareManagedWorktreesForArchive(d, taskProjectDeps(), cfg, selectedIDs, binding.ArchiveConfirmOptions{
