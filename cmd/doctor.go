@@ -75,8 +75,8 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		userHasTmuxConfig: tmux.UserHasTmuxConfig,
 		loadProjectConfig: func() (*config.Config, error) {
-			path := config.DefaultConfigPath()
-			return config.Load(path)
+			path := defaultConfigPath()
+			return loadConfig(path)
 		},
 		projectConfigureAvailable: func() bool { return true },
 		expandProjectConfig: func(cfg *config.Config) ([]config.ExpandedPath, error) {
@@ -133,7 +133,7 @@ func defaultDoctorDeps() *doctorDeps {
 		updateCheck: func() release.Result { return release.Check(buildVersion()) },
 	}
 	d.agentCatalog = func() []tasks.AgentCatalogRow {
-		cfg, err := config.Load(config.DefaultConfigPath())
+		cfg, err := loadConfig(defaultConfigPath())
 		if err != nil && !os.IsNotExist(err) {
 			cfg = nil
 		}
@@ -680,7 +680,7 @@ func defaultPaneSessionAddressable() (string, error) {
 	if current := currentTmuxSession(); current != "" {
 		return fmt.Sprintf("current tmux session %q is addressable", current), nil
 	}
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		return "", fmt.Errorf("not inside a tmux session and no target project config is available")
 	}

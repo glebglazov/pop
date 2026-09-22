@@ -28,7 +28,7 @@ func prepareWorktreeDrain(d *Deps, dec Decision) (Decision, string) {
 	}
 	var cfg *config.Config
 	if d.LoadConfig != nil {
-		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+		cfg, _ = d.LoadConfig(config.DefaultConfigPathWith(d.Tasks.ConfigDeps()))
 	}
 	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
 		TD:              d.Tasks,

@@ -89,7 +89,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	if d.Runner == nil {
 		d.Runner = RealCommandRunner{}
 	}
-	plan, err := newRunPlan(loadConfig, runPlanInput{
+	plan, err := newRunPlan(d, loadConfig, runPlanInput{
 		agentPresets:  opts.AgentPresets,
 		agentPreset:   opts.AgentPreset,
 		agentExplicit: opts.AgentExplicit,
@@ -266,7 +266,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 
 	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, resolveRepoTurnCap(d, cfg, runtimePath))
+	buildForAgent := buildAgentInvocationFactory(d, loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, resolveRepoTurnCap(d, cfg, runtimePath))
 
 	maxTries, err := plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)
 	if err != nil {

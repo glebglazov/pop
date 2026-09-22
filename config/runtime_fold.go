@@ -60,6 +60,7 @@ func foldRetiredRuntimeRecord(d *Deps) {
 // having been retired regardless once its foldable values were in.
 func foldRetiredRuntimeRecordWith(d *Deps) (bool, error) {
 	path := retiredRuntimeConfigPathWith(d)
+	guardTestConfigFile(path)
 	data, err := d.FS.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

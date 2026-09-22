@@ -379,7 +379,7 @@ func resolveNamedWorktree(td *tasks.Deps, checkout, name string) (project.Worktr
 // ResolveTrunkPath resolves the repository checkout used as the Trunk worktree.
 // See ResolveTrunkPathWith.
 func ResolveTrunkPath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
-	return ResolveTrunkPathWith(config.DefaultDeps(), td, cfg, checkoutPath)
+	return ResolveTrunkPathWith(td.ConfigDeps(), td, cfg, checkoutPath)
 }
 
 // ResolveTrunkPathWith resolves the Trunk worktree, using cd for the config reads
@@ -401,7 +401,7 @@ func ResolveTrunkPathWith(cd *config.Deps, td *tasks.Deps, cfg *config.Config, c
 		return "", false, fmt.Errorf("missing task dependencies")
 	}
 	if cd == nil {
-		cd = config.DefaultDeps()
+		cd = td.ConfigDeps()
 	}
 	repoKey, err := repoKeyFromCheckout(td, checkoutPath)
 	if err != nil {

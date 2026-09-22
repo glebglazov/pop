@@ -22,7 +22,7 @@ func TestNewRunPlanSuccess(t *testing.T) {
 		}, nil
 	}
 
-	plan, err := newRunPlan(loadConfig, runPlanInput{
+	plan, err := newRunPlan(nil, loadConfig, runPlanInput{
 		agentPresets: []string{"claude"},
 		agentCmd:     "",
 		allowDirty:   DirtyRuntimeContinue,
@@ -71,7 +71,7 @@ func TestNewRunPlanCommitOverridesSetupError(t *testing.T) {
 		}, nil
 	}
 
-	_, err := newRunPlan(loadConfig, runPlanInput{
+	_, err := newRunPlan(nil, loadConfig, runPlanInput{
 		agentPresets: []string{"claude"},
 		allowDirty:   DirtyRuntimeContinue,
 	})

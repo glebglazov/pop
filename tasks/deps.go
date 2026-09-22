@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/store"
 )
@@ -112,6 +113,23 @@ func DefaultDeps() *Deps {
 }
 
 var defaultDeps = DefaultDeps()
+
+// ConfigDeps returns config dependencies that read through this Deps'
+// FileSystem, so the default config path and every config layer resolve against
+// the same environment as the rest of the run. A test's fake FileSystem thus
+// isolates its config reads too; production Deps carry the real FileSystem.
+func (d *Deps) ConfigDeps() *config.Deps {
+	if d == nil || d.FS == nil {
+		return config.DefaultDeps()
+	}
+	return &config.Deps{FS: d.FS}
+}
+
+// defaultConfigPath is the config.toml path in the environment this Deps
+// describes — the path every injected loader is handed.
+func (d *Deps) defaultConfigPath() string {
+	return config.DefaultConfigPathWith(d.ConfigDeps())
+}
 
 // Now is the current instant as the bag's clock reports it. A bag built from a
 // bare literal (tests that care about nothing else) still gets a working clock.

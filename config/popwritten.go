@@ -44,6 +44,7 @@ func overrideConfigFile(d *Deps) popWrittenFile {
 // document the write side edits and through pop's own structs — must not read it
 // twice to get them (the override layer does exactly that).
 func (f popWrittenFile) read(d *Deps) (string, error) {
+	guardTestConfigFile(f.path)
 	data, err := d.FS.ReadFile(f.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -77,6 +78,7 @@ func (f popWrittenFile) load(d *Deps) (map[string]any, toml.MetaData, error) {
 // out: a pop-written file is never left behind as an empty table, so its absence
 // always means "pop stores nothing here".
 func (f popWrittenFile) save(d *Deps, doc map[string]any) error {
+	guardTestConfigFile(f.path)
 	if len(doc) == 0 {
 		if err := d.FS.RemoveAll(f.path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s %q: %w", f.label, f.path, err)
@@ -94,6 +96,7 @@ func (f popWrittenFile) save(d *Deps, doc map[string]any) error {
 // concurrent reader sees either the old file or the new one, never a
 // half-written document.
 func (f popWrittenFile) writeAtomic(d *Deps, data []byte) error {
+	guardTestConfigFile(f.path)
 	dir := filepath.Dir(f.path)
 	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s dir: %w", f.label, err)

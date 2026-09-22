@@ -91,6 +91,14 @@ func setCmdLayerDeps(t *testing.T, d *Deps) {
 	})
 }
 
+// isolateCmdConfig registers cmd-layer deps whose config and data dirs are
+// fresh temp dirs, for a test that drives a command without wiring any other
+// deps: the command then reads only config the test wrote.
+func isolateCmdConfig(t *testing.T) {
+	t.Helper()
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", t.TempDir(), t.TempDir()))
+}
+
 // setupCmdRepoTest initializes a temp git repo with cmd-layer deps wired for
 // parallel-safe cmd smoke tests.
 func setupCmdRepoTest(t *testing.T) (root string, cd *Deps, td *tasks.Deps) {

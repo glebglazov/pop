@@ -189,7 +189,7 @@ func (d *Deps) probeDirective(checkout, setID string) string {
 	}
 	var cfg *config.Config
 	if d.LoadConfig != nil {
-		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+		cfg, _ = d.LoadConfig(config.DefaultConfigPathWith(d.Tasks.ConfigDeps()))
 	}
 	err := binding.ProbeWorktreeDirective(d.Tasks, d.Project, cfg, checkout, setID)
 	if errors.Is(err, binding.ErrNoResolvableTrunk) || errors.Is(err, binding.ErrNamedWorktreeNotFound) {
@@ -800,7 +800,7 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	bindings, _ := binding.AllBindings(d.Tasks)
 	var cfg *config.Config
 	if d.LoadConfig != nil {
-		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+		cfg, _ = d.LoadConfig(config.DefaultConfigPathWith(d.Tasks.ConfigDeps()))
 	}
 	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
 		return binding.RuntimeForSet(bindings, repoKey, setID)

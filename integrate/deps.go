@@ -55,6 +55,16 @@ type Deps struct {
 }
 
 func DefaultDeps() *Deps {
+	return DefaultDepsWith(config.DefaultDeps())
+}
+
+// DefaultDepsWith is DefaultDeps with the config it reads resolved through cd,
+// so a caller holding injected config Deps gets real integration IO without the
+// machine's own skills_prefix leaking in.
+func DefaultDepsWith(cd *config.Deps) *Deps {
+	if cd == nil {
+		cd = config.DefaultDeps()
+	}
 	d := &Deps{
 		userHomeDir: os.UserHomeDir,
 		readFile:    os.ReadFile,
@@ -76,7 +86,7 @@ func DefaultDeps() *Deps {
 	}
 	d.getenv = func(key string) string { return os.Getenv(key) }
 	d.dataDir = func() (string, error) { return popDataDirWith(d) }
-	d.skillsPrefix = loadSkillsPrefix()
+	d.skillsPrefix = loadSkillsPrefix(cd)
 	return d
 }
 
@@ -148,8 +158,8 @@ func osReadDirNames(dir string) ([]string, error) {
 }
 
 // loadSkillsPrefix resolves [integrations] skills_prefix from merged config.
-func loadSkillsPrefix() *string {
-	cfg, err := config.Load(config.DefaultConfigPath())
+func loadSkillsPrefix(cd *config.Deps) *string {
+	cfg, err := config.LoadDefaultWith(cd)
 	if err != nil {
 		debug.Log("loadSkillsPrefix: config load failed (%v); using default prefix %q", err, config.DefaultSkillsPrefix)
 		return nil

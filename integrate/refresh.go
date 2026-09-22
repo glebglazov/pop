@@ -381,7 +381,7 @@ func ensureForRevisionWith(rev string, cd *config.Deps, newDeps func() *Deps) []
 	if rev == "dev" {
 		return nil
 	}
-	stateDeps := stateDepsFromConfig(cd, DefaultDeps())
+	stateDeps := stateDepsFromConfig(cd, DefaultDepsWith(cd))
 	state := loadAppState(stateDeps)
 	if state.BuildRevision == rev {
 		return nil

@@ -12,8 +12,10 @@ import (
 
 // Deps holds implement orchestration dependencies and test seams.
 type Deps struct {
-	Tasks      *tasks.Deps
-	Project    *project.Deps
+	Tasks   *tasks.Deps
+	Project *project.Deps
+	// LoadConfig loads a config file. When nil, every config layer is read
+	// through Tasks' FileSystem.
 	LoadConfig func(string) (*config.Config, error)
 
 	// StdinInteractive reports whether stdin is an interactive terminal. When nil,
@@ -28,9 +30,8 @@ type Deps struct {
 // DefaultDeps returns production implement dependencies.
 func DefaultDeps() *Deps {
 	return &Deps{
-		Tasks:      tasks.DefaultDeps(),
-		Project:    project.DefaultDeps(),
-		LoadConfig: config.Load,
+		Tasks:   tasks.DefaultDeps(),
+		Project: project.DefaultDeps(),
 	}
 }
 
@@ -48,11 +49,21 @@ func (d *Deps) projectDeps() *project.Deps {
 	return project.DefaultDeps()
 }
 
+// loadDefaultConfig loads the default config, resolving its path and every
+// config layer through the task Deps' FileSystem so a run reads the config of
+// the environment its Deps describe.
+func (d *Deps) loadDefaultConfig() (*config.Config, error) {
+	return d.loadConfig(config.DefaultConfigPathWith(d.tasksDeps().ConfigDeps()))
+}
+
+// loadConfig is the config loader implement hands the tasks package. Without an
+// injected LoadConfig it reads every config layer through the task Deps'
+// FileSystem rather than the process environment.
 func (d *Deps) loadConfig(path string) (*config.Config, error) {
 	if d != nil && d.LoadConfig != nil {
 		return d.LoadConfig(path)
 	}
-	return config.Load(path)
+	return config.LoadWith(d.tasksDeps().ConfigDeps(), path)
 }
 
 func (d *Deps) now() time.Time {
