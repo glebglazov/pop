@@ -31,6 +31,12 @@ const (
 	AcceptanceCriteriaHeading = "Acceptance criteria"
 	// manifestTasksKey is the manifest's only required top-level key.
 	manifestTasksKey = "tasks"
+	// planningSourcesKey names both halves of Planning source attribution: the
+	// set-level entries and each task's list of entry ids.
+	planningSourcesKey = "planning_sources"
+	// sourceMapKey is the legacy singular spelling folded into PlanningSources
+	// on read.
+	sourceMapKey = "source_map"
 
 	DefaultTaskEffort = "standard"
 )
@@ -83,13 +89,17 @@ func IsValidEffort(effort string) bool { return allowedTaskEfforts[effort] }
 
 // Task represents one entry in an task manifest.
 type Task struct {
-	ID          string     `json:"id"`
-	File        string     `json:"file"`
-	Title       string     `json:"title"`
-	Type        string     `json:"type"`
-	Status      TaskStatus `json:"status"`
-	BlockedBy   []string   `json:"blocked_by"`
-	FailedAfter *int       `json:"failed_after,omitempty"`
+	ID        string     `json:"id"`
+	File      string     `json:"file"`
+	Title     string     `json:"title"`
+	Type      string     `json:"type"`
+	Status    TaskStatus `json:"status"`
+	BlockedBy []string   `json:"blocked_by"`
+	// PlanningSources names the set-level Planning source entries this task
+	// answers. The ids are validated with the same cross-reference rule as
+	// BlockedBy.
+	PlanningSources []string `json:"planning_sources,omitempty"`
+	FailedAfter     *int     `json:"failed_after,omitempty"`
 	// Effort selects the model-strength tier for this task. Missing manifests
 	// resolve to DefaultTaskEffort; EffortExplicit records whether the key was
 	// present so legacy manifests keep their previous invocation shape.
@@ -131,17 +141,18 @@ type TaskCommit struct {
 }
 
 type taskJSON struct {
-	ID            string      `json:"id"`
-	File          string      `json:"file"`
-	Title         string      `json:"title"`
-	Type          string      `json:"type"`
-	Status        TaskStatus  `json:"status"`
-	BlockedBy     []string    `json:"blocked_by"`
-	FailedAfter   *int        `json:"failed_after,omitempty"`
-	Effort        *string     `json:"effort,omitempty"`
-	Origin        string      `json:"origin,omitempty"`
-	Commit        *TaskCommit `json:"commit,omitempty"`
-	CommitSubject string      `json:"commit_subject,omitempty"`
+	ID              string      `json:"id"`
+	File            string      `json:"file"`
+	Title           string      `json:"title"`
+	Type            string      `json:"type"`
+	Status          TaskStatus  `json:"status"`
+	BlockedBy       []string    `json:"blocked_by"`
+	PlanningSources []string    `json:"planning_sources,omitempty"`
+	FailedAfter     *int        `json:"failed_after,omitempty"`
+	Effort          *string     `json:"effort,omitempty"`
+	Origin          string      `json:"origin,omitempty"`
+	Commit          *TaskCommit `json:"commit,omitempty"`
+	CommitSubject   string      `json:"commit_subject,omitempty"`
 }
 
 // UnmarshalJSON preserves the difference between an absent effort key and an
@@ -157,6 +168,7 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 	t.Type = raw.Type
 	t.Status = raw.Status
 	t.BlockedBy = raw.BlockedBy
+	t.PlanningSources = raw.PlanningSources
 	t.FailedAfter = raw.FailedAfter
 	t.Origin = raw.Origin
 	t.Commit = raw.Commit
@@ -174,22 +186,32 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 // avoiding churn when older manifests are rewritten for unrelated state.
 func (t Task) MarshalJSON() ([]byte, error) {
 	raw := taskJSON{
-		ID:            t.ID,
-		File:          t.File,
-		Title:         t.Title,
-		Type:          t.Type,
-		Status:        t.Status,
-		BlockedBy:     t.BlockedBy,
-		FailedAfter:   t.FailedAfter,
-		Origin:        t.Origin,
-		Commit:        t.Commit,
-		CommitSubject: t.CommitSubject,
+		ID:              t.ID,
+		File:            t.File,
+		Title:           t.Title,
+		Type:            t.Type,
+		Status:          t.Status,
+		BlockedBy:       t.BlockedBy,
+		PlanningSources: t.PlanningSources,
+		FailedAfter:     t.FailedAfter,
+		Origin:          t.Origin,
+		Commit:          t.Commit,
+		CommitSubject:   t.CommitSubject,
 	}
 	if t.EffortExplicit || (t.Effort != "" && t.Effort != DefaultTaskEffort) {
 		effort := t.Effort
 		raw.Effort = &effort
 	}
 	return json.Marshal(raw)
+}
+
+// PlanningSource is one artifact a Task set was planned from. ID is the
+// set-local name tasks claim; Reference is the URL or bare tracker key an agent
+// fetches; Title is optional human context.
+type PlanningSource struct {
+	ID        string `json:"id"`
+	Reference string `json:"reference"`
+	Title     string `json:"title,omitempty"`
 }
 
 // Manifest is a parsed and validated task manifest.
@@ -202,13 +224,19 @@ type Manifest struct {
 	Errors  []string
 	Valid   bool
 	Unknown map[string]json.RawMessage
+	// PlanningSources is the effective source list. A legacy source_map is folded
+	// into this list on read so later consumers have one question to ask.
+	PlanningSources []PlanningSource
+	// PlanningSourcesExplicit preserves whether the successor key was authored,
+	// so writing unrelated task state does not migrate a legacy-only manifest.
+	PlanningSourcesExplicit bool
 	// SourceMap names the Map this set was spawned from, read from and written
 	// back as the set-level `source_map` key. It is the set-side half of the one
 	// lineage link pop keeps — the Map's own `spawned_sets` is the traversed half —
 	// and it is recorded on every Map-sourced set, spec or no spec, so the link is
-	// never half-built. Empty for a set with no Map behind it. Nothing derives from
-	// it: `spec.md`'s `Source map:` line stays human-facing prose and is never
-	// parsed.
+	// never half-built. Empty for a set with no Map behind it. On read it becomes
+	// one effective Planning source; `spec.md`'s `Source map:` line stays
+	// human-facing prose and is never parsed.
 	SourceMap string
 	// BaseCommit is the Set base commit: the parent of the set's *first*
 	// implementation commit, read from and written back as the set-level
@@ -373,7 +401,14 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 			// no forced migration rewrites the file.
 			m.DeprecatedKeys = append(m.DeprecatedKeys, k)
 			m.Unknown[k] = v
-		case "source_map":
+		case planningSourcesKey:
+			m.PlanningSourcesExplicit = true
+			if err := json.Unmarshal(v, &m.PlanningSources); err != nil {
+				m.Errors = append(m.Errors, planningSourcesKey+": must be an array of source entries")
+				m.PlanningSources = nil
+				m.Unknown[k] = v
+			}
+		case sourceMapKey:
 			// A malformed value is a diagnostic rather than a parse failure: the tasks
 			// array is the set, and a bad back-link must not hide what is wrong with it.
 			// The raw value rides through Unknown so a rewrite never eats it.
@@ -423,6 +458,12 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 			m.Unknown[k] = v
 		}
 	}
+	if m.SourceMap != "" {
+		m.PlanningSources = append(m.PlanningSources, PlanningSource{
+			ID:        m.SourceMap,
+			Reference: m.SourceMap,
+		})
+	}
 	sort.Strings(m.DeprecatedKeys)
 	return nil
 }
@@ -439,6 +480,20 @@ func validateManifest(d *Deps, m *Manifest, entries []os.DirEntry, listErr error
 	ids := make(map[string]int)
 	files := make(map[string]int)
 	idSet := make(map[string]bool)
+	sourceIDs := make(map[string]int)
+	for i, source := range m.PlanningSources {
+		if source.ID == "" {
+			m.Errors = append(m.Errors, fmt.Sprintf("planning source[%d]: missing id", i))
+		} else {
+			if sourceIDs[source.ID] > 0 {
+				m.Errors = append(m.Errors, fmt.Sprintf("duplicate planning source id %q", source.ID))
+			}
+			sourceIDs[source.ID]++
+		}
+		if source.Reference == "" {
+			m.Errors = append(m.Errors, fmt.Sprintf("planning source[%d]: missing reference", i))
+		}
+	}
 
 	for i, task := range m.Tasks {
 		if task.ID == "" {
@@ -500,6 +555,11 @@ func validateManifest(d *Deps, m *Manifest, entries []os.DirEntry, listErr error
 		for _, blocker := range task.BlockedBy {
 			if !idSet[blocker] {
 				m.Errors = append(m.Errors, fmt.Sprintf("task %q: unresolved blocker %q", task.ID, blocker))
+			}
+		}
+		for _, sourceID := range task.PlanningSources {
+			if sourceIDs[sourceID] == 0 {
+				m.Errors = append(m.Errors, fmt.Sprintf("task %q: unresolved planning source %q", task.ID, sourceID))
 			}
 		}
 	}
@@ -610,12 +670,19 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 		return err
 	}
 	out[manifestTasksKey] = tasksData
+	if _, malformed := m.Unknown[planningSourcesKey]; m.PlanningSourcesExplicit && !malformed {
+		planningSources, err := json.Marshal(m.planningSourcesWithoutLegacyMap())
+		if err != nil {
+			return err
+		}
+		out[planningSourcesKey] = planningSources
+	}
 	if m.SourceMap != "" {
 		sourceMap, err := json.Marshal(m.SourceMap)
 		if err != nil {
 			return err
 		}
-		out["source_map"] = sourceMap
+		out[sourceMapKey] = sourceMap
 	}
 	if m.CommitConvention != "" {
 		convention, err := json.Marshal(m.CommitConvention)
@@ -657,6 +724,20 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 		return err
 	}
 	return WriteAtomicWith(d, m.Path, data, 0o644)
+}
+
+// planningSourcesWithoutLegacyMap returns the authored successor entries. The
+// read fold appends the legacy Map entry, but a state rewrite must not persist
+// that derived entry into planning_sources.
+func (m *Manifest) planningSourcesWithoutLegacyMap() []PlanningSource {
+	if m.SourceMap == "" || len(m.PlanningSources) == 0 {
+		return m.PlanningSources
+	}
+	last := m.PlanningSources[len(m.PlanningSources)-1]
+	if last.ID == m.SourceMap && last.Reference == m.SourceMap && last.Title == "" {
+		return m.PlanningSources[:len(m.PlanningSources)-1]
+	}
+	return m.PlanningSources
 }
 
 // VerifyOptedOut reports whether the set explicitly opted out of Agent

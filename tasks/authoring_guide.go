@@ -180,6 +180,8 @@ Per-task fields:
   `+"`%s`"+`. Never write `+"`in_progress`"+`: a run is live state, and a
   persisted `+"`in_progress`"+` is malformed.
 - `+"`blocked_by`"+` — array of blocker ids; empty array if none.
+- `+"`%s`"+` — optional array of ids from the set-level `+"`%s`"+` list;
+  each id says this task answers that Planning source.
 - `+"`failed_after`"+` — optional integer written by a runner that gave up;
   never at authoring time.
 - `+"`agent`"+` — optional escape hatch (ADR-0018). Fill it only when the user
@@ -194,9 +196,13 @@ Per-task fields:
 
 Set-level keys:
 
-- `+"`source_map`"+` — the id of the Map this set was spawned from. Written on
+- `+"`%s`"+` — optional list of the artifacts the set was planned from. Each
+  entry has an `+"`id`"+` tasks claim, a `+"`reference`"+` containing a URL or
+  bare tracker key, and an optional human `+"`title`"+`.
+- `+"`%s`"+` — the legacy id of the Map this set was spawned from. Written on
   **every** Map-sourced set, spec or no spec, so the back-link is never
-  half-built.
+  half-built. On read it becomes a Planning source whose id and reference are
+  both the Map id; pop does not rewrite the manifest to perform this fold.
 - `+"`commit_convention`"+` — **pop's, not yours.** Register writes this key
   itself, from the same resolved commit convention
   `+"`pop conventions get commits`"+` prints: it is the prose an agent spawning
@@ -246,6 +252,7 @@ item, and is re-runnable until the set reads `+"`READY`"+` (or
 - every `+"`type`"+`, `+"`effort`"+` and `+"`status`"+` is one of the words
   above, and no status is `+"`in_progress`"+`;
 - every `+"`blocked_by`"+` id names a task in the manifest;
+- every claimed `+"`%s`"+` id names a declared Planning source;
 - every markdown file in the folder has an entry — %s
   aside, a file nothing lists is reported rather than silently ignored, because
   an unlisted slice is one that never runs.
@@ -267,11 +274,13 @@ why the section is mandatory.
 		enumList(taskTypeOrder),
 		enumList(ValidEfforts()), DefaultTaskEffort,
 		enumList(taskStatusWords()), TaskOpen,
+		planningSourcesKey, planningSourcesKey,
+		planningSourcesKey, sourceMapKey,
 		verifyKey, refineKey,
 		exploreKey, verifyKey, refineKey, ExplorationFileName,
 		verifierKey, refinerKey, explorerKey,
 		verifyKey, refineKey, exploreKey,
-		AcceptanceCriteriaHeading, unlistedSetMarkdownNames(),
+		AcceptanceCriteriaHeading, planningSourcesKey, unlistedSetMarkdownNames(),
 		AcceptanceCriteriaHeading,
 	)
 
@@ -320,15 +329,16 @@ func taskMarkdownTemplate() string {
 func taskManifestExample() string {
 	tasks := []Task{
 		{
-			ID:             "01-login-form",
-			File:           "01-login-form.md",
-			Title:          "Login form",
-			Type:           "AFK",
-			Status:         TaskOpen,
-			BlockedBy:      []string{},
-			Effort:         DefaultTaskEffort,
-			EffortExplicit: true,
-			CommitSubject:  "feat(auth): add the login form",
+			ID:              "01-login-form",
+			File:            "01-login-form.md",
+			Title:           "Login form",
+			Type:            "AFK",
+			Status:          TaskOpen,
+			BlockedBy:       []string{},
+			PlanningSources: []string{"AUTH-123"},
+			Effort:          DefaultTaskEffort,
+			EffortExplicit:  true,
+			CommitSubject:   "feat(auth): add the login form",
 		},
 		{
 			ID:             "02-sign-off",
@@ -345,7 +355,16 @@ func taskManifestExample() string {
 	if err != nil {
 		return ""
 	}
-	data, err := json.MarshalIndent(map[string]json.RawMessage{manifestTasksKey: tasksJSON}, "", "  ")
+	sourcesJSON, err := json.Marshal([]PlanningSource{{
+		ID: "AUTH-123", Reference: "https://tracker.example/AUTH-123", Title: "Login flow",
+	}})
+	if err != nil {
+		return ""
+	}
+	data, err := json.MarshalIndent(map[string]json.RawMessage{
+		manifestTasksKey:   tasksJSON,
+		planningSourcesKey: sourcesJSON,
+	}, "", "  ")
 	if err != nil {
 		return ""
 	}

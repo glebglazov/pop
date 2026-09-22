@@ -439,10 +439,29 @@ func TestManifestRecordsSourceMap(t *testing.T) {
 	if m.SourceMap != "2026-08-03-generalize-work" {
 		t.Fatalf("SourceMap = %q", m.SourceMap)
 	}
+	if got, want := m.PlanningSources, []PlanningSource{{
+		ID: "2026-08-03-generalize-work", Reference: "2026-08-03-generalize-work",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("PlanningSources = %#v, want legacy Map fold %#v", got, want)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.ReadFile(path); err != nil || !reflect.DeepEqual(after, before) {
+		t.Fatalf("loading rewrote legacy manifest: err=%v before=%q after=%q", err, before, after)
+	}
 
 	m.Tasks[0].Status = "done"
 	if err := WriteManifestAtomic(d, m); err != nil {
 		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(written), `"planning_sources"`) {
+		t.Fatalf("state rewrite migrated legacy source_map:\n%s", written)
 	}
 	if again := LoadManifest(d, "demo", path); again.SourceMap != m.SourceMap {
 		t.Fatalf("SourceMap after a rewrite = %q, want %q", again.SourceMap, m.SourceMap)
@@ -457,6 +476,68 @@ func TestManifestRecordsSourceMap(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(broken.Errors, "; "), "source_map") {
 		t.Fatalf("errors = %v, want one naming source_map", broken.Errors)
+	}
+}
+
+func TestManifestPlanningSourcesAndClaims(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+	path := filepath.Join(taskDir, ManifestFileName)
+
+	valid := `{
+		"planning_sources":[
+			{"id":"ticket","reference":"AUTH-123","title":"Login flow"},
+			{"id":"brief","reference":"https://example.test/brief"}
+		],
+		"tasks":[{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[],"planning_sources":["ticket","brief"]}]
+	}`
+	if err := os.WriteFile(path, []byte(valid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := LoadManifest(DefaultDeps(), "demo", path)
+	if !m.Valid {
+		t.Fatalf("manifest with declared and claimed sources is invalid: %v", m.Errors)
+	}
+	if got := m.PlanningSources[1].Title; got != "" {
+		t.Fatalf("optional title = %q, want empty", got)
+	}
+	if got, want := m.Tasks[0].PlanningSources, []string{"ticket", "brief"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("task claims = %v, want %v", got, want)
+	}
+
+	malformed := `{
+		"planning_sources":[{"id":"ticket","reference":"AUTH-123"}],
+		"tasks":[{"id":"01-one","file":"01-one.md","title":"One","type":"wrong","status":"open","blocked_by":[],"planning_sources":["missing"]}]
+	}`
+	if err := os.WriteFile(path, []byte(malformed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = LoadManifest(DefaultDeps(), "demo", path)
+	errors := strings.Join(m.Errors, "; ")
+	if m.Valid || !strings.Contains(errors, `invalid type "wrong"`) || !strings.Contains(errors, `unresolved planning source "missing"`) {
+		t.Fatalf("fix list = %v, want type and unresolved-source diagnostics", m.Errors)
+	}
+}
+
+func TestManifestPlanningSourceFieldsAreRequired(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+	path := filepath.Join(taskDir, ManifestFileName)
+	manifest := `{
+		"planning_sources":[{"id":"","reference":""}],
+		"tasks":[{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}]
+	}`
+	if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := LoadManifest(DefaultDeps(), "demo", path)
+	errors := strings.Join(m.Errors, "; ")
+	if m.Valid || !strings.Contains(errors, "missing id") || !strings.Contains(errors, "missing reference") {
+		t.Fatalf("errors = %v, want required source-field diagnostics", m.Errors)
 	}
 }
 

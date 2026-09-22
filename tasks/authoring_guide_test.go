@@ -123,6 +123,9 @@ func TestTaskGuideTemplatesRegisterAsWritten(t *testing.T) {
 	if len(m.Tasks[1].BlockedBy) == 0 {
 		t.Fatal("guide example shows no blocking edge")
 	}
+	if len(m.PlanningSources) != 1 || len(m.Tasks[0].PlanningSources) != 1 {
+		t.Fatal("guide example does not show a Planning source and a task claim")
+	}
 }
 
 // TestTaskGuideCarriesTheJudgmentRules pins what this guide has that the Map's
@@ -188,6 +191,9 @@ func TestTaskGuidePhaseKeysAreTheOnesTheManifestReads(t *testing.T) {
 		if !strings.Contains(guide, "`"+key+"`") {
 			t.Fatalf("guide never names the %q key", key)
 		}
+	}
+	if !strings.Contains(guide, "`"+planningSourcesKey+"`") || !strings.Contains(guide, "`"+sourceMapKey+"`") {
+		t.Fatal("guide does not document Planning sources and the legacy Map fold")
 	}
 	if !strings.Contains(guide, "`"+ExplorationFileName+"`") {
 		t.Fatalf("guide never names %s, the document the explore pass writes", ExplorationFileName)

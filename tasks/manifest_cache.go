@@ -95,68 +95,74 @@ func markManifestPersisted(d *Deps, contentKey string) {
 // faithfulness: a nil RawMessage marshals to the literal `null` and comes back
 // as the four bytes "null", where a freshly loaded manifest would have nil.
 type persistedManifest struct {
-	Stem               string            `json:"stem"`
-	Dir                string            `json:"dir"`
-	Path               string            `json:"path"`
-	Tasks              []persistedTask   `json:"tasks"`
-	Raw                []byte            `json:"raw"`
-	Errors             []string          `json:"errors"`
-	Valid              bool              `json:"valid"`
-	Unknown            map[string][]byte `json:"unknown"`
-	SourceMap          string            `json:"source_map"`
-	BaseCommit         string            `json:"base_commit"`
-	BaseCommitRecorded bool              `json:"base_commit_recorded"`
-	CommitConvention   string            `json:"commit_convention"`
-	HumanCompleted     bool              `json:"human_completed"`
-	DeprecatedKeys     []string          `json:"deprecated_keys"`
+	Stem                    string            `json:"stem"`
+	Dir                     string            `json:"dir"`
+	Path                    string            `json:"path"`
+	Tasks                   []persistedTask   `json:"tasks"`
+	Raw                     []byte            `json:"raw"`
+	Errors                  []string          `json:"errors"`
+	Valid                   bool              `json:"valid"`
+	Unknown                 map[string][]byte `json:"unknown"`
+	PlanningSources         []PlanningSource  `json:"planning_sources"`
+	PlanningSourcesExplicit bool              `json:"planning_sources_explicit"`
+	SourceMap               string            `json:"source_map"`
+	BaseCommit              string            `json:"base_commit"`
+	BaseCommitRecorded      bool              `json:"base_commit_recorded"`
+	CommitConvention        string            `json:"commit_convention"`
+	HumanCompleted          bool              `json:"human_completed"`
+	DeprecatedKeys          []string          `json:"deprecated_keys"`
 }
 
 type persistedTask struct {
-	ID             string      `json:"id"`
-	File           string      `json:"file"`
-	Title          string      `json:"title"`
-	Type           string      `json:"type"`
-	Status         TaskStatus  `json:"status"`
-	BlockedBy      []string    `json:"blocked_by"`
-	FailedAfter    *int        `json:"failed_after"`
-	Effort         string      `json:"effort"`
-	EffortExplicit bool        `json:"effort_explicit"`
-	Origin         string      `json:"origin"`
-	Commit         *TaskCommit `json:"commit"`
-	CommitSubject  string      `json:"commit_subject"`
+	ID              string      `json:"id"`
+	File            string      `json:"file"`
+	Title           string      `json:"title"`
+	Type            string      `json:"type"`
+	Status          TaskStatus  `json:"status"`
+	BlockedBy       []string    `json:"blocked_by"`
+	PlanningSources []string    `json:"planning_sources"`
+	FailedAfter     *int        `json:"failed_after"`
+	Effort          string      `json:"effort"`
+	EffortExplicit  bool        `json:"effort_explicit"`
+	Origin          string      `json:"origin"`
+	Commit          *TaskCommit `json:"commit"`
+	CommitSubject   string      `json:"commit_subject"`
 }
 
 func newPersistedManifest(m *Manifest) persistedManifest {
 	record := persistedManifest{
-		Stem:               m.Stem,
-		Dir:                m.Dir,
-		Path:               m.Path,
-		Raw:                m.Raw,
-		Errors:             m.Errors,
-		Valid:              m.Valid,
-		SourceMap:          m.SourceMap,
-		BaseCommit:         m.BaseCommit,
-		BaseCommitRecorded: m.BaseCommitRecorded,
-		CommitConvention:   m.CommitConvention,
-		HumanCompleted:     m.HumanCompleted,
-		DeprecatedKeys:     m.DeprecatedKeys,
+		Stem:                    m.Stem,
+		Dir:                     m.Dir,
+		Path:                    m.Path,
+		Raw:                     m.Raw,
+		Errors:                  m.Errors,
+		Valid:                   m.Valid,
+		PlanningSources:         m.PlanningSources,
+		PlanningSourcesExplicit: m.PlanningSourcesExplicit,
+		SourceMap:               m.SourceMap,
+		BaseCommit:              m.BaseCommit,
+		BaseCommitRecorded:      m.BaseCommitRecorded,
+		CommitConvention:        m.CommitConvention,
+		HumanCompleted:          m.HumanCompleted,
+		DeprecatedKeys:          m.DeprecatedKeys,
 	}
 	if m.Tasks != nil {
 		record.Tasks = make([]persistedTask, len(m.Tasks))
 		for i, task := range m.Tasks {
 			record.Tasks[i] = persistedTask{
-				ID:             task.ID,
-				File:           task.File,
-				Title:          task.Title,
-				Type:           task.Type,
-				Status:         task.Status,
-				BlockedBy:      task.BlockedBy,
-				FailedAfter:    task.FailedAfter,
-				Effort:         task.Effort,
-				EffortExplicit: task.EffortExplicit,
-				Origin:         task.Origin,
-				Commit:         task.Commit,
-				CommitSubject:  task.CommitSubject,
+				ID:              task.ID,
+				File:            task.File,
+				Title:           task.Title,
+				Type:            task.Type,
+				Status:          task.Status,
+				BlockedBy:       task.BlockedBy,
+				PlanningSources: task.PlanningSources,
+				FailedAfter:     task.FailedAfter,
+				Effort:          task.Effort,
+				EffortExplicit:  task.EffortExplicit,
+				Origin:          task.Origin,
+				Commit:          task.Commit,
+				CommitSubject:   task.CommitSubject,
 			}
 		}
 	}
@@ -173,35 +179,38 @@ func newPersistedManifest(m *Manifest) persistedManifest {
 // own — decoding allocated them — so the caller owns what it gets.
 func (r persistedManifest) manifest() *Manifest {
 	m := &Manifest{
-		Stem:               r.Stem,
-		Dir:                r.Dir,
-		Path:               r.Path,
-		Raw:                json.RawMessage(r.Raw),
-		Errors:             r.Errors,
-		Valid:              r.Valid,
-		SourceMap:          r.SourceMap,
-		BaseCommit:         r.BaseCommit,
-		BaseCommitRecorded: r.BaseCommitRecorded,
-		CommitConvention:   r.CommitConvention,
-		HumanCompleted:     r.HumanCompleted,
-		DeprecatedKeys:     r.DeprecatedKeys,
+		Stem:                    r.Stem,
+		Dir:                     r.Dir,
+		Path:                    r.Path,
+		Raw:                     json.RawMessage(r.Raw),
+		Errors:                  r.Errors,
+		Valid:                   r.Valid,
+		PlanningSources:         r.PlanningSources,
+		PlanningSourcesExplicit: r.PlanningSourcesExplicit,
+		SourceMap:               r.SourceMap,
+		BaseCommit:              r.BaseCommit,
+		BaseCommitRecorded:      r.BaseCommitRecorded,
+		CommitConvention:        r.CommitConvention,
+		HumanCompleted:          r.HumanCompleted,
+		DeprecatedKeys:          r.DeprecatedKeys,
 	}
 	if r.Tasks != nil {
 		m.Tasks = make([]Task, len(r.Tasks))
 		for i, task := range r.Tasks {
 			m.Tasks[i] = Task{
-				ID:             task.ID,
-				File:           task.File,
-				Title:          task.Title,
-				Type:           task.Type,
-				Status:         task.Status,
-				BlockedBy:      task.BlockedBy,
-				FailedAfter:    task.FailedAfter,
-				Effort:         task.Effort,
-				EffortExplicit: task.EffortExplicit,
-				Origin:         task.Origin,
-				Commit:         task.Commit,
-				CommitSubject:  task.CommitSubject,
+				ID:              task.ID,
+				File:            task.File,
+				Title:           task.Title,
+				Type:            task.Type,
+				Status:          task.Status,
+				BlockedBy:       task.BlockedBy,
+				PlanningSources: task.PlanningSources,
+				FailedAfter:     task.FailedAfter,
+				Effort:          task.Effort,
+				EffortExplicit:  task.EffortExplicit,
+				Origin:          task.Origin,
+				Commit:          task.Commit,
+				CommitSubject:   task.CommitSubject,
 			}
 		}
 	}

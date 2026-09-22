@@ -98,6 +98,7 @@ func (m *Manifest) clone() *Manifest {
 	copied.Tasks = make([]Task, len(m.Tasks))
 	for i, task := range m.Tasks {
 		task.BlockedBy = append([]string(nil), task.BlockedBy...)
+		task.PlanningSources = append([]string(nil), task.PlanningSources...)
 		if task.FailedAfter != nil {
 			failedAfter := *task.FailedAfter
 			task.FailedAfter = &failedAfter
@@ -113,6 +114,7 @@ func (m *Manifest) clone() *Manifest {
 	}
 	copied.Raw = append(json.RawMessage(nil), m.Raw...)
 	copied.Errors = append([]string(nil), m.Errors...)
+	copied.PlanningSources = append([]PlanningSource(nil), m.PlanningSources...)
 	copied.DeprecatedKeys = append([]string(nil), m.DeprecatedKeys...)
 	if m.Unknown != nil {
 		copied.Unknown = make(map[string]json.RawMessage, len(m.Unknown))
