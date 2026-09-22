@@ -63,7 +63,7 @@ func newTopicDerivationDispatcher() *topicDerivationDispatcher {
 		latest:  map[string]uint64{},
 		cancels: map[string]context.CancelFunc{},
 		loadCfg: func() *config.Config {
-			cfg, err := config.Load(config.DefaultConfigPath())
+			cfg, err := loadConfig(defaultConfigPath())
 			if err != nil {
 				debug.Error("topic dispatcher: load config: %v", err)
 			}

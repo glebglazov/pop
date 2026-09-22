@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 )
@@ -160,7 +159,7 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	}
 
 	started, progress := taskSetRowInfo(refresh, taskSetID)
-	cfg, _ := d.loadConfig(config.DefaultConfigPath())
+	cfg, _ := d.loadDefaultConfig()
 	td := d.tasksDeps()
 	hooks := implementLifecycleHooks(td)
 
@@ -290,7 +289,7 @@ func routedDrainHeader(route binding.RouteDrainCheckoutResult) tasks.DrainHeader
 // before calling this helper.
 func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID string) (tasks.ResolveInput, tasks.DrainHeader, error) {
 	td := d.tasksDeps()
-	cfg, _ := d.loadConfig(config.DefaultConfigPath())
+	cfg, _ := d.loadDefaultConfig()
 
 	key, _, bound, err := binding.GetForSet(td, projectPath, setID)
 	if err != nil {
@@ -322,7 +321,7 @@ func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID stri
 // provisions a worktree — auto-provisioning stays the Queue's path.
 func bindCheckout(d *Deps) func(setID, projectPath, runtimePath string) error {
 	return func(setID, projectPath, runtimePath string) error {
-		cfg, _ := d.loadConfig(config.DefaultConfigPath())
+		cfg, _ := d.loadDefaultConfig()
 		_, err := binding.AdoptCurrentCheckout(d.tasksDeps(), d.projectDeps(), cfg, projectPath, runtimePath, setID)
 		return err
 	}
@@ -333,7 +332,7 @@ func bindCheckout(d *Deps) func(setID, projectPath, runtimePath string) error {
 func refreshManagedCheckout(d *Deps) func(setID, projectPath, runtimePath string) error {
 	return func(setID, projectPath, runtimePath string) error {
 		td := d.tasksDeps()
-		cfg, _ := d.loadConfig(config.DefaultConfigPath())
+		cfg, _ := d.loadDefaultConfig()
 		_, b, ok, err := binding.GetForSet(td, projectPath, setID)
 		if err != nil || !ok {
 			return err

@@ -84,7 +84,7 @@ func init() {
 func completeWorkStatusPreset(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {
@@ -94,7 +94,7 @@ func completeWorkStatusPreset(cmd *cobra.Command, args []string, toComplete stri
 }
 
 var (
-	workConfigLoad  = config.Load
+	workConfigLoad  = loadConfig
 	supervisorRun   = supervisor.Run
 	workBuildStatus = drain.BuildStatus
 	// workBuildStatusTables builds the two tables `pop work status` prints. The
@@ -118,7 +118,7 @@ func cmdOut(cmd *cobra.Command) io.Writer {
 func runWorkDaemon(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {
@@ -156,7 +156,7 @@ func runWorkDaemon(cmd *cobra.Command, args []string) error {
 func runWorkStatus(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {

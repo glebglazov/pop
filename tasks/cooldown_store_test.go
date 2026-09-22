@@ -33,6 +33,10 @@ func TestAgentCooldownConcurrentUpdates(t *testing.T) {
 	d := newTestDeps(t)
 
 	const writers = 10
+	stated := make([]time.Time, writers)
+	for i := range stated {
+		stated[i] = concurrentCooldownUntil(i)
+	}
 	var wg sync.WaitGroup
 	errCh := make(chan error, writers)
 	for i := 0; i < writers; i++ {
@@ -41,7 +45,7 @@ func TestAgentCooldownConcurrentUpdates(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			preset := fmt.Sprintf("agent-%02d", i)
-			req := AgentQuotaCooldownRequest{Preset: preset, Stated: concurrentCooldownUntil(i)}
+			req := AgentQuotaCooldownRequest{Preset: preset, Stated: stated[i]}
 			if _, err := recordAgentQuotaCooldown(d, req, time.Now(), 0); err != nil {
 				errCh <- err
 			}
@@ -62,9 +66,8 @@ func TestAgentCooldownConcurrentUpdates(t *testing.T) {
 	}
 	for i := 0; i < writers; i++ {
 		preset := fmt.Sprintf("agent-%02d", i)
-		want := concurrentCooldownUntil(i)
-		if got := store[preset].ExhaustedUntil; !got.Equal(want) {
-			t.Fatalf("%s until = %s, want %s", preset, got, want)
+		if got := store[preset].ExhaustedUntil; !got.Equal(stated[i]) {
+			t.Fatalf("%s until = %s, want %s", preset, got, stated[i])
 		}
 	}
 }

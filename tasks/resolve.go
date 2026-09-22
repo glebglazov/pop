@@ -46,7 +46,7 @@ func ResolvePathsWith(d *Deps, pd *project.Deps, loadConfig func(string) (*confi
 
 	switch {
 	case input.ProjectName != "":
-		projectPath, err = resolveByProjectName(pd, loadConfig, input.ProjectName)
+		projectPath, err = resolveByProjectName(d, pd, loadConfig, input.ProjectName)
 	case input.Path != "":
 		projectPath, err = NormalizeProjectPathWith(d, input.Path)
 	default:
@@ -109,8 +109,8 @@ func ResolveScanPaths(d *Deps, path string) (*ResolvedPaths, *RepositoryIdentity
 	return &ResolvedPaths{ProjectPath: projectPath, DefinitionPath: defPath}, id, nil
 }
 
-func resolveByProjectName(pd *project.Deps, loadConfig func(string) (*config.Config, error), name string) (string, error) {
-	cfg, err := loadConfig(config.DefaultConfigPath())
+func resolveByProjectName(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), name string) (string, error) {
+	cfg, err := loadConfig(d.defaultConfigPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("unknown project %q (no pop config)", name)
