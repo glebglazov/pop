@@ -57,6 +57,8 @@ type RunTaskOptions struct {
 	// identity through tasks, so the caller that holds both wires it. Nil ⇒ the
 	// prompt carries no convention.
 	ImplementationConvention ImplementationConvention
+	// PlanningSourcesConvention mirrors the whole-set path for a single task.
+	PlanningSourcesConvention PlanningSourcesConvention
 }
 
 // RunTaskResult is the outcome of a successful or declined run-task.
@@ -272,8 +274,10 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		opts.PreSeedTopic(sel.Task.Title)
 	}
 
-	basePrompt := BuildAgentPrompt(d, sel.TaskPath, runtimePath,
-		implementImplementationConvention(cfg, opts.ImplementationConvention, runtimePath))
+	basePrompt := buildAgentPrompt(d, sel.TaskPath, runtimePath,
+		implementImplementationConvention(cfg, opts.ImplementationConvention, runtimePath),
+		implementPlanningSources(sel.Manifest, sel.Task,
+			implementPlanningSourcesConvention(cfg, opts.PlanningSourcesConvention, runtimePath)))
 	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, resolveRepoTurnCap(d, cfg, runtimePath))
 
 	maxTries, err := plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)

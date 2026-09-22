@@ -13,6 +13,9 @@ import (
 const implementationConventionProse = "----- ANSWER: SHIPPED (pop's own) -----\n" +
 	"conventions/shipped/implementation.md\n\nName things after what they are here.\n"
 
+const planningSourcesConventionProse = "----- ANSWER: REPOSITORY -----\n" +
+	"docs/agents/planning-sources.md\n\nOpen tracker references with the tracker CLI.\n"
+
 // includeImplementationConventionConfig is the toggle on with the Refine pass
 // off — the independence ADR-0246 asks for: a repository may hold its builders
 // to the standard long before it switches the pass on.
@@ -84,7 +87,11 @@ func TestImplementPromptsCarryTheImplementationConvention(t *testing.T) {
 // with the seam wired and never consulted.
 func TestImplementPromptIsUnchangedWithoutTheToggle(t *testing.T) {
 	t.Parallel()
-	env := setupRunTaskSetFixture(t, "demo", plannedAndRemediationSet()[:1])
+	tasks := plannedAndRemediationSet()[:1]
+	tasks[0].PlanningSources = []string{"request"}
+	env := setupRunTaskSetFixtureWithKeys(t, "demo", tasks, map[string]any{
+		"planning_sources": []PlanningSource{{ID: "request", Reference: "PROJ-42"}},
+	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{changeFile: "work.txt", changeData: "x\n", checkTask: true, summary: "done"})
 
 	var buf bytes.Buffer
@@ -94,6 +101,11 @@ func TestImplementPromptIsUnchangedWithoutTheToggle(t *testing.T) {
 	opts.ImplementationConvention = func(string) (string, error) {
 		resolved = true
 		return implementationConventionProse, nil
+	}
+	planningSourcesResolved := false
+	opts.PlanningSourcesConvention = func(string) (string, error) {
+		planningSourcesResolved = true
+		return planningSourcesConventionProse, nil
 	}
 
 	if _, err := RunTaskSetWith(env.deps(), nil, func(string) (*config.Config, error) {
@@ -110,7 +122,94 @@ func TestImplementPromptIsUnchangedWithoutTheToggle(t *testing.T) {
 		t.Fatalf("prompt differs from the untoggled prompt:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 	if resolved {
-		t.Fatal("the convention seam was consulted with the toggle off")
+		t.Fatal("the implementation convention seam was consulted with the toggle off")
+	}
+	if planningSourcesResolved {
+		t.Fatal("the planning-sources convention seam was consulted with the toggle off")
+	}
+}
+
+func TestImplementPromptsCarryClaimedPlanningSources(t *testing.T) {
+	t.Parallel()
+	tasks := plannedAndRemediationSet()
+	tasks[0].PlanningSources = []string{"request"}
+	tasks[1].PlanningSources = []string{"follow-up"}
+	env := setupRunTaskSetFixtureWithKeys(t, "demo", tasks, map[string]any{
+		"planning_sources": []PlanningSource{
+			{ID: "request", Reference: "PROJ-42", Title: "Original request"},
+			{ID: "follow-up", Reference: "https://tracker.example/PROJ-43"},
+		},
+	})
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{changeFile: "work.txt", changeData: "x\n", checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	var asked []string
+	opts.PlanningSourcesConvention = func(cwd string) (string, error) {
+		asked = append(asked, cwd)
+		return planningSourcesConventionProse, nil
+	}
+
+	if _, err := RunTaskSetWith(env.deps(), nil, func(string) (*config.Config, error) {
+		return &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{IncludePlanningSources: true}}}, nil
+	}, opts); err != nil {
+		t.Fatalf("RunTaskSetWith: %v", err)
+	}
+
+	prompts := fakeAgentPrompts(agent)
+	if len(prompts) != 2 {
+		t.Fatalf("agent saw %d prompts, want one per task", len(prompts))
+	}
+	for i, prompt := range prompts {
+		for _, want := range []string{
+			"## Planning sources for this task",
+			"### This repository's planning-sources convention",
+			planningSourcesConventionProse,
+			"the sole authority on what to build",
+			"do not report the divergence",
+			"Verifier's job, not the implementer's",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("prompt %d missing %q:\n%s", i+1, want, prompt)
+			}
+		}
+		if strings.Contains(prompt, "READ-WHOLE NOTICE") {
+			t.Fatalf("prompt %d carries the command-only notice:\n%s", i+1, prompt)
+		}
+	}
+	if !strings.Contains(prompts[0], "request — Original request: PROJ-42") || strings.Contains(prompts[0], "PROJ-43") {
+		t.Fatalf("planned task prompt does not contain only its claim:\n%s", prompts[0])
+	}
+	if !strings.Contains(prompts[1], "follow-up: https://tracker.example/PROJ-43") || strings.Contains(prompts[1], "PROJ-42") {
+		t.Fatalf("Remediation task prompt does not contain only its claim:\n%s", prompts[1])
+	}
+	if len(asked) != 1 || asked[0] == "" {
+		t.Fatalf("convention resolved %v, want once against the runtime checkout", asked)
+	}
+}
+
+func TestImplementPromptIsUnchangedWhenSetDeclaresNoPlanningSources(t *testing.T) {
+	t.Parallel()
+	env := setupRunTaskSetFixture(t, "demo", plannedAndRemediationSet()[:1])
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{changeFile: "work.txt", changeData: "x\n", checkTask: true, summary: "done"})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.PlanningSourcesConvention = func(string) (string, error) { return planningSourcesConventionProse, nil }
+	if _, err := RunTaskSetWith(env.deps(), nil, func(string) (*config.Config, error) {
+		return &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{IncludePlanningSources: true}}}, nil
+	}, opts); err != nil {
+		t.Fatalf("RunTaskSetWith: %v", err)
+	}
+
+	prompts := fakeAgentPrompts(agent)
+	if len(prompts) != 1 {
+		t.Fatalf("agent saw %d prompts, want one", len(prompts))
+	}
+	if got, want := prompts[0], BuildAgentPrompt(nil, parseFakeAgentTaskPath(prompts[0]), runtimeCheckoutOf(t, prompts[0]), ""); got != want {
+		t.Fatalf("source-free prompt differs from today's prompt:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
 

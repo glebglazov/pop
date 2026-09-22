@@ -83,7 +83,8 @@ type RunTaskSetOptions struct {
 	// that holds both packages wires it. Nil ⇒ the Verifier runs on pop's frame
 	// alone.
 	VerificationConvention VerificationConvention
-	// PlanningSourcesConvention tells the Verifier how to read declared sources.
+	// PlanningSourcesConvention tells the Verifier and, when opted in, each
+	// implementer how to read declared sources.
 	PlanningSourcesConvention PlanningSourcesConvention
 	// refineRunner overrides the refine phase's agent spawn, mirroring
 	// refineCoreOptions.runRefiner. Unexported and test-only.

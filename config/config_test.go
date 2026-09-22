@@ -213,6 +213,23 @@ enabled = false
 	}
 }
 
+func TestLoadImplementIncludePlanningSources(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte("[work.implement]\ninclude_planning_sources = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ImplementIncludesPlanningSources() {
+		t.Fatal("[work.implement].include_planning_sources = true did not load as set")
+	}
+	if (&Config{}).ImplementIncludesPlanningSources() {
+		t.Fatal("an undeclared toggle must resolve to off")
+	}
+}
+
 // TestLoadIncludeRefineConventionRenameError: the retired key hard-fails naming
 // the new one (ADR-0246), rather than silently dropping the behaviour a bool
 // defaulting to false would lose.

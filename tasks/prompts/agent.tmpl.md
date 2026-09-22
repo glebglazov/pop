@@ -51,7 +51,25 @@ what you leave short of it is fixed or reported there.
 
 {{.ImplementationConvention}}
 
-{{end}}This attempt is a single non-interactive session. There is no human and no
+{{end}}{{if .PlanningSources.Recorded}}## Planning sources for this task
+
+Read the sources below for context before you build. The Acceptance criteria in
+the task remain the sole authority on what to build. If a source appears to ask
+for work that the criteria do not require, do not implement that extra work and
+do not report the divergence. Detecting and reporting divergence is the
+Verifier's job, not the implementer's.
+
+### This repository's planning-sources convention
+
+{{.PlanningSources.Convention}}
+
+{{if .PlanningSources.Sources}}### Sources this task claims
+
+{{range .PlanningSources.Sources}}- {{.ID}}{{if .Title}} — {{.Title}}{{end}}: {{.Reference}}
+{{end}}
+{{else}}This task claims no Planning sources.
+
+{{end}}{{end}}This attempt is a single non-interactive session. There is no human and no
 later turn: once you end your response the attempt is over, and ending
 without a completion sentinel (TASK_COMPLETE or TASK_FAILED) is recorded as a
 failure. To wait on a long-running command, keep polling it across successive

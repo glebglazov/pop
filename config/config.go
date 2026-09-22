@@ -303,6 +303,11 @@ type ImplementConfig struct {
 	// before the pass is ever switched on. Absent/false ⇒ the implement prompt
 	// is unchanged.
 	IncludeImplementationConvention bool `toml:"include_implementation_convention" include:"replace" desc:"Inline the resolved implementation convention into every implement prompt (default false)."`
+	// IncludePlanningSources gives each builder the source-reading convention
+	// and the Planning sources its task claims (ADR-0276). Sources provide
+	// context; Acceptance criteria remain the implementation contract. A set
+	// with no declared sources keeps the existing prompt.
+	IncludePlanningSources bool `toml:"include_planning_sources" include:"replace" desc:"Include the source-reading convention and each task's claimed Planning sources in implement prompts (default false)."`
 }
 
 // AgentGroupConfig is a Work group whose only setting is its ordered Agent
@@ -1188,6 +1193,15 @@ func (c *Config) ImplementIncludesImplementationConvention() bool {
 		return false
 	}
 	return c.Work.Implement.IncludeImplementationConvention
+}
+
+// ImplementIncludesPlanningSources reports whether implement prompts may carry
+// the source-reading convention and task claims (ADR-0276).
+func (c *Config) ImplementIncludesPlanningSources() bool {
+	if c == nil || c.Work == nil || c.Work.Implement == nil {
+		return false
+	}
+	return c.Work.Implement.IncludePlanningSources
 }
 
 // ImplementAgents returns the commands of the [work.implement].agents list, in

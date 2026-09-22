@@ -132,12 +132,18 @@ func taskHeading(task Task) string {
 // Empty renders the prompt exactly as it read before the toggle existed;
 // non-empty adds one labelled block, so a planned task and a Remediation task —
 // which drain through this same prompt — are held to the standard upfront.
+// The internal builder can also receive the opted-in Planning source block;
+// the exported compatibility path supplies none and keeps its existing output.
 //
 // The completion sentinels the template names (SUMMARY_START, SUMMARY_END,
 // TASK_COMPLETE, TASK_FAILED) stay literal text there. They are also compiled
 // into the assessor's regexes and written again in the retry lessons; folding
 // the three sites onto a shared constant is its own change (ADR-0208).
 func BuildAgentPrompt(d *Deps, taskPath, runtimePath, implementationConvention string) string {
+	return buildAgentPrompt(d, taskPath, runtimePath, implementationConvention, implementPlanningSourcesView{})
+}
+
+func buildAgentPrompt(d *Deps, taskPath, runtimePath, implementationConvention string, planningSources implementPlanningSourcesView) string {
 	if d == nil {
 		d = defaultDeps
 	}
@@ -153,7 +159,8 @@ func BuildAgentPrompt(d *Deps, taskPath, runtimePath, implementationConvention s
 		// Named as a path, like the task body and like the Refine report every
 		// attended prompt carries: a builder in the checkout opens the file, and
 		// a map of a large area never has to fit in an argv or a context window.
-		Exploration: explorationBlock(d, tasksDir),
+		Exploration:     explorationBlock(d, tasksDir),
+		PlanningSources: planningSources,
 	}
 	if convention := strings.TrimSpace(implementationConvention); convention != "" {
 		view.ImplementationConventionRecorded = true
@@ -163,8 +170,7 @@ func BuildAgentPrompt(d *Deps, taskPath, runtimePath, implementationConvention s
 }
 
 // agentPromptView is what the AFK worker's template renders against: a long
-// instruction document with four paths in it and one conditional section, the
-// repository's implementation convention.
+// instruction document with its paths and optional repository context blocks.
 type agentPromptView struct {
 	TaskPath     string
 	TasksDir     string
@@ -180,6 +186,32 @@ type agentPromptView struct {
 	// so the template never asks why a field is empty.
 	ImplementationConventionRecorded bool
 	ImplementationConvention         string
+	PlanningSources                  implementPlanningSourcesView
+}
+
+// implementPlanningSourcesView is present only when the toggle is on and the
+// set declares sources. This keeps every other prompt byte-identical.
+type implementPlanningSourcesView struct {
+	Recorded   bool
+	Convention string
+	Sources    []PlanningSource
+}
+
+func implementPlanningSources(m *Manifest, task Task, convention string) implementPlanningSourcesView {
+	if m == nil || len(m.PlanningSources) == 0 || strings.TrimSpace(convention) == "" {
+		return implementPlanningSourcesView{}
+	}
+	claimed := make(map[string]bool, len(task.PlanningSources))
+	for _, id := range task.PlanningSources {
+		claimed[id] = true
+	}
+	sources := make([]PlanningSource, 0, len(claimed))
+	for _, source := range m.PlanningSources {
+		if claimed[source.ID] {
+			sources = append(sources, source)
+		}
+	}
+	return implementPlanningSourcesView{Recorded: true, Convention: strings.TrimSpace(convention), Sources: sources}
 }
 
 // BuildHITLAssistancePrompt generates the attended-agent prompt shown when a

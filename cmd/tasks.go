@@ -1245,6 +1245,8 @@ func verificationConvention(d *tasks.Deps) tasks.VerificationConvention {
 	}
 }
 
+// planningSourcesConvention wires both consumers of the source-reading rules:
+// the Verifier and the optional implement-prompt block (ADR-0276).
 func planningSourcesConvention(d *tasks.Deps) tasks.PlanningSourcesConvention {
 	return func(cwd string) (string, error) {
 		stack, err := conventions.Resolve(&conventions.Deps{FS: d.FS, Tasks: d}, conventions.KindPlanningSources, cwd)
@@ -1454,25 +1456,26 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		return fmt.Errorf("tasks implement: invalid --timeout %q: %w", taskTimeout, err)
 	}
 	result, err := tasks.RunTaskWith(d, taskProjectDeps(), taskConfigLoad, tasks.RunTaskOptions{
-		ResolveInput:             taskResolveInput(),
-		TaskPathOverride:         taskPath,
-		AgentPreset:              selectedTaskAgentPreset(),
-		AgentPresets:             selectedTaskAgentPresets(),
-		AgentExplicit:            agentExplicit,
-		AgentCmd:                 taskAgentCmd,
-		AgentOutput:              taskAgentOutput,
-		AllowDirty:               taskAllowDirty,
-		MaxTries:                 taskMaxTries,
-		MaxTriesExplicit:         maxTriesExplicit,
-		Timeout:                  timeout,
-		Yes:                      taskRunYes,
-		Wait:                     taskImplementWaitChoice(),
-		ConfirmIn:                stdin,
-		ConfirmOut:               stderr,
-		Output:                   stdout,
-		BindCheckout:             taskBindCheckout(d),
-		PreSeedTopic:             taskPreSeedTopic(),
-		ImplementationConvention: implementationConvention(d),
+		ResolveInput:              taskResolveInput(),
+		TaskPathOverride:          taskPath,
+		AgentPreset:               selectedTaskAgentPreset(),
+		AgentPresets:              selectedTaskAgentPresets(),
+		AgentExplicit:             agentExplicit,
+		AgentCmd:                  taskAgentCmd,
+		AgentOutput:               taskAgentOutput,
+		AllowDirty:                taskAllowDirty,
+		MaxTries:                  taskMaxTries,
+		MaxTriesExplicit:          maxTriesExplicit,
+		Timeout:                   timeout,
+		Yes:                       taskRunYes,
+		Wait:                      taskImplementWaitChoice(),
+		ConfirmIn:                 stdin,
+		ConfirmOut:                stderr,
+		Output:                    stdout,
+		BindCheckout:              taskBindCheckout(d),
+		PreSeedTopic:              taskPreSeedTopic(),
+		ImplementationConvention:  implementationConvention(d),
+		PlanningSourcesConvention: planningSourcesConvention(d),
 	})
 	if err != nil {
 		return err

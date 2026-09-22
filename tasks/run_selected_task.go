@@ -98,7 +98,8 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		opts.PreSeedTopic(sel.Task.Title)
 	}
 
-	basePrompt := BuildAgentPrompt(d, sel.TaskPath, runtimePath, r.implementationConvention)
+	basePrompt := buildAgentPrompt(d, sel.TaskPath, runtimePath, r.implementationConvention,
+		implementPlanningSources(sel.Manifest, sel.Task, r.planningSourcesConvention))
 	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, r.turnCap)
 
 	resolveSpec := newEffortSpecResolver(opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)

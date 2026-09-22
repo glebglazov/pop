@@ -45,7 +45,8 @@ type WholeSetOptions struct {
 	// for the drain's verify phase (ADR-0227); forwarded verbatim to the task-set
 	// executor, which hands it to the Verifier as its mandate.
 	VerificationConvention tasks.VerificationConvention
-	// PlanningSourcesConvention tells the Verifier how to read declared sources.
+	// PlanningSourcesConvention tells the Verifier and, when opted in, each
+	// implementer how to read declared sources.
 	PlanningSourcesConvention tasks.PlanningSourcesConvention
 	// SkipExplore drains a set carrying the Explore directive once without
 	// exploring it (`--skip-explore`, ADR-0262); forwarded verbatim to the

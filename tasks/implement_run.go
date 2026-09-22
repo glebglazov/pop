@@ -77,6 +77,9 @@ type implementRun struct {
 	// Resolved once per run, beside turnCap and for the same reason: it describes
 	// the repository the run drains, not any one task.
 	implementationConvention string
+	// planningSourcesConvention is the `planning-sources` convention prose an
+	// implement prompt may carry. The selected task supplies its own claims.
+	planningSourcesConvention string
 
 	// drain is the live Drain handle — nil while parked at a gate or a
 	// quota-recovery wait. parkDrain/ensureDrain mutate it and the deferred
@@ -164,24 +167,25 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	return &implementRun{
-		d:                        d,
-		loadConfig:               loadConfig,
-		opts:                     opts,
-		plan:                     plan,
-		resolved:                 resolved,
-		runtimePath:              runtimePath,
-		statePath:                statePath,
-		taskSetID:                taskSetID,
-		hitlFallback:             hitlFallback,
-		confirmOut:               confirmOut,
-		out:                      out,
-		refresh:                  refresh,
-		drain:                    drain,
-		admission:                admission,
-		admissionWaited:          waited,
-		turnCap:                  resolveRepoTurnCap(d, plan.cfg, runtimePath),
-		implementationConvention: implementImplementationConvention(plan.cfg, opts.ImplementationConvention, runtimePath),
-		agentProbeMemo:           newAgentAvailabilityProbeMemo(),
+		d:                         d,
+		loadConfig:                loadConfig,
+		opts:                      opts,
+		plan:                      plan,
+		resolved:                  resolved,
+		runtimePath:               runtimePath,
+		statePath:                 statePath,
+		taskSetID:                 taskSetID,
+		hitlFallback:              hitlFallback,
+		confirmOut:                confirmOut,
+		out:                       out,
+		refresh:                   refresh,
+		drain:                     drain,
+		admission:                 admission,
+		admissionWaited:           waited,
+		turnCap:                   resolveRepoTurnCap(d, plan.cfg, runtimePath),
+		implementationConvention:  implementImplementationConvention(plan.cfg, opts.ImplementationConvention, runtimePath),
+		planningSourcesConvention: implementPlanningSourcesConvention(plan.cfg, opts.PlanningSourcesConvention, runtimePath),
+		agentProbeMemo:            newAgentAvailabilityProbeMemo(),
 	}, nil
 }
 
