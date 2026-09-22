@@ -49,7 +49,7 @@ func StatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
 	detailRow := tasks.FindRow(refresh, row.ID)
 	var cfg *config.Config
 	if d.LoadConfig != nil {
-		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+		cfg, _ = d.LoadConfig(config.DefaultConfigPathWith(d.Tasks.ConfigDeps()))
 	}
 	var buf bytes.Buffer
 	tasks.RenderTaskSetDetail(d.Tasks, cfg, &buf, row.ID, detailRow, refresh.Manifests[row.ID])

@@ -110,11 +110,11 @@ func TestDrainHoldsTheLastGoodConfigUntilAReadRecovers(t *testing.T) {
 		t.Fatalf("failed reads = %d, want a hold spanning at least two turns", failedReads)
 	}
 	out := buf.String()
-	holdLine := "Configuration re-read failed for " + config.DefaultConfigPath() + "; keeping the previous configuration: load config: parse broken TOML"
+	holdLine := "Configuration re-read failed for " + env.deps().defaultConfigPath() + "; keeping the previous configuration: load config: parse broken TOML"
 	if got := strings.Count(out, holdLine); got != 1 {
 		t.Fatalf("hold lines = %d, want 1 line %q; output:\n%s", got, holdLine, out)
 	}
-	recoveryLine := "Configuration re-read recovered for " + config.DefaultConfigPath()
+	recoveryLine := "Configuration re-read recovered for " + env.deps().defaultConfigPath()
 	if got := strings.Count(out, recoveryLine); got != 1 {
 		t.Fatalf("recovery lines = %d, want 1 line %q; output:\n%s", got, recoveryLine, out)
 	}

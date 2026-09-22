@@ -74,11 +74,12 @@ func recordKnownSpendRateModel(keys map[string]struct{}, normalize func(string) 
 }
 
 // loadDeclaredSpendRates reads merged [spend.model_rates] from config.
-func loadDeclaredSpendRates(loadConfig func(string) (*config.Config, error)) map[string]ModelRates {
+func loadDeclaredSpendRates(d *Deps, loadConfig func(string) (*config.Config, error)) map[string]ModelRates {
+	cd := d.ConfigDeps()
 	if loadConfig == nil {
-		loadConfig = config.Load
+		loadConfig = func(path string) (*config.Config, error) { return config.LoadWith(cd, path) }
 	}
-	cfg, err := loadConfig(config.DefaultConfigPath())
+	cfg, err := loadConfig(config.DefaultConfigPathWith(cd))
 	if err != nil || cfg == nil || cfg.Spend == nil || len(cfg.Spend.ModelRates) == 0 {
 		return nil
 	}

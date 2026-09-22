@@ -567,6 +567,7 @@ func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
 	d := DefaultDeps()
 	d.Tasks = td
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: root}}}
+	d.LoadConfig = func(string) (*config.Config, error) { return cfg, nil }
 
 	decisions, err := Scan(d, cfg)
 	if err != nil {

@@ -105,7 +105,7 @@ func init() {
 func completeWorkStatusPreset(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {
@@ -115,7 +115,7 @@ func completeWorkStatusPreset(cmd *cobra.Command, args []string, toComplete stri
 }
 
 var (
-	workConfigLoad       = config.Load
+	workConfigLoad       = loadConfig
 	supervisorRun        = supervisor.Run
 	supervisorRunWork    = supervisor.RunWork
 	supervisorRunErrands = supervisor.RunErrands
@@ -149,7 +149,7 @@ func runWorkHalf(cmd *cobra.Command, args []string) error {
 func runConfiguredDaemon(run func(*drain.Deps, time.Duration, io.Writer, <-chan os.Signal) error) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {
@@ -195,7 +195,7 @@ func runErrandHalf(cmd *cobra.Command, args []string) error {
 func runWorkStatus(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {

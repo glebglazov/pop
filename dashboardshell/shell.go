@@ -94,7 +94,7 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Sh
 		d = drain.DefaultDeps()
 	}
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = config.DefaultConfigPathWith(d.Tasks.ConfigDeps())
 	}
 	if cfg == nil {
 		var err error

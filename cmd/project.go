@@ -166,9 +166,9 @@ func DefaultProjectDeps() *ProjectDeps {
 		LoadConfig: func() (*config.Config, error) {
 			cfgPath := cfgFile
 			if cfgPath == "" {
-				cfgPath = config.DefaultConfigPath()
+				cfgPath = defaultConfigPath()
 			}
-			return config.Load(cfgPath)
+			return loadConfig(cfgPath)
 		},
 		LoadHistory: func() (*history.History, error) {
 			return history.LoadWith(cmdHistoryDeps())
@@ -216,8 +216,8 @@ func DefaultProjectDeps() *ProjectDeps {
 		SwitchAndZoom: func(target string) error {
 			return switchToTmuxTargetAndZoomWith(defaultTmuxMod, target)
 		},
-		RunCustomCommand:         executeProjectCustomCommand,
-		EnsureSystemState:        ensureSystemState,
+		RunCustomCommand:  executeProjectCustomCommand,
+		EnsureSystemState: ensureSystemState,
 		RunConfigure: func() error {
 			cd := defaultConfigureDeps()
 			cd.ShowWelcome = true
@@ -227,7 +227,7 @@ func DefaultProjectDeps() *ProjectDeps {
 		UpdateNotice: pickerUpdateNotice,
 
 		ResolveWorkbenches: func(cfg *config.Config, path string) []config.Workbench {
-			templates, _ := cfg.ResolveWorkbenchesWith(config.DefaultDeps(), path)
+			templates, _ := cfg.ResolveWorkbenchesWith(cmdConfigDeps(), path)
 			return templates
 		},
 
@@ -257,7 +257,7 @@ func RunProject(d *ProjectDeps) error {
 	// LoadConfig hides how the config is actually loaded.
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 
 	cfg, err := d.LoadConfig()

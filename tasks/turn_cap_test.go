@@ -265,7 +265,7 @@ func TestResolveRepoTurnCapReadsOneBoundPerRepository(t *testing.T) {
 	cfg := &config.Config{Repo: map[string]config.RepoOverrideConfig{
 		main: {TurnCap: intPtr(12)},
 	}}
-	d := DefaultDeps()
+	d := newTestDeps(t)
 
 	if got := resolveRepoTurnCap(d, cfg, feature); got != 12 {
 		t.Fatalf("turn cap at the sibling worktree = %d, want 12", got)

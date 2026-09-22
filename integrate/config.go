@@ -10,7 +10,7 @@ import (
 // components from the merged [integrations] skills list. Status wiring is
 // not included — callers always install it separately.
 func BaselineLoader(cd *config.Deps) ([]ComponentID, error) {
-	cfg, err := config.LoadWith(cd, config.DefaultConfigPathWith(cd))
+	cfg, err := config.LoadDefaultWith(cd)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}

@@ -102,7 +102,7 @@ type implementRun struct {
 // which then runs under that deferred. Failing before or at BeginDrain leaves no
 // live Drain, so the caller returns the error directly with nothing to finalize.
 func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunTaskSetOptions) (*implementRun, error) {
-	plan, err := newRunPlan(loadConfig, runPlanInput{
+	plan, err := newRunPlan(d, loadConfig, runPlanInput{
 		agentPresets:  opts.AgentPresets,
 		agentPreset:   opts.AgentPreset,
 		agentExplicit: opts.AgentExplicit,
@@ -303,15 +303,15 @@ func (r *implementRun) setup() error {
 // It reports only the transition into and out of a failed-read run; every failed
 // turn in between silently keeps the last snapshot.
 func (r *implementRun) reloadConfig() {
-	if err := r.plan.reloadConfig(r.loadConfig); err != nil {
+	if err := r.plan.reloadConfig(r.d, r.loadConfig); err != nil {
 		if !r.configReadFailed {
-			outputFor(r.out).line(ansiYellow, "Configuration re-read failed for %s; keeping the previous configuration: %v", config.DefaultConfigPath(), err)
+			outputFor(r.out).line(ansiYellow, "Configuration re-read failed for %s; keeping the previous configuration: %v", r.d.defaultConfigPath(), err)
 		}
 		r.configReadFailed = true
 		return
 	}
 	if r.configReadFailed {
-		outputFor(r.out).line(ansiGreen, "Configuration re-read recovered for %s", config.DefaultConfigPath())
+		outputFor(r.out).line(ansiGreen, "Configuration re-read recovered for %s", r.d.defaultConfigPath())
 	}
 	r.configReadFailed = false
 }

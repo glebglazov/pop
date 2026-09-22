@@ -24,7 +24,7 @@ func TestLoadWorkbenchSetupAndRoundTrip(t *testing.T) {
 			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := Load(path)
+			cfg, err := LoadWith(isolatedDeps(t), path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -35,7 +35,7 @@ func TestLoadWorkbenchSetupAndRoundTrip(t *testing.T) {
 			if err := os.WriteFile(path, encoded.Bytes(), 0600); err != nil {
 				t.Fatal(err)
 			}
-			again, err := Load(path)
+			again, err := LoadWith(isolatedDeps(t), path)
 			if err != nil {
 				t.Fatalf("reload: %v\n%s", err, encoded.String())
 			}
@@ -64,7 +64,7 @@ func TestLoadRefusesMalformedWorkbenchSetup(t *testing.T) {
 			if err := os.WriteFile(path, []byte("[[workbenches]]\nname = \"dev\"\nbefore_apply = "+setup), 0600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Load(path)
+			_, err := LoadWith(isolatedDeps(t), path)
 			if err == nil || !strings.Contains(err.Error(), "before_apply") || !(strings.Contains(err.Error(), "must be") || strings.Contains(err.Error(), "expected")) {
 				t.Fatalf("error = %v, want expected setup shape", err)
 			}

@@ -30,7 +30,7 @@ func CompleteProjectNames() ([]string, error) {
 
 // CompleteProjectNamesWith returns picker-visible project names using injected dependencies.
 func CompleteProjectNamesWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error)) ([]string, error) {
-	cfg, err := loadConfig(config.DefaultConfigPath())
+	cfg, err := loadConfig(d.defaultConfigPath())
 	if err != nil {
 		if isConfigMissing(err) {
 			return nil, nil

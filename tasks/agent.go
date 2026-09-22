@@ -1432,11 +1432,11 @@ func validateAgentOutputMode(mode AgentOutputMode) error {
 	}
 }
 
-func loadConfigIfPresent(loadConfig func(string) (*config.Config, error)) (*config.Config, error) {
+func loadConfigIfPresent(d *Deps, loadConfig func(string) (*config.Config, error)) (*config.Config, error) {
 	if loadConfig == nil {
 		return nil, nil
 	}
-	cfg, err := loadConfig(config.DefaultConfigPath())
+	cfg, err := loadConfig(d.defaultConfigPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -1446,7 +1446,7 @@ func loadConfigIfPresent(loadConfig func(string) (*config.Config, error)) (*conf
 	return cfg, nil
 }
 
-func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), preset string, override AgentOutputMode) (AgentOutputMode, error) {
+func resolveAgentOutputMode(d *Deps, loadConfig func(string) (*config.Config, error), preset string, override AgentOutputMode) (AgentOutputMode, error) {
 	if override != "" {
 		if err := validateAgentOutputMode(override); err != nil {
 			return "", err
@@ -1456,7 +1456,7 @@ func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), pre
 	if loadConfig == nil {
 		return AgentOutputAuto, nil
 	}
-	cfg, err := loadConfigIfPresent(loadConfig)
+	cfg, err := loadConfigIfPresent(d, loadConfig)
 	if err != nil {
 		return "", err
 	}

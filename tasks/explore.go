@@ -110,7 +110,7 @@ func ExploreTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*con
 	if err != nil {
 		return nil, err
 	}
-	cfg, _ := loadConfig(config.DefaultConfigPath())
+	cfg, _ := loadConfig(d.defaultConfigPath())
 	return exploreResolvedSet(d, cfg, exploreCoreOptions{
 		DefPath:     resolved.DefinitionPath,
 		RuntimePath: runtimePath,

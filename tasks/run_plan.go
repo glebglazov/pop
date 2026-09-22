@@ -33,8 +33,8 @@ type runPlan struct {
 // nothing else on the plan, which is what separates it from reloading the plan:
 // every field beside cfg is frozen for the whole Drain. A failed read keeps the
 // previous snapshot, matching the gate menu's reload contract.
-func (p *runPlan) reloadConfig(loadConfig func(string) (*config.Config, error)) error {
-	cfg, err := loadConfigIfPresent(loadConfig)
+func (p *runPlan) reloadConfig(d *Deps, loadConfig func(string) (*config.Config, error)) error {
+	cfg, err := loadConfigIfPresent(d, loadConfig)
 	if err != nil {
 		return err
 	}
@@ -58,8 +58,8 @@ type runPlanInput struct {
 // error with the same message text and in the same order both entry points used
 // inline, so a malformed [work.implement.git] entry (commit overrides) still fails before
 // any commit could happen and setup-failure behavior stays byte-identical.
-func newRunPlan(loadConfig func(string) (*config.Config, error), in runPlanInput) (*runPlan, error) {
-	cfg, err := loadConfigIfPresent(loadConfig)
+func newRunPlan(d *Deps, loadConfig func(string) (*config.Config, error), in runPlanInput) (*runPlan, error) {
+	cfg, err := loadConfigIfPresent(d, loadConfig)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
@@ -67,7 +67,7 @@ func newRunPlan(loadConfig func(string) (*config.Config, error), in runPlanInput
 	baseAgentPreset := baseAgentPresets[0]
 	agentOutput := AgentOutputAuto
 	if in.agentCmd == "" {
-		agentOutput, err = resolveAgentOutputMode(loadConfig, baseAgentPreset, in.agentOutput)
+		agentOutput, err = resolveAgentOutputMode(d, loadConfig, baseAgentPreset, in.agentOutput)
 		if err != nil {
 			return nil, exitErr(ExitSetup, "%v", err)
 		}
@@ -80,7 +80,7 @@ func newRunPlan(loadConfig func(string) (*config.Config, error), in runPlanInput
 	// Resolve commit-config overrides up front (the lazy validation point) so a
 	// malformed [work.implement.git] entry fails the drain hard before any commit —
 	// including the per-task dirty-runtime checkpoint, which commits earliest.
-	commitOverrides, err := resolveCommitConfigOverrides(loadConfig)
+	commitOverrides, err := resolveCommitConfigOverrides(d, loadConfig)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
@@ -137,11 +137,11 @@ func resolveAgentQuotaRetryAfter(cfg *config.Config) (time.Duration, error) {
 // overrides for the drain path. A nil loadConfig (or a load that fails to find
 // a config file) yields no overrides — commits behave exactly as today. A
 // malformed entry is returned as a hard error so the caller fails the drain.
-func resolveCommitConfigOverrides(loadConfig func(string) (*config.Config, error)) ([]string, error) {
+func resolveCommitConfigOverrides(d *Deps, loadConfig func(string) (*config.Config, error)) ([]string, error) {
 	if loadConfig == nil {
 		return nil, nil
 	}
-	cfg, err := loadConfig(config.DefaultConfigPath())
+	cfg, err := loadConfig(d.defaultConfigPath())
 	if err != nil {
 		// A missing/unreadable config is not a drain-stopping error here; the
 		// rest of the run already tolerates it. Only a present-but-malformed

@@ -27,6 +27,7 @@ func writeDaemonConfig(t *testing.T, body string) string {
 }
 
 func TestRunWorkDaemonHonorsConfiguredPollInterval(t *testing.T) {
+	isolateCmdConfig(t)
 	path := writeDaemonConfig(t, `
 [work.daemon]
 poll_interval = "2s"
@@ -55,6 +56,7 @@ poll_interval = "2s"
 }
 
 func TestDaemonRunStartsBothHalvesAndWorkAliasStartsOnlyWork(t *testing.T) {
+	isolateCmdConfig(t)
 	path := writeDaemonConfig(t, "")
 	oldCfgFile := cfgFile
 	oldRun := supervisorRun
@@ -262,6 +264,7 @@ func TestWorkStatusUnknownPresetRefused(t *testing.T) {
 }
 
 func TestWorkDaemonUsesShippedActivePreset(t *testing.T) {
+	isolateCmdConfig(t)
 	path := writeDaemonConfig(t, `
 [work.daemon]
 poll_interval = "2s"
