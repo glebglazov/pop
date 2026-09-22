@@ -71,10 +71,10 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 func runConfigureWith(d *configureDeps) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 
-	cfg, err := config.Load(cfgPath)
+	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		cfg = &config.Config{}
 	}

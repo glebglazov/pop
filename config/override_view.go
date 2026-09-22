@@ -213,6 +213,7 @@ func overrideValueLayers(d *Deps, configPath string) ([]overrideValueLayer, erro
 // not there decodes to an empty document: the dashboard has to open on a machine
 // that has never written a config.toml.
 func genericTOMLFile(d *Deps, path string) (map[string]any, error) {
+	guardTestConfigFile(path)
 	data, err := d.FS.ReadFile(path)
 	if err != nil {
 		return map[string]any{}, nil

@@ -21,7 +21,7 @@ func writeConfig(t *testing.T, body string) string {
 // takes a table entry with display_name/cmd, and a bare string is sugar for an
 // entry whose cmd is that string.
 func TestAgentEntryTableAndStringForms(t *testing.T) {
-	cfg, err := Load(writeConfig(t, `
+	cfg, err := LoadWith(newOverrideFixture(t).d, writeConfig(t, `
 [work.implement]
 agents = ["codex", { display_name = "Claude Usual", cmd = "claude --model opus" }]
 
@@ -67,7 +67,8 @@ agents = [{ display_name = "Cursor Fast", cmd = "cursor --model composer-2.5-fas
 // decodes identically to the same entries written inline — the decoder hands
 // back a different Go shape for each.
 func TestAgentEntryTableBlocksMatchInline(t *testing.T) {
-	blocks, err := Load(writeConfig(t, `
+	d := newOverrideFixture(t).d
+	blocks, err := LoadWith(d, writeConfig(t, `
 [[work.attended.agents]]
 display_name = "Claude Usual"
 cmd = "claude --model opus"
@@ -78,7 +79,7 @@ cmd = "cursor"
 	if err != nil {
 		t.Fatal(err)
 	}
-	inline, err := Load(writeConfig(t, `
+	inline, err := LoadWith(d, writeConfig(t, `
 [work.attended]
 agents = [{ display_name = "Claude Usual", cmd = "claude --model opus" }, { cmd = "cursor" }]
 `))
@@ -94,7 +95,7 @@ agents = [{ display_name = "Claude Usual", cmd = "claude --model opus" }, { cmd 
 // reported with its group and position, the load still succeeds, and the good
 // entries around it survive.
 func TestAgentEntryMalformedIsAFinding(t *testing.T) {
-	cfg, err := Load(writeConfig(t, `
+	cfg, err := LoadWith(newOverrideFixture(t).d, writeConfig(t, `
 [work.attended]
 agents = ["claude", { display_name = "No Command" }, 7, "cursor"]
 `))

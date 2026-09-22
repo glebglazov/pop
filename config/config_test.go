@@ -125,7 +125,7 @@ agents = ["claude --model opus", "cursor"]
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(newOverrideFixture(t).d, configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ max_remediation_depth = 2
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ enabled = false
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ enabled = false
 	if err := os.WriteFile(emptyPath, []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	empty, err := Load(emptyPath)
+	empty, err := LoadWith(isolatedDeps(t), emptyPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ include_refine_convention = true
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(configPath)
+	_, err := LoadWith(isolatedDeps(t), configPath)
 	if err == nil {
 		t.Fatal("Load accepted include_refine_convention; want a rename error")
 	}
@@ -246,7 +246,7 @@ agents = ["codex", "claude"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ agents = ["codex", "claude"]
 	if err := os.WriteFile(emptyPath, []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	empty, err := Load(emptyPath)
+	empty, err := LoadWith(isolatedDeps(t), emptyPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ pick_on_create = true
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ order = ["minimal", "<reset>"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ output = "auto"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ command = "go test ./..."
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ command = "go test ./..."
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +509,7 @@ command = "go test ./..."
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +555,7 @@ command = "zsh"
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +598,7 @@ command = "go test ./..."
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +638,7 @@ command = "vim"
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +663,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -702,7 +702,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -742,7 +742,7 @@ workbenches = [
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -960,7 +960,7 @@ light = [{ model = "opencode/kimi-k2.6" }]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +986,7 @@ extreme = [{ model = "opencode/claude-opus-4-8" }]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatalf("Load returned a fatal error for a stale effort tier: %v", err)
 	}
@@ -1022,7 +1022,7 @@ heavy = [{ model = "opencode/claude-opus-4-8", reasoning = "high", temperature =
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatalf("Load returned a fatal error for a stale effort entry key: %v", err)
 	}
@@ -1052,7 +1052,7 @@ heavy = [{ model = "opencode/claude-opus-4-8" }]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1076,7 +1076,7 @@ func TestLoadSyntaxErrorIsFatal(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("this is = not valid = toml\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(configPath); err == nil {
+	if _, err := LoadWith(isolatedDeps(t), configPath); err == nil {
 		t.Fatal("Load accepted unparseable TOML; want a fatal error")
 	}
 }
@@ -1095,7 +1095,7 @@ projects = [
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatalf("Load returned a fatal error for a wrong-typed display_depth: %v", err)
 	}
@@ -1280,7 +1280,7 @@ commit_config_overrides = ["this-is-not-valid"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatalf("global Load must tolerate a malformed override entry, got: %v", err)
 	}
@@ -1298,7 +1298,7 @@ commit_config_overrides = ["commit.gpgsign=false"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1325,7 +1325,7 @@ commit_config_overrides = ["commit.gpgsign=false"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1348,7 +1348,7 @@ agents = ["codex"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1383,7 +1383,7 @@ crash_retry_delays = ["10s", "1m", "5m"]
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1552,7 +1552,7 @@ func TestPopTOMLPresenceDoesNotRegisterProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	d := &Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
 			if key == "XDG_DATA_HOME" {
@@ -1615,7 +1615,7 @@ func TestLoadSkillsPrefixFromTOML(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte("exclude_current_session = true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1629,7 +1629,7 @@ func TestLoadSkillsPrefixFromTOML(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte("[integrations]\nskills_prefix = \"\"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1682,7 +1682,7 @@ poll_interval = "30s"
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1857,7 +1857,7 @@ max_tries = 2
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2169,9 +2169,9 @@ command = "echo test"
 				t.Fatalf("failed to write temp config: %v", err)
 			}
 
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 
 			// Check number of commands
@@ -2266,9 +2266,9 @@ display_depth = 3
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 			if len(cfg.Projects) != tt.expectedCount {
 				t.Fatalf("got %d projects, want %d", len(cfg.Projects), tt.expectedCount)
@@ -2315,9 +2315,9 @@ func TestUpdateNoticeEnabled(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 			if got := cfg.UpdateNoticeEnabled(); got != tt.expected {
 				t.Errorf("UpdateNoticeEnabled() = %v, want %v", got, tt.expected)
@@ -2343,7 +2343,7 @@ socket = "pop"
 `), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2357,7 +2357,7 @@ socket = "pop"
 		if err := os.WriteFile(configPath, []byte(`projects = [{ path = "~/Dev" }]`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2406,7 +2406,7 @@ projects = [{ path = "/main" }]
 `), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2477,7 +2477,7 @@ include = "~/dotfiles/pop-tmux.conf"
 `), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2491,7 +2491,7 @@ include = "~/dotfiles/pop-tmux.conf"
 		if err := os.WriteFile(configPath, []byte(`projects = [{ path = "~/Dev" }]`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2543,7 +2543,7 @@ projects = [{ path = "/main" }]
 `), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2622,9 +2622,9 @@ func TestDashboardZoomOnSwitch(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 			if got := cfg.DashboardZoomOnSwitch(); got != tt.expected {
 				t.Errorf("DashboardZoomOnSwitch() = %v, want %v", got, tt.expected)
@@ -2673,9 +2673,9 @@ func TestGetDisambiguationStrategy(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 			if cfg.GetDisambiguationStrategy() != tt.expected {
 				t.Errorf("GetDisambiguationStrategy() = %q, want %q", cfg.GetDisambiguationStrategy(), tt.expected)
@@ -2922,9 +2922,9 @@ includes = ["work.toml"]
 projects = [{ path = "~/Personal/*" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if len(cfg.Projects) != 2 {
 			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
@@ -2954,9 +2954,9 @@ includes = ["a.toml", "b.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if len(cfg.Projects) != 3 {
 			t.Fatalf("got %d projects, want 3", len(cfg.Projects))
@@ -3016,9 +3016,9 @@ includes = ["extra.toml"]
 projects = [{ path = "/main" }]
 `), 0644)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if len(cfg.Projects) != 2 {
 			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
@@ -3033,7 +3033,7 @@ includes = ["nonexistent.toml"]
 projects = [{ path = "/main" }]
 `), 0644)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("expected no error for missing include, got: %v", err)
 		}
@@ -3069,9 +3069,9 @@ includes = ["extra.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		// Main config values should be preserved (defaults)
 		if cfg.ShouldExcludeCurrentSession() {
@@ -3120,9 +3120,9 @@ includes = ["extra.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		// Nested includes should not be processed
 		if len(cfg.Projects) != 2 {
@@ -3149,9 +3149,9 @@ includes = []
 projects = [{ path = "/main" }]
 `), 0644)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if len(cfg.Projects) != 1 {
 			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
@@ -3163,9 +3163,9 @@ projects = [{ path = "/main" }]
 		configPath := filepath.Join(tmpDir, "config.toml")
 		os.WriteFile(configPath, []byte(`projects = [{ path = "/main" }]`), 0644)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if len(cfg.Projects) != 1 {
 			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
@@ -3188,7 +3188,7 @@ includes = ["malformed.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		_, err := Load(configPath)
+		_, err := LoadWith(isolatedDeps(t), configPath)
 		if err == nil {
 			t.Fatalf("expected error for malformed include, got nil")
 		}
@@ -3205,7 +3205,7 @@ includes = ["nonexistent.toml"]
 projects = [{ path = "/main" }]
 `), 0644)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("expected no error for missing include, got: %v", err)
 		}
@@ -3245,7 +3245,7 @@ includes = ["%s"]
 projects = [{ path = "/main" }]
 `, filepath.Join(tmpDir, "extra*.toml")))
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			// Glob path doesn't expand, so it's treated as literal and won't exist
 			// This should result in a warning about missing include, not an error
@@ -3281,9 +3281,9 @@ includes = ["private.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		block, ok := cfg.Repo["/home/user/secret"]
 		if !ok {
@@ -3318,9 +3318,9 @@ includes = ["extra.toml"]
 trunk = "/shared/repo/parent"
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		block, ok := cfg.Repo["/shared/repo"]
 		if !ok {
@@ -3359,9 +3359,9 @@ trunk = "/shared/repo/second"
 includes = ["first.toml", "second.toml"]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		block, ok := cfg.Repo["/shared/repo"]
 		if !ok {
@@ -3397,9 +3397,9 @@ includes = ["private.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if got, want := cfg.ImplementAgents(), []string{"codex", "claude"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("implement agents = %#v, want %#v", got, want)
@@ -3432,9 +3432,9 @@ includes = ["private.toml"]
 agents = ["claude"]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if got, want := cfg.ImplementAgents(), []string{"claude"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("implement agents = %#v, want %#v", got, want)
@@ -3471,9 +3471,9 @@ light = [{ model = "sonnet", reasoning = "high" }]
 includes = ["private.toml"]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		got := cfg.Effort["claude"].Heavy
 		want := []EffortModel{{Model: "opus", Reasoning: "xhigh"}}
@@ -3503,9 +3503,9 @@ includes = ["private.toml"]
 heavy = [{ model = "opus", reasoning = "high" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		got := cfg.Effort["claude"].Heavy
 		want := []EffortModel{{Model: "opus", Reasoning: "high"}}
@@ -3548,9 +3548,9 @@ includes = ["private.toml"]
 output = "auto"
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		// The include set a preset the parent never mentions, and the parent's own
 		// preset survives untouched: the merge is per preset, not whole-table.
@@ -3587,9 +3587,9 @@ attended_model = "opus"
 `), 0644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		for _, key := range []string{"attended_args", "attended_model"} {
 			found := false
@@ -3618,9 +3618,9 @@ attended_flags = ["--nope"]
 `), 0644); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		found := false
 		for _, f := range cfg.Findings {
@@ -3653,9 +3653,9 @@ unknown_field = "oops"
 includes = ["private.toml"]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if len(cfg.Warnings) != 1 {
 			t.Fatalf("expected 1 warning for unknown key, got %d: %v", len(cfg.Warnings), cfg.Warnings)
@@ -3686,9 +3686,9 @@ includes = ["extra.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if len(cfg.Projects) != 2 {
 			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
@@ -3721,9 +3721,9 @@ includes = ["private.toml"]
 projects = [{ path = "/main" }]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if !cfg.WorkbenchPickOnCreate() {
 			t.Error("pick_on_create from include should be enabled")
@@ -3758,9 +3758,9 @@ includes = ["private.toml"]
 pick_on_create = false
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		// Main defined pick_on_create=false → wins; include's true is skipped.
 		if cfg.WorkbenchPickOnCreate() {
@@ -3800,9 +3800,9 @@ order = ["second"]
 includes = ["first.toml", "second.toml"]
 `)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if got := cfg.WorkbenchOrder(); len(got) != 1 || got[0] != "first" {
 			t.Errorf("WorkbenchOrder() = %v, want [first] (first definition wins)", got)
@@ -4011,9 +4011,9 @@ func TestShouldExcludeCurrentSession(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 			if got := cfg.ShouldExcludeCurrentSession(); got != tt.expected {
 				t.Errorf("ShouldExcludeCurrentSession() = %v, want %v", got, tt.expected)
@@ -4083,9 +4083,9 @@ attention_notifications_enabled = true
 attention_notifications_enabled = true
 `), 0644)
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 	}
 
 	// Accessors should honor the legacy keys.
@@ -4120,9 +4120,9 @@ projects = []
 unread_notifications_enabled = true
 `), 0644)
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 	}
 
 	if !cfg.UnreadNotificationsEnabled("project") {
@@ -4160,9 +4160,9 @@ unread_notifications_enabled = true
 unread_notifications_enabled = true
 `), 0644)
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 	}
 
 	if !cfg.DismissUnreadInActivePane() {
@@ -4277,9 +4277,9 @@ func TestMonitorDashboardAlias(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 			if got := cfg.DashboardCursorPosition(); got != tt.wantCursor {
 				t.Errorf("DashboardCursorPosition() = %q, want %q", got, tt.wantCursor)
@@ -4314,9 +4314,9 @@ func TestDashboardKillPanePromptEnabled(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load() error: %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 			}
 			if got := cfg.DashboardKillPanePromptEnabled(); got != tt.want {
 				t.Errorf("DashboardKillPanePromptEnabled() = %v, want %v", got, tt.want)
@@ -4353,12 +4353,13 @@ func makeFSWithBare(bareDir string) *deps.MockFileSystem {
 func TestResolveRepoConfigPrecedence(t *testing.T) {
 	root := t.TempDir()
 
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	d := &Deps{FS: &deps.MockFileSystem{
 		StatFunc:         real.Stat,
 		ReadFileFunc:     real.ReadFile,
 		EvalSymlinksFunc: real.EvalSymlinks,
 		UserHomeDirFunc:  real.UserHomeDir,
+		GetenvFunc:       real.Getenv,
 	}}
 
 	t.Run("global declaration states trunk", func(t *testing.T) {
@@ -4438,12 +4439,13 @@ func TestLoadPreferredWorkbenchParsesOnRepoBlock(t *testing.T) {
 
 func TestResolvePreferredWorkbench(t *testing.T) {
 	root := t.TempDir()
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	d := &Deps{FS: &deps.MockFileSystem{
 		StatFunc:         real.Stat,
 		ReadFileFunc:     real.ReadFile,
 		EvalSymlinksFunc: real.EvalSymlinks,
 		UserHomeDirFunc:  real.UserHomeDir,
+		GetenvFunc:       real.Getenv,
 	}}
 
 	t.Run("repo default resolves to a real workbench", func(t *testing.T) {
@@ -4518,7 +4520,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 func preferredResolverDeps(t *testing.T) *Deps {
 	t.Helper()
 	dataDir := filepath.Join(t.TempDir(), "data")
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	return &Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
 			if key == "XDG_DATA_HOME" {
@@ -4657,13 +4659,14 @@ func TestResolvePreferredWorkbenchScopeFirstLadder(t *testing.T) {
 // specific declaration and wins for the same key. trunk stays [repo]-only and is
 // rejected in .pop/config.toml.
 func TestResolveRepoConfigSharedSchema(t *testing.T) {
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	newDeps := func() *Deps {
 		return &Deps{FS: &deps.MockFileSystem{
 			StatFunc:         real.Stat,
 			ReadFileFunc:     real.ReadFile,
 			EvalSymlinksFunc: real.EvalSymlinks,
 			UserHomeDirFunc:  real.UserHomeDir,
+			GetenvFunc:       real.Getenv,
 		}}
 	}
 	writePopTOML := func(t *testing.T, dir, body string) {
@@ -4764,12 +4767,13 @@ func TestPreferredWorkbenchFromPopTOML(t *testing.T) {
 	if err := os.WriteFile(popConfigPath(t, root), []byte(popTOML), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	d := &Deps{FS: &deps.MockFileSystem{
 		StatFunc:         real.Stat,
 		ReadFileFunc:     real.ReadFile,
 		EvalSymlinksFunc: real.EvalSymlinks,
 		UserHomeDirFunc:  real.UserHomeDir,
+		GetenvFunc:       real.Getenv,
 	}}
 	cfg := &Config{}
 	name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -4784,12 +4788,13 @@ func TestPreferredWorkbenchFromPopTOML(t *testing.T) {
 func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
 	// Global override sets trunk for a repo with no .pop/config.toml
 	dir := t.TempDir()
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	d := &Deps{FS: &deps.MockFileSystem{
 		StatFunc:         real.Stat,
 		ReadFileFunc:     real.ReadFile,
 		EvalSymlinksFunc: real.EvalSymlinks,
 		UserHomeDirFunc:  real.UserHomeDir,
+		GetenvFunc:       real.Getenv,
 	}}
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
@@ -4931,7 +4936,7 @@ projects = ["should-warn"]
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4957,7 +4962,7 @@ projects = ["should-warn"]
 }
 
 // TestRepoBlockQueueBaseRenameIsFinding proves the migration tripwire is
-// confined (ADR 0054): the queue_base→trunk rename no longer aborts Load(); it
+// confined (ADR 0054): the queue_base→trunk rename no longer aborts LoadWith(isolatedDeps(t), ); it
 // becomes a blocking "repo" finding that ResolveRepoConfig (the execution-config
 // getter consuming commands hit) returns as its error, while getters for other
 // sections (EffortFor) stay clean.
@@ -4970,15 +4975,15 @@ queue_base = true
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("Load err = %v, want the rename to be a finding, not a Load() error", err)
+		t.Fatalf("Load err = %v, want the rename to be a finding, not a LoadWith(isolatedDeps(t), ) error", err)
 	}
 	if cfg.blockingFindingFor("repo") == nil {
 		t.Fatalf("expected a blocking 'repo' finding, findings = %+v", cfg.Findings)
 	}
 	// The execution-config getter surfaces it as the migration message.
-	d := &Deps{FS: deps.NewRealFileSystem()}
+	d := &Deps{FS: isolatedDeps(t).FS}
 	if _, err := cfg.ResolveRepoConfig(d, "/path/to/repo"); err == nil || !strings.Contains(err.Error(), "queue_base was renamed to trunk") {
 		t.Fatalf("ResolveRepoConfig err = %v, want queue_base rename error", err)
 	}
@@ -5004,7 +5009,7 @@ func TestRepoLocalExecutionBaseHardError(t *testing.T) {
 	if err := os.WriteFile(popConfigPath(t, root), []byte("execution_base = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadRepoConfigWith(&Deps{FS: deps.NewRealFileSystem()}, root)
+	_, err := LoadRepoConfigWith(&Deps{FS: isolatedDeps(t).FS}, root)
 	if err == nil || !strings.Contains(err.Error(), "execution_base was renamed to trunk") {
 		t.Fatalf("LoadRepoConfig err = %v, want execution_base rename error", err)
 	}
@@ -5015,7 +5020,7 @@ func TestRepoLocalExecutionBaseHardError(t *testing.T) {
 // naming .pop/config.toml, and when both files exist only .pop/config.toml is
 // read (warn-and-ignore, so committed config never silently vanishes).
 func TestLegacyPopTOMLIgnoredWithWarning(t *testing.T) {
-	fs := deps.NewRealFileSystem()
+	fs := isolatedDeps(t).FS
 
 	t.Run("flat .pop.toml alone is ignored and warns", func(t *testing.T) {
 		root := t.TempDir()
@@ -5093,7 +5098,7 @@ exclude_current_session = true
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
 		t.Fatalf("load must not hard-fail on unknown repo block key: %v", err)
 	}
@@ -5176,7 +5181,7 @@ display_depth = "two"
 		},
 	}
 
-	fd := &Deps{FS: deps.NewRealFileSystem()}
+	fd := &Deps{FS: isolatedDeps(t).FS}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			configPath := filepath.Join(t.TempDir(), "config.toml")
@@ -5184,15 +5189,15 @@ display_depth = "two"
 				t.Fatal(err)
 			}
 
-			cfg, loadErr := Load(configPath)
+			cfg, loadErr := LoadWith(isolatedDeps(t), configPath)
 			if tt.loadFails {
 				if loadErr == nil {
-					t.Fatal("Load() succeeded, want fatal parse error")
+					t.Fatal("LoadWith(isolatedDeps(t), ) succeeded, want fatal parse error")
 				}
 				return
 			}
 			if loadErr != nil {
-				t.Fatalf("Load() = %v, want nil (class-B problems must not abort Load)", loadErr)
+				t.Fatalf("LoadWith(isolatedDeps(t), ) = %v, want nil (class-B problems must not abort Load)", loadErr)
 			}
 
 			// Finding path check
@@ -5258,9 +5263,9 @@ func TestPaneMonitoringTopicWords(t *testing.T) {
 		configPath := filepath.Join(tmpDir, "config.toml")
 		os.WriteFile(configPath, []byte("[pane_monitoring]\ntopic_words = 3\n"), 0644)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if got := cfg.PaneMonitoringTopicWords(); got != 3 {
 			t.Errorf("PaneMonitoringTopicWords() = %d, want 3", got)
@@ -5300,9 +5305,9 @@ func TestPaneMonitoringTopicDerivationTimeout(t *testing.T) {
 		configPath := filepath.Join(tmpDir, "config.toml")
 		os.WriteFile(configPath, []byte("[pane_monitoring]\ntopic_derivation_timeout = 45\n"), 0644)
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("Load() error: %v", err)
+			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 		}
 		if got := cfg.PaneMonitoringTopicDerivationTimeout(); got != 45*time.Second {
 			t.Errorf("PaneMonitoringTopicDerivationTimeout() = %v, want 45s", got)
@@ -5346,7 +5351,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -5400,7 +5405,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -5455,7 +5460,7 @@ workbenches = [
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -5520,7 +5525,7 @@ windows = [{name = "main", layout = {name = "editor", command = "nano"}}]
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -5592,7 +5597,7 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 			t.Fatal(err)
 		}
 
-		cfg, err := Load(configPath)
+		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
@@ -5686,9 +5691,9 @@ func TestProjectWorktreeDisplay(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load(): %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ): %v", err)
 			}
 			if got := cfg.ProjectWorktreeDisplay(); got != tt.want {
 				t.Errorf("ProjectWorktreeDisplay() = %q, want %q", got, tt.want)
@@ -5776,9 +5781,9 @@ func TestProjectSessionOrdering(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			cfg, err := Load(configPath)
+			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("Load(): %v", err)
+				t.Fatalf("LoadWith(isolatedDeps(t), ): %v", err)
 			}
 			if got := cfg.ProjectSessionOrdering(); got != tt.want {
 				t.Errorf("ProjectSessionOrdering() = %q, want %q", got, tt.want)
@@ -5868,9 +5873,9 @@ enabled = true
 effort = "heavy"
 `)
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
 	}
 
 	verify := cfg.Work.Verify

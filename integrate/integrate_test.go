@@ -1681,7 +1681,7 @@ func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
 func seedState(t *testing.T, rev string) {
 	t.Helper()
 	cd := testConfigDeps(t)
-	d := stateDepsFromConfig(cd, DefaultDeps())
+	d := stateDepsFromConfig(cd, DefaultDepsWith(cd))
 	if err := saveAppState(d, &appState{BuildRevision: rev}); err != nil {
 		t.Fatalf("seed state: %v", err)
 	}
@@ -1690,7 +1690,7 @@ func seedState(t *testing.T, rev string) {
 func readStateRevision(t *testing.T) string {
 	t.Helper()
 	cd := testConfigDeps(t)
-	d := stateDepsFromConfig(cd, DefaultDeps())
+	d := stateDepsFromConfig(cd, DefaultDepsWith(cd))
 	return loadAppState(d).BuildRevision
 }
 
@@ -2285,7 +2285,7 @@ func TestAppState_LoadMissingReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	cd := testConfigDeps(t)
-	s := loadAppState(stateDepsFromConfig(cd, DefaultDeps()))
+	s := loadAppState(stateDepsFromConfig(cd, DefaultDepsWith(cd)))
 	if s == nil {
 		t.Fatal("loadAppState returned nil for missing file; want empty struct")
 	}
@@ -2306,7 +2306,7 @@ func TestAppState_LoadCorruptReturnsEmpty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(popDir, "state.json"), []byte("not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := loadAppState(stateDepsFromConfig(cd, DefaultDeps()))
+	s := loadAppState(stateDepsFromConfig(cd, DefaultDepsWith(cd)))
 	if s.BuildRevision != "" {
 		t.Errorf("corrupt state.json should produce empty revision, got %q", s.BuildRevision)
 	}
@@ -2316,7 +2316,7 @@ func TestAppState_SaveThenLoadRoundTrip(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	cd := testConfigDeps(t)
-	d := stateDepsFromConfig(cd, DefaultDeps())
+	d := stateDepsFromConfig(cd, DefaultDepsWith(cd))
 	if err := saveAppState(d, &appState{BuildRevision: "deadbeef"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}

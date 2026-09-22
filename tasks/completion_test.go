@@ -233,8 +233,9 @@ func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	names, err := CompleteProjectNamesWith(DefaultDeps(), project.DefaultDeps(), func(string) (*config.Config, error) {
-		return config.Load(cfgPath)
+	d := newTestDeps(t)
+	names, err := CompleteProjectNamesWith(d, project.DefaultDeps(), func(string) (*config.Config, error) {
+		return config.LoadWith(d.ConfigDeps(), cfgPath)
 	})
 	if err != nil {
 		t.Fatal(err)

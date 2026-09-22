@@ -30,7 +30,7 @@ func newOverrideScopeFixture(t *testing.T) *overrideScopeFixture {
 	t.Helper()
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	d := &Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
 			if key == "XDG_DATA_HOME" {

@@ -152,7 +152,7 @@ func TestRenderEffectiveTOMLTrunkBareNoOverride(t *testing.T) {
 // printed above it, and the checkout-keyed [repo."<path>"] block — the more
 // specific declaration — is what a reader sees when both exist.
 func TestRenderEffectiveTOMLReportsScopeFirstRepoValues(t *testing.T) {
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	newDeps := func(t *testing.T) *Deps {
 		t.Helper()
 		dataDir := filepath.Join(t.TempDir(), "data")

@@ -21,7 +21,7 @@ const setListCompDirective = cobra.ShellCompDirectiveKeepOrder | cobra.ShellComp
 var (
 	taskCompletionDeps        = func() *tasks.Deps { return cmdLayerDeps().tasksDeps() }
 	taskCompletionProjectDeps = func() *project.Deps { return cmdLayerDeps().projectDeps() }
-	taskCompletionConfigLoad  = func(path string) (*config.Config, error) { return config.Load(path) }
+	taskCompletionConfigLoad  = func(path string) (*config.Config, error) { return loadConfig(path) }
 )
 
 func init() {

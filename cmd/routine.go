@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboardshell"
 	"github.com/glebglazov/pop/routine"
 	"github.com/spf13/cobra"
@@ -313,7 +312,7 @@ var routineRunDashboard = dashboardshell.RunFromRoutine
 func runRoutineDashboard(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {

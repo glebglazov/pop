@@ -41,15 +41,20 @@ func LoadBindingStore(t *testing.T, td *tasks.Deps) map[string]store.Binding {
 	return all
 }
 
+// machineDataHome is XDG_DATA_HOME as the test binary inherited it — the
+// developer's own setting, which points at their real store and so is never a
+// test's isolation.
+var machineDataHome = os.Getenv("XDG_DATA_HOME")
+
 func TasksDeps(t *testing.T, allFound bool) *tasks.Deps {
 	t.Helper()
 	// Default isolation (slice 01): point the data dir at a temp location so any
 	// store touch lands in a throwaway dir, never the developer's real
-	// machine-global store. Only set one when the caller hasn't already isolated
-	// XDG_DATA_HOME (e.g. queuetest.SetupSpawnRepo pins it to repo/.xdg and seeds
+	// machine-global store. Only keep XDG_DATA_HOME when the caller already
+	// isolated it (e.g. queuetest.SetupSpawnRepo pins it to repo/.xdg and seeds
 	// the store there) — clobbering it would hide the seeded rows. The
 	// guardTestStorePath backstop panics if isolation is ever missed entirely.
-	if os.Getenv("XDG_DATA_HOME") == "" {
+	if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome == "" || dataHome == machineDataHome {
 		t.Setenv("XDG_DATA_HOME", t.TempDir())
 	}
 	d := tasks.DefaultDeps()

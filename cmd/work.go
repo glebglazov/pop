@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
@@ -80,7 +79,7 @@ func runWorkShowPathWith(d *tasks.Deps, w io.Writer) error {
 func runWorkDashboard(cmd *cobra.Command, args []string) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
-		cfgPath = config.DefaultConfigPath()
+		cfgPath = defaultConfigPath()
 	}
 	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {

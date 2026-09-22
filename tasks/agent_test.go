@@ -1221,19 +1221,19 @@ func TestResolveAgentOutputModePrecedence(t *testing.T) {
 			Agents: map[string]config.AgentConfig{"claude": {Output: "text"}},
 		}, nil
 	}
-	mode, err := resolveAgentOutputMode(loadText, "claude", "")
+	mode, err := resolveAgentOutputMode(nil, loadText, "claude", "")
 	if err != nil || mode != AgentOutputText {
 		t.Fatalf("configured mode = %q, err = %v", mode, err)
 	}
-	mode, err = resolveAgentOutputMode(loadText, "claude", AgentOutputAuto)
+	mode, err = resolveAgentOutputMode(nil, loadText, "claude", AgentOutputAuto)
 	if err != nil || mode != AgentOutputAuto {
 		t.Fatalf("override mode = %q, err = %v", mode, err)
 	}
-	mode, err = resolveAgentOutputMode(loadText, "cursor", "")
+	mode, err = resolveAgentOutputMode(nil, loadText, "cursor", "")
 	if err != nil || mode != AgentOutputAuto {
 		t.Fatalf("other agent mode = %q, err = %v", mode, err)
 	}
-	mode, err = resolveAgentOutputMode(loadText, "claude --model opus4.8", "")
+	mode, err = resolveAgentOutputMode(nil, loadText, "claude --model opus4.8", "")
 	if err != nil || mode != AgentOutputText {
 		t.Fatalf("augmented preset mode = %q, err = %v", mode, err)
 	}
@@ -1245,7 +1245,7 @@ func TestResolveAgentOutputModeRejectsInvalidConfig(t *testing.T) {
 			Agents: map[string]config.AgentConfig{"claude": {Output: "structured-ish"}},
 		}, nil
 	}
-	_, err := resolveAgentOutputMode(loadInvalid, "claude", "")
+	_, err := resolveAgentOutputMode(nil, loadInvalid, "claude", "")
 	if err == nil || !strings.Contains(err.Error(), "[agents.claude] output") {
 		t.Fatalf("err = %v", err)
 	}
