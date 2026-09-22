@@ -189,31 +189,6 @@ type agentPromptView struct {
 	PlanningSources                  implementPlanningSourcesView
 }
 
-// implementPlanningSourcesView is present only when the toggle is on and the
-// set declares sources. This keeps every other prompt byte-identical.
-type implementPlanningSourcesView struct {
-	Recorded   bool
-	Convention string
-	Sources    []PlanningSource
-}
-
-func implementPlanningSources(m *Manifest, task Task, convention string) implementPlanningSourcesView {
-	if m == nil || len(m.PlanningSources) == 0 || strings.TrimSpace(convention) == "" {
-		return implementPlanningSourcesView{}
-	}
-	claimed := make(map[string]bool, len(task.PlanningSources))
-	for _, id := range task.PlanningSources {
-		claimed[id] = true
-	}
-	sources := make([]PlanningSource, 0, len(claimed))
-	for _, source := range m.PlanningSources {
-		if claimed[source.ID] {
-			sources = append(sources, source)
-		}
-	}
-	return implementPlanningSourcesView{Recorded: true, Convention: strings.TrimSpace(convention), Sources: sources}
-}
-
 // BuildHITLAssistancePrompt generates the attended-agent prompt shown when a
 // Task set reaches a human-in-the-loop gate.
 func BuildHITLAssistancePrompt(d *Deps, taskSetID string, m *Manifest, blocking Task, runtimePath string) string {

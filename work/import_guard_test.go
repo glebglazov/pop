@@ -27,7 +27,7 @@ func TestWorkImportsNoTUI(t *testing.T) {
 // this design rejected. The guard is transitive: reaching a kind through a
 // helper package counts.
 func TestWorkImportsNoKind(t *testing.T) {
-	// The five kinds, plus the two surfaces that compose them — the Work
+	// The four kinds, plus the two surfaces that compose them — the Work
 	// dashboard and the supervisor loop both wire every kind, so an import of
 	// either would pull all of them in behind work's back.
 	kinds := []string{

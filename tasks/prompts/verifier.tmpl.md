@@ -28,7 +28,7 @@ In FINDINGS, name each source, the evidence you read, both sides of each diverge
 {{.PlanningSourcesConvention}}
 {{else}}Read `pop conventions get planning-sources` in full to find how this repository reaches a source. If you still cannot fetch a source, report the unrunnable gate as NEEDS-HUMAN.
 {{end}}
-{{range .PlanningSources}}### {{.ID}}: {{.Title}}
+{{range .PlanningSources}}### {{.ID}}{{if .Title}}: {{.Title}}{{end}}
 Reference: {{.Reference}}
 {{if .Claimed}}Claimed by:
 {{range .Claims}}- {{.ID}} [{{.Type}}] ({{.Status}}): {{.Title}}

@@ -29,17 +29,3 @@ func implementImplementationConvention(cfg *config.Config, resolve Implementatio
 	}
 	return strings.TrimSpace(prose)
 }
-
-// implementPlanningSourcesConvention resolves the notice-free convention that
-// tells a builder how to read Planning sources. The same seam supplies the
-// Verifier; the implement toggle only controls whether builders receive it.
-func implementPlanningSourcesConvention(cfg *config.Config, resolve PlanningSourcesConvention, cwd string) string {
-	if !cfg.ImplementIncludesPlanningSources() || resolve == nil {
-		return ""
-	}
-	prose, err := resolve(cwd)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(prose)
-}
