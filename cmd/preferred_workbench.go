@@ -17,7 +17,7 @@ import (
 // path a bare repo states via binding.ResolveTrunkPath); a bare repo with no
 // trunk anchor yields ("", false) so the inheritance layer is skipped.
 func preferredResolverConfigDeps(cfg *config.Config) *config.Deps {
-	d := config.DefaultDeps()
+	d := cmdConfigDeps()
 	d.Trunk = func(checkoutPath string) (string, bool) {
 		trunkPath, bare, err := binding.ResolveTrunkPath(tasks.DefaultDeps(), cfg, checkoutPath)
 		if err != nil || bare || strings.TrimSpace(trunkPath) == "" {
@@ -68,14 +68,14 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 		ResolveWorkbenches: func(path string) []config.Workbench {
 			cfgPath := cfgFile
 			if cfgPath == "" {
-				cfgPath = config.DefaultConfigPath()
+				cfgPath = defaultConfigPath()
 			}
-			cfg, err := config.Load(cfgPath)
+			cfg, err := loadConfig(cfgPath)
 			if err != nil {
 				debug.Error("preferred workbench: load config: %v", err)
 				return nil
 			}
-			templates, _ := cfg.ResolveWorkbenchesWith(config.DefaultDeps(), path)
+			templates, _ := cfg.ResolveWorkbenchesWith(cmdConfigDeps(), path)
 			return templates
 		},
 		CurrentEntry: func(path string) (string, bool) {
@@ -91,9 +91,9 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 		WorkbenchOrder: func() []string {
 			cfgPath := cfgFile
 			if cfgPath == "" {
-				cfgPath = config.DefaultConfigPath()
+				cfgPath = defaultConfigPath()
 			}
-			cfg, err := config.Load(cfgPath)
+			cfg, err := loadConfig(cfgPath)
 			if err != nil {
 				debug.Error("preferred workbench: load config: %v", err)
 				return nil

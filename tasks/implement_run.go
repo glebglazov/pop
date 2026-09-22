@@ -96,7 +96,7 @@ type implementRun struct {
 // which then runs under that deferred. Failing before or at BeginDrain leaves no
 // live Drain, so the caller returns the error directly with nothing to finalize.
 func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts RunTaskSetOptions) (*implementRun, error) {
-	plan, err := newRunPlan(loadConfig, runPlanInput{
+	plan, err := newRunPlan(d, loadConfig, runPlanInput{
 		agentPresets:  opts.AgentPresets,
 		agentPreset:   opts.AgentPreset,
 		agentExplicit: opts.AgentExplicit,

@@ -275,7 +275,7 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	table := loadRateTableForSpend(d)
-	overrides := loadDeclaredSpendRates(loadConfig)
+	overrides := loadDeclaredSpendRates(d, loadConfig)
 
 	var (
 		candidates []spendRollupCandidate
@@ -711,7 +711,7 @@ func SpendSetBreakdownWith(d *Deps, pd *project.Deps, loadConfig func(string) (*
 	}
 
 	table := loadRateTableForSpend(d)
-	overrides := loadDeclaredSpendRates(loadConfig)
+	overrides := loadDeclaredSpendRates(d, loadConfig)
 	result, err := buildSpendSetBreakdown(d, taskSetID, m, table, overrides)
 	if err != nil {
 		return nil, exitErr(ExitOperational, "spend for %s: %v", taskSetID, err)

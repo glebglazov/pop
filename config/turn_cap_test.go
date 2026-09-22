@@ -25,7 +25,7 @@ func TestRepoTurnCapResolvesForEveryWorktree(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d := DefaultDeps()
+	d := isolatedDeps(t)
 
 	cfg := &Config{Repo: map[string]RepoOverrideConfig{
 		main: {TurnCap: intPtr(12), Trunk: trunkPtr(main)},
@@ -83,7 +83,7 @@ func TestTurnCapRejectedInPopTOML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadRepoConfigWith(DefaultDeps(), root)
+	cfg, err := LoadRepoConfigWith(isolatedDeps(t), root)
 	if err != nil {
 		t.Fatalf("LoadRepoConfigWith: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestTurnCapAcceptedInRepoBlock(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadWith(isolatedDeps(t), path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

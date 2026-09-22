@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -1309,8 +1310,8 @@ func (c *Config) TmuxSocket() string {
 // when the key is unset or the config cannot be loaded. Callers hand the
 // result to tmux.New so every production construction shares one resolution.
 func ConfiguredTmuxSocket() string {
-	cfg, err := Load(DefaultConfigPath())
-	if err != nil || cfg == nil {
+	cfg := loadMachineConfig()
+	if cfg == nil {
 		return ""
 	}
 	return cfg.TmuxSocket()
@@ -1330,11 +1331,27 @@ func (c *Config) TmuxInclude() string {
 // tmux.New alongside the socket so every production construction shares one
 // resolution; the tmux module never loads config itself.
 func ConfiguredTmuxInclude() string {
-	cfg, err := Load(DefaultConfigPath())
-	if err != nil || cfg == nil {
+	cfg := loadMachineConfig()
+	if cfg == nil {
 		return DefaultTmuxIncludePath
 	}
 	return cfg.TmuxInclude()
+}
+
+// loadMachineConfig is the process-edge load behind the package-level tmux
+// handles, which every binary that links them builds at init. Under go test it
+// loads nothing: a test binary would otherwise read the developer's own
+// config.toml and aim its default handle at their configured tmux server. Nil
+// means unloadable, and callers answer with the unset value.
+func loadMachineConfig() *Config {
+	if testing.Testing() {
+		return nil
+	}
+	cfg, err := Load(DefaultConfigPath())
+	if err != nil {
+		return nil
+	}
+	return cfg
 }
 
 // WorkbenchPickOnCreate reports whether the picker create-path should prompt for
@@ -1819,6 +1836,13 @@ func DefaultConfigPathWith(d *Deps) string {
 	return filepath.Join(home, ".config", "pop", "config.toml")
 }
 
+// LoadDefaultWith loads the machine's config — config.toml at the default path
+// and the layers beside it — with both the path and the reads resolved through
+// d, so a caller holding injected Deps never falls back to the process env.
+func LoadDefaultWith(d *Deps) (*Config, error) {
+	return LoadWith(d, DefaultConfigPathWith(d))
+}
+
 // Load reads the config file from the given path
 func Load(path string) (*Config, error) {
 	return LoadWith(defaultDeps, path)
@@ -1832,6 +1856,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	// per machine: the fold retires the file it read.
 	foldRetiredRuntimeRecord(d)
 	var cfg Config
+	guardTestConfigFile(path)
 	md, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
 		return nil, err
@@ -1941,6 +1966,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		currentInclude = expanded
 
 		var included Config
+		guardTestConfigFile(expanded)
 		includedMD, err := toml.DecodeFile(expanded, &included)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -2558,6 +2584,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 
 	// Detect all top-level keys actually present in the include file by parsing
 	// into a generic map. This catches both struct fields and undecoded keys.
+	guardTestConfigFile(path)
 	data, err := d.FS.ReadFile(path)
 	if err != nil {
 		return warnings

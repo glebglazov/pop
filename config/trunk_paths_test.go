@@ -27,7 +27,7 @@ func TestDeclaredTrunkPaths(t *testing.T) {
 		t.Fatalf("write override: %v", err)
 	}
 
-	real := deps.NewRealFileSystem()
+	real := isolatedDeps(t).FS
 	d := &Deps{FS: &deps.MockFileSystem{
 		UserHomeDirFunc: func() (string, error) { return home, nil },
 		ReadFileFunc:    real.ReadFile,

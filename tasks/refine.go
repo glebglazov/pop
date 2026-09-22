@@ -132,7 +132,7 @@ func RefineTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 	if err != nil {
 		return nil, err
 	}
-	cfg, _ := loadConfig(config.DefaultConfigPath())
+	cfg, _ := loadConfig(d.defaultConfigPath())
 	repo := ""
 	if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
 		repo = id.CommonDir

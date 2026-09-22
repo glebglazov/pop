@@ -56,6 +56,7 @@ type configLayer struct {
 }
 
 func decodeConfigLayer(d *Deps, path string) (*configLayer, error) {
+	guardTestConfigFile(path)
 	data, err := d.FS.ReadFile(path)
 	if err != nil {
 		return nil, err

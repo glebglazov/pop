@@ -32,7 +32,7 @@ func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.S
 	}
 	defer func() { _ = lock.Release() }()
 
-	if _, err := d.LoadConfig(config.DefaultConfigPath()); err != nil {
+	if _, err := d.LoadConfig(config.DefaultConfigPathWith(d.Tasks.ConfigDeps())); err != nil {
 		return err
 	}
 
@@ -61,7 +61,7 @@ func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.S
 // candidate at a time. Refusals ride the same dispatch call as advances, because
 // a kind that must persist why it refused writes on exactly that path.
 func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
-	cfg, err := d.LoadConfig(config.DefaultConfigPath())
+	cfg, err := d.LoadConfig(config.DefaultConfigPathWith(d.Tasks.ConfigDeps()))
 	if err != nil {
 		runOut.emitScanError(out, fmt.Sprintf("work: load config: %v", err))
 		return

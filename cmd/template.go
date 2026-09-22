@@ -32,13 +32,13 @@ func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 		LoadConfig: func() (*config.Config, error) {
 			path := cfgFile
 			if path == "" {
-				path = config.DefaultConfigPath()
+				path = defaultConfigPath()
 			}
-			return config.Load(path)
+			return loadConfig(path)
 		},
 		Getwd:          os.Getwd,
 		UserHomeDir:    os.UserHomeDir,
-		ConfigDeps:     config.DefaultDeps(),
+		ConfigDeps:     cmdConfigDeps(),
 		ErrOut:         os.Stderr,
 		RunBeforeApply: runBeforeApplyCommand,
 	}

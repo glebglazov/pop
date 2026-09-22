@@ -195,6 +195,7 @@ func TestRunPaneMonitorStatusWith(t *testing.T) {
 }
 
 func TestBuildMonitorHandler_DispatchesByCmd(t *testing.T) {
+	isolateCmdConfig(t)
 	t.Parallel()
 	dir := t.TempDir()
 	statePath := dir + "/monitor.json"

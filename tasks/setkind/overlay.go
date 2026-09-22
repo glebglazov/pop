@@ -30,7 +30,7 @@ func (d *Deps) config() *config.Config {
 		return d.Config
 	}
 	if d.LoadConfig != nil {
-		cfg, _ := d.LoadConfig(config.DefaultConfigPath())
+		cfg, _ := d.LoadConfig(config.DefaultConfigPathWith(d.Tasks.ConfigDeps()))
 		return cfg
 	}
 	return nil

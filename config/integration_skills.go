@@ -38,7 +38,7 @@ func DeclineIntegrationSkillsWith(d *Deps, aliases ...string) error {
 	if len(aliases) == 0 {
 		return nil
 	}
-	cfg, err := LoadWith(d, DefaultConfigPathWith(d))
+	cfg, err := LoadDefaultWith(d)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}

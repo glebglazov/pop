@@ -57,7 +57,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		systemWarnings = ensureSystemState()
 	}
 
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := loadConfig(defaultConfigPath())
 	if err != nil {
 		debug.Error("dashboard: load config: %v", err)
 	}
