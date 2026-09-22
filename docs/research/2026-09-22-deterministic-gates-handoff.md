@@ -1,7 +1,9 @@
 # Handoff: which parts of pop should be deterministic and are not
 
 Date: 2026-09-22. Branch: `master` at `2ccdf95`. Read-only research session; no
-code was changed.
+code was changed. Extended the same day at `a8437e8` with a second read-only
+session on whether the state machine can carry the proposal (the section "Is
+the state machine ready?").
 
 ## The original question
 
@@ -34,12 +36,21 @@ parsing fallbacks, and existing deterministic-check hooks:
    `conventions/`.
 5. Everything else that invokes an agent or parses agent text: topic
    derivation, Routines, Wayfinder Maps, spend, effort ladders, quota parsing.
+6. The state machine itself, in the second session: `tasks/transition.go`,
+   `status.go`, `verified_status.go`, `verify_status.go`, `run_tasks.go`,
+   `implement_run.go`, `run_selected_task.go`, `terminal_switch.go`,
+   `refine_phase.go`, `verify_phase.go`, `scheduler.go`, `attempts.go`,
+   `attempt_cap_exhaustion.go`, `drain_store.go`, `tasks/drain/advance.go`,
+   `store/store.go`, `store/drains.go`, plus one subagent audit of every
+   write site that a status derivation later reads.
 
-ADRs read for the contracts: 0040, 0086, 0102, 0148, 0207, 0227, 0228, 0229,
-0245, 0248, 0252, 0258, 0260, 0265, 0268, 0274. The glossary entries read:
-Verifier, Verification convention, Verify verdict, Verification mark,
-Verified-at SHA, Completion sentinel, Failure reason, Planned commit subject,
-Refine, Remediation task, Remediation depth.
+ADRs read for the contracts: 0040, 0055, 0056, 0086, 0102, 0109, 0148, 0207,
+0227, 0228, 0229, 0231, 0245, 0248, 0252, 0258, 0260, 0265, 0268, 0274. The
+glossary entries read: Verifier, Verification convention, Verify verdict,
+Verification mark, Verified-at SHA, Verification episode, Verified status
+resolution, Human completion, Completion sentinel, Failure reason, Planned
+commit subject, Refine, Refine episode, Remediation task, Remediation depth,
+Task transition, Drain, Drain outcome, Drain ending.
 
 ## What was found
 
@@ -215,12 +226,199 @@ is defensive only: pop runs the gates after the pass, and a red result forces
 
 Details to settle:
 
-- **Baseline.** Run the gates once at `base_commit` on the first drain. A gate
-  already red on trunk is not the set's fault; demote it to advisory for that
-  set and report it.
+- **Baseline.** Run the gates once at the start of the first drain. Not at
+  `base_commit`: the manifest records the Set base commit only at the set's
+  first implementation commit (`tasks/transition.go:189-192`), so on the first
+  drain there is no base yet. HEAD at drain start is the baseline, stored
+  SHA-keyed like a quiescence result. A gate already red on trunk is not the
+  set's fault; demote it to advisory for that set and report it as a Severe
+  journal event.
 - **Deleted tests.** An agent can turn a gate green by deleting the test. Count
   test files and assertions removed in the range and hand the number to the
   Verifier as a flag, the eval harness's scope-flag pattern.
+
+## Is the state machine ready?
+
+Yes. It needs no rewrite. It is already deterministic: a two-layer model with
+one pure derivation, one write chokepoint and a durable execution store. What
+it lacks is not determinism but an input. No fact about the work comes from a
+subprocess other than git and the agent CLIs. The work is to add that input at
+two existing seams, give it a place to live, and close the fail-open holes on
+the way. One structural blemish is worth fixing at the same time: effective
+status is overlaid in three places instead of one.
+
+### What the machine is today
+
+**Layer 1: the manifest, derived status.**
+
+- A task has four statuses: `open`, `done`, `failed`, `skipped`
+  (`tasks/transition.go:11-14`). No `in_progress` is ever persisted.
+- Every task status write goes through `ApplyTransitions`
+  (`tasks/transition.go:93`). Legality is a `(from, to, actor)` table
+  (`:38-50`); the executor may drive only `open→done` and `open→failed`. The
+  batch is validated before any write, then written once, atomically. The
+  chokepoint also fires Verification invalidation when an AFK task moves into
+  open or done (`:158-172`), records the Set base commit once (`:184`) and the
+  Human completion bit (`:144`).
+- Set status is a pure function of the manifest: `DeriveStatus`
+  (`tasks/status.go:139`). `TerminalStatus` (`:172`) is the one definition of
+  the terminal zone. The verdict is layered on by `DeriveStatusWithVerdict`
+  (`:207`) and its read-side wrapper `ResolveVerifiedStatus`
+  (`tasks/verified_status.go:54`), which every surface routes through.
+- Other manifest writers write no status: `writeRemediationTask` appends a
+  task (`tasks/remediation.go:315`); `writeCommitConventionKey` writes one key
+  (`tasks/commit_convention.go:109`).
+
+**Layer 2: the Drain store.**
+
+- A Drain row is one supervised execution (ADR-0055). Its terminal is the
+  process exit reason only: `running`, `finished`, `quota_paused`,
+  `verify_failed`, `interrupted`, `crashed` (`store/drains.go:15-20`), plus a
+  Drain ending for two clean stops. The work disposition is never copied onto
+  it (ADR-0056).
+- `verify_verdicts` is keyed `(repo, set_id, work_sha)` (`store/store.go:211`)
+  and is a cache. Pop already authors one verdict row itself: the
+  range-undetermined NEEDS-HUMAN stand-in (`tasks/verify.go:589-598`). The row
+  says nothing about who authored it, except the human-Accept flag.
+- `refine_episodes`, `spent_retry_caps`, `checkout_gate_holds`,
+  `recovery_waiters`, `admission_waiters`, `spawn_intents` each have one
+  writer and one reader. Deferrals are derived from them, not stored.
+
+**The drain loop** (`implementRun.loop`, `tasks/run_tasks.go:199`) is not a
+table-driven state machine. It is a fixed sequence of phases over a fresh
+manifest refresh each tick: `explorePhase` once at the head; then
+`SelectTaskInSet`; an eligible task goes to `runSelectedTask`
+(`tasks/run_selected_task.go:49`); otherwise, in order, `refinePhase`
+(`tasks/refine_phase.go:50`), `verifyPhase` (`tasks/verify_phase.go:59`),
+`terminalStatus` (`tasks/terminal_switch.go:35`). Each phase hands back a small
+directive enum shaped continue / return / fall through. The loop reads
+manifest-derived `Row.Status`; the verify phase computes the effective status
+itself.
+
+**Inside one attempt** (`executeTaskAttempts`, `tasks/attempts.go:108`) the
+agent's word becomes a manifest write on this path: run the agent →
+`assessAttempt` (`:590`) → `completeSuccessfulTask` (`:605`) → `git add -A`
+and commit (`createImplementationCommit`, `:679`) → `finalizeTaskDone`
+(`:732`) → `ApplyTransitions`. After `max_tries` the Agent fallback walk
+writes `failed` with a three-way `attemptFault`: provider, contract, overrun
+(`tasks/attempt_cap_exhaustion.go:16-33`). Only a provider fault leaves the
+task open.
+
+**Where LLM text becomes state.** Five parsers, all code-owned:
+
+| Parser | Default when the text is missing or bad | Direction |
+| --- | --- | --- |
+| `ParseVerdict` (`tasks/verify.go:1636`) | NEEDS-HUMAN | fails closed |
+| `AssessCompletion` (`tasks/assess.go:54`) | failed | fails closed |
+| `splitRefinerReply` (`tasks/refine_commit.go:47`) | `refined` | **fails open** |
+| `COMMIT-SUBJECT:` (`refine_commit.go:64`, `verify.go:646`) | pop's default subject | safe |
+| Explore park (`tasks/explore_park.go:34`) | derived from run outcome, not prose | safe |
+
+### What is good and should stay
+
+- One pure derivation for set status, one chokepoint for task status, one
+  atomic write. This is the model the gates should follow.
+- The verdict cache is keyed by work SHA, so a re-drain at an unchanged tree
+  invokes nothing. A gate result at set quiescence can use the same key.
+- Pop already writes a verdict row from a code fact. A gate-authored verdict
+  is not a new kind of thing.
+- `attemptFault` already separates "the provider fell over" from "the work
+  missed the contract". A red gate on a clean exit is a contract fault; no new
+  fault kind is needed.
+- The retry digest (`tasks/digest.go:125`) is already the channel that hands
+  the next attempt what the last one did.
+- The phase directives keep the loop readable. A gate is an input, not a
+  phase, so no fifth directive is needed.
+
+### What blocks the proposal, or makes it worse than it needs to be
+
+1. **No storage for a machine fact about the work.** Gate results need two
+   lifetimes. A post-attempt gate runs on an uncommitted tree; its result
+   belongs to the attempt, like a Captured run, and the digest must read it.
+   Today `persistAttemptStream` records `outcome` and `reason` strings
+   (`tasks/attempts.go:180`), and gate output is larger than a reason. A
+   quiescence gate runs at HEAD on a clean tree; its result should be keyed
+   `(repo, set_id, work_sha, gate)` so a re-drain reuses it, like a verdict.
+   Proposed: a `gate_results` table beside `verify_verdicts`, plus the output
+   as a file under `<set>/gates/`, filed with the `pass_report.go` pattern.
+2. **`verify_verdicts` has no author column.** Once code downgrades a PASS to
+   FIXABLE because a gate is red, or stores a gate-authored FIXABLE without
+   invoking the Verifier, a reader must tell an agent verdict from a gate
+   verdict from a human Accept. The derivation stamp called low value above
+   becomes necessary: one migration, `source TEXT` with `agent`, `human`,
+   `gate`, `range`.
+3. **`REFINE-OUTCOME` fails open.** Already listed under "Two fixes that need
+   no manifest". `commitRefinePass` already reverts an abandoned pass against
+   the pre-invocation snapshot (`refine_commit.go:228-248`), so the change is
+   one constant and its tests.
+4. **Effective status is overlaid in three places.** `ResolveVerifiedStatus`
+   is documented as the single read-side resolution, but two writes sit
+   outside it: `applyExploreMarks` overwrites READY with EXPLORE-FAILED in
+   place (`tasks/explore_park.go:58`), and `verifyPhase` overwrites
+   `row.Status = StatusVerifyFailed` for display (`tasks/verify_phase.go:167`).
+   Neither is wrong today. With a gate result as a third input the overlay
+   should have one home. This is the one refactor worth doing before the
+   gates, because every later "why does status say X" question lands here.
+5. **The gate runner and the manifest resolver sit on two sides of `tasks`.**
+   The only runner today is in the eval harness (`eval/grade.go:216-244`), a
+   separate program. Extract it to a leaf package below `tasks` with a
+   three-way outcome, used by both eval and tasks. The Gate manifest resolves
+   through the conventions stack, and `conventions` sits above `tasks`, so the
+   resolver reaches the drain through a seam on `RunTaskSetOptions`, as
+   `VerificationConvention` and `ImplementationConvention` do
+   (`tasks/run_tasks.go:75-88`), wired in `cmd`.
+
+### Where the two gate points land in the existing code
+
+1. **Post-attempt, scoped gates.** In `executeTaskAttempts`, between
+   `assessAttempt` returning `Complete` and `completeSuccessfulTask`
+   (`tasks/attempts.go:299-306`). A red result is a new named reason beside
+   `reasonUncheckedBoxes` (`tasks/assess.go:37-43`); the attempt is persisted
+   as failed with that reason, the output is filed for the digest, and the
+   loop retries under `max_tries`. Exit code stays zero, so
+   `attemptFaultForExit` yields `faultContract` and the task ends `failed` for
+   a human after the cap. Could-not-run does not fail the attempt; it is
+   recorded and passed on.
+2. **At quiescence, whole-tree gates.** In `drainVerifyPhase`, before
+   `ensureVerifyVerdict` (`tasks/verify.go:745-746`). Run or reuse the
+   SHA-keyed results; hand them into `buildVerifierPrompt` as evidence. After
+   `ParseVerdict`, code downgrades PASS to FIXABLE when any gate is red, with
+   the output prepended to findings and `source = gate`. The remediation loop
+   then runs unchanged: `spawnRemediationIfUnderCap` spawns the task, the
+   chokepoint invalidates, the SHA moves, gates and Verifier re-fire.
+
+Human completion: the verify phase already suspends every non-PASS
+disposition on a human-completed set (`tasks/verify_phase.go:133-140`); a red
+gate becomes a mark, not a veto, through the same branch. Fold:
+`runFoldSetVerify` (`tasks/fold_conflict.go:369-404`) calls the set-scoped
+runner first and only then the Verifier; the runner must sit below
+`tasks/binding`, which the leaf package does. Refine: after
+`refineResolvedSet` returns, run the lint and format gates; a red result
+forces `abandoned` before `commitRefinePass`.
+
+### Recommended order of work
+
+1. Flip `REFINE-OUTCOME` to fail closed.
+2. Add `source` to `verify_verdicts` and stamp the four existing writers.
+3. Extract the gate runner from `eval/grade.go` into a leaf package.
+4. Fold the Explore overwrite and the drain's display overwrite into
+   `ResolveVerifiedStatus`.
+5. Add `gate_results` and the `<set>/gates/` filing.
+6. Gate manifest kind and detection through the conventions stack, with a
+   seam on `RunTaskSetOptions`.
+7. Insert the two gate points. Then the Fold and Refine hooks.
+
+Steps 1 to 4 make the machine strictly better with or without gates. Steps 5
+to 7 are the proposal.
+
+### What not to do
+
+- Rewrite the loop as a table-driven state machine. The phase sequence is
+  readable and tested; a gate is an input, not a state.
+- Add a task status. `failed` with a contract fault and a gate reason is the
+  right ending after the cap.
+- Add a set status for "gate could not run". It is a flag on the evidence and
+  a journal event, not a place the set can be.
 
 ## Open design questions to grill first
 
@@ -237,6 +435,10 @@ Details to settle:
    item as the first option?
 6. The word "gate": accept the overload or pick a new term for the executable
    kind.
+7. Should a post-attempt red gate spend a try from `max_tries`, or get one
+   bounded self-correction outside the cap? The retry loop has no notion of a
+   free retry today; a timeout and a turn-cap exhaustion both spend a try.
+   One budget is simpler and matches ADR-0231. This sharpens question 3.
 
 ## Suggested skills
 
