@@ -214,7 +214,8 @@ func TestWorkReadSurfacesThreadViewPreset(t *testing.T) {
 // TestWorkReadSurfacesRegisterIncludeDoneFlag confirms both Work read surfaces
 // expose the `--include-done` flag, defaulting off.
 func TestWorkReadSurfacesRegisterIncludeDoneFlag(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	if f := workStatusCmd.Flags().Lookup("include-done"); f == nil {
 		t.Fatal("work status missing --include-done flag")
 	} else if f.DefValue != "false" {

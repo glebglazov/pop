@@ -16,7 +16,8 @@ import (
 // belongs here is the wiring and what the commands tell a human.
 
 func TestPickerHelpDocumentsTheConfigDashboard(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	for name, long := range map[string]string{
 		"project dashboard":  projectDashboardCmd.Long,
 		"worktree dashboard": worktreeDashboardCmd.Long,

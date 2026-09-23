@@ -15,7 +15,8 @@ import (
 )
 
 func TestWorkCommandTree(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	for _, path := range [][]string{
 		{"work", "show-path"},
 		{"work", "dashboard"},
@@ -30,7 +31,8 @@ func TestWorkCommandTree(t *testing.T) {
 }
 
 func TestWorkHelpDescribesCrossConceptSurface(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	var buf bytes.Buffer
 	workCmd.SetOut(&buf)
 	workCmd.SetErr(&buf)
@@ -136,7 +138,8 @@ func TestWorkShowPathOutsideGitRepo(t *testing.T) {
 }
 
 func TestWorkDashboardUsesWorkHandler(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	got, _, err := rootCmd.Find([]string{"work", "dashboard"})
 	if err != nil {
 		t.Fatalf("Find([work dashboard]): %v", err)
@@ -153,7 +156,8 @@ func TestWorkDashboardUsesWorkHandler(t *testing.T) {
 // subcommand it carried — including the hidden `dashboard` alias — are deleted
 // with no alias left behind, and the three verbs that survived live under `work`.
 func TestQueueCommandFamilyIsGone(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	for _, path := range [][]string{
 		{"queue"},
 		{"queue", "run"},
@@ -178,7 +182,8 @@ func TestQueueCommandFamilyIsGone(t *testing.T) {
 // service-management verb — the daemon is foreground and Ctrl-C is stop, so there
 // is nothing to start, stop or install.
 func TestWorkSubcommandsAreTheWholeSurface(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	var got []string
 	for _, c := range workCmd.Commands() {
 		got = append(got, c.Name())

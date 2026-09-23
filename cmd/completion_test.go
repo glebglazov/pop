@@ -17,7 +17,8 @@ import (
 )
 
 func TestCompletionSubcommandsGenerateScripts(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	generators := []struct {
 		name string
 		gen  func(*bytes.Buffer) error
@@ -270,7 +271,8 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 }
 
 func TestRoutineShellCompletionCandidates(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	for _, verb := range []string{"new", "edit"} {
 		t.Run(verb, func(t *testing.T) {
 			out := shellCompNoDesc(t, "routine", verb, "--agent")
@@ -361,7 +363,8 @@ func queueShellCompletionDeps(t *testing.T, dataHome string) *tasks.Deps {
 }
 
 func TestTaskCompletionReadOnly(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	root, _, td := setupCmdRepoTest(t)
 	writeCompletionThoughts(t, cmdTasksDir(t, td, root), "fresh", nil)
 
@@ -374,7 +377,8 @@ func TestTaskCompletionReadOnly(t *testing.T) {
 }
 
 func TestTaskPathFlagsRequestDirectoryCompletion(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	out := shellCompNoDesc(t, "tasks", "status", "--path")
 	if !strings.Contains(out, ":16") {
 		t.Fatalf("expected directory completion directive, got:\n%s", out)

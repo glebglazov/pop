@@ -19,7 +19,8 @@ import (
 // behind them. The guides are text the binary carries, so they must answer in a
 // virgin checkout and leave nothing behind.
 func TestAuthoringGuidesAreReadOnly(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	setCmdLayerDeps(t, refusingWriteDeps(t))
 
 	for _, tc := range []struct {
@@ -64,7 +65,8 @@ func TestAuthoringGuidesAreReadOnly(t *testing.T) {
 // for: -h is a human's flag reference, hit constantly, so authoring doctrine
 // stays in the guide and the help points at it (ADR-0183).
 func TestRegisterHelpCarriesMechanicsNotDoctrine(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	for _, tc := range []struct {
 		cmd   *cobra.Command
 		guide string

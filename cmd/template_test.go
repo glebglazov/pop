@@ -14,7 +14,8 @@ import (
 )
 
 func TestTemplateCommandTree(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	tests := []struct {
 		path    []string
 		wantCmd any
@@ -48,7 +49,8 @@ func TestTemplateCommandTree(t *testing.T) {
 }
 
 func TestWorkbenchCmdIsVisibleLayoutCmdIsHidden(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	if workbenchCmd.Hidden {
 		t.Fatal("workbench command should not be hidden")
 	}
