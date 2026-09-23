@@ -62,4 +62,5 @@ quality figure. It has its own count, so it cannot read as a gate failure.
 - A Case whose parent fails a gate yields no quality figures until it is
   repaired, rather than figures that blame the Arm.
 - Repairing an old Case means a new parent commit — the historical parent
-  plus only the test fixes — and a Case manifest that names it.
+  plus only the changes that make its tests hermetic, the production seams
+  those tests inject through included — and a Case manifest that names it.
