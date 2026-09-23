@@ -293,6 +293,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"1. The command rep
 	prompt := readFile(t, promptPath)
 	for _, text := range []string{
 		"observable behaviours only", "Never record code shape", "checkable against a diff",
+		"Never record that the build, the vet or the tests pass",
 		"The command reports the new state.", "- [ ] The new state is reported",
 		"diff --git a/feature.txt b/feature.txt", "+after",
 	} {

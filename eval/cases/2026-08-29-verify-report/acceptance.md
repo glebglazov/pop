@@ -26,4 +26,3 @@ Status: draft
 22. Verify reports and Refine reports are rendered, filed, scanned for the newest and have their header fields read back from the document itself (no side-car file) by one shared machinery that takes the pass as a parameter, and Refine keeps no private copy of it.
 23. Refine's observable behaviour is unchanged: the same directory, the same filename stamps, the same header, and every surface it renders on looks exactly as before.
 24. The refine prompt goldens are unmodified.
-25. `go build ./...`, `go vet ./tasks/...` and `make test` all pass.

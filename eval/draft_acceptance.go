@@ -177,7 +177,7 @@ func cloneAtCommit(repositoryURL, commit, destination string) error {
 func draftingPrompt(spec, lifted, referenceDiff string) string {
 	return `Draft the Acceptance list for this Eval Case.
 
-Record observable behaviours only. Never record code shape. Each behaviour must be checkable against a diff. Do not copy implementation details from the Reference diff.
+Record observable behaviours only. Never record code shape. Each behaviour must be checkable against a diff. Do not copy implementation details from the Reference diff. Never record that the build, the vet or the tests pass: the Objective gates check that, and the Grader never sees their results.
 
 Return only a numbered list. Put one complete behaviour on each line in this exact shape:
 1. <observable behaviour>

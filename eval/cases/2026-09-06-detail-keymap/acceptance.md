@@ -30,4 +30,3 @@ Status: approved
 26. The typing phase's hint line names only apply, cancel and help.
 27. The help overlay for a detail names the run menu plus the status, copy and mute menus, the container's `I` verb when its kind offers one, and `/` search — with a clear-search entry while a term is in force — and no longer names flat copy keys; the peek's help likewise drops them.
 28. The help overlay has its own arms for a menu opened over a detail and for the detail's typing phase.
-29. `go build ./... && go vet ./dashboard/... && go test ./dashboard/...` passes.

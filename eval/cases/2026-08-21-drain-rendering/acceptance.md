@@ -20,4 +20,3 @@ Status: draft
 16. Drain header lines and Task result lines print in full when output is redirected to a non-TTY, carrying no ANSI escape sequences.
 17. On a TTY the header and result lines carry color, and setting NO_COLOR suppresses that color on a TTY.
 18. The Work journal gains no new rows for the header or result lines; the change is stdout-only.
-19. `go build ./... && go vet ./tasks/... ./cmd/... && go test ./tasks/... ./cmd/...` passes.

@@ -25,4 +25,3 @@ Status: draft
 21. A repository that holds both a Task set and a Map lifts both from one pane, with the Task set rows ahead of the Map rows.
 22. A pane inside a Map's own Work session still gets the stamp answer, unchanged by the weaker repository pass.
 23. A Routine never lifts by locality, and a comment records that the asymmetry is deliberate.
-24. `go build ./...`, `go vet ./...`, `go test ./...` and `make test` all pass.
