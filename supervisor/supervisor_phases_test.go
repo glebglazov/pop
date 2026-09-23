@@ -217,7 +217,7 @@ func (m *meetingPoint) arrive() bool {
 	select {
 	case <-m.open:
 		return true
-	case <-time.After(5 * time.Second):
+	case <-time.After(time.Minute): // only stops a hang
 		return false
 	}
 }

@@ -480,8 +480,8 @@ func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
 
 	select {
 	case <-atGate:
-	case <-time.After(5 * time.Second):
-		t.Fatal("set-a did not reach Failed gate within 5 seconds")
+	case <-time.After(hangGuard):
+		t.Fatal("set-a did not reach Failed gate")
 	}
 
 	waiter := RecoveryWaiter{
@@ -506,8 +506,8 @@ func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
 
 	select {
 	case <-gateDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("set-a did not exit Failed gate within 5 seconds")
+	case <-time.After(hangGuard):
+		t.Fatal("set-a did not exit Failed gate")
 	}
 
 	hold, err := GetCheckoutGateHold(d, runtimePath)
@@ -1344,23 +1344,7 @@ func TestRunTaskSetClaudeQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 
-	// Wait for the recovery waiter to be registered
-	var waiter *RecoveryWaiter
-	var err error
-	for i := 0; i < 50; i++ {
-		time.Sleep(100 * time.Millisecond)
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 5 seconds")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 
 	// Verify the waiter properties
 	if waiter.Preset != "claude" {
@@ -1394,7 +1378,7 @@ func TestRunTaskSetClaudeQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
 	select {
 	case <-done:
 		// Success
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("drain did not exit after waiter deregistration")
 	}
 }
@@ -1956,18 +1940,16 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	opts.AgentExplicit = true
 	opts.MaxTries = 3
 
-	start := time.Now()
-	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	elapsed := time.Since(start)
+	d := env.deps()
+	delays := recordRetryDelays(d)
+	result, err := RunTaskSetWith(d, nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.TaskSetDone || len(result.Completed) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("fallback took %s, want no retry delay between agents", elapsed)
-	}
+	delays.assertNone(t)
 	out := buf.String()
 	if !strings.Contains(out, "Attempt 1/3 · cursor") || !strings.Contains(out, "Attempt 1/3 · claude") {
 		t.Fatalf("fallback attempts not rendered:\n%s", out)
@@ -2039,18 +2021,15 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 		return realLookPath(file)
 	}
 
-	start := time.Now()
+	delays := recordRetryDelays(d)
 	result, err := RunTaskSetWith(d, nil, nil, opts)
-	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.TaskSetDone || len(result.Completed) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("fallback took %s, want no retry delay between agents", elapsed)
-	}
+	delays.assertNone(t)
 	out := buf.String()
 	if strings.Contains(out, "Attempt 1/3 · cursor") {
 		t.Fatalf("cursor should be skipped before spawn:\n%s", out)
@@ -2475,7 +2454,7 @@ exit 1
 
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("run did not finish")
 	}
 
@@ -2544,21 +2523,7 @@ printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered for mixed quota+human list")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 	if waiter.Preset != "claude" {
 		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
 	}
@@ -2568,7 +2533,7 @@ printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You
 	}
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
@@ -2650,23 +2615,7 @@ printf '%s\n' '{"type":"error","message":"You'\''ve hit your usage limit. try ag
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 
-	// Wait for the recovery waiter to be registered
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 2 seconds")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 	// The fallback should select codex (earliest reset)
 	if waiter.Preset != "codex" {
 		t.Fatalf("waiter preset = %q, want codex", waiter.Preset)
@@ -2686,7 +2635,7 @@ printf '%s\n' '{"type":"error","message":"You'\''ve hit your usage limit. try ag
 	}
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
@@ -2748,23 +2697,7 @@ func TestRunTaskSetAgentFallbackWritesResetAwareCooldown(t *testing.T) {
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 
-	// Wait for the recovery waiter to be registered
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 2 seconds")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 	if waiter.Preset != "codex" {
 		t.Fatalf("waiter preset = %q, want codex", waiter.Preset)
 	}
@@ -2790,7 +2723,7 @@ func TestRunTaskSetAgentFallbackWritesResetAwareCooldown(t *testing.T) {
 	}
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
@@ -2821,23 +2754,7 @@ printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You
 		_, _ = RunTaskSetWith(d, nil, loadConfig, opts)
 	}()
 
-	// Wait for the recovery waiter to be registered
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 2 seconds")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 	if waiter.Preset != "claude" {
 		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
 	}
@@ -2859,7 +2776,7 @@ printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You
 	}
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
@@ -2899,23 +2816,7 @@ printf 'called\n' >> %[1]q
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 
-	// Wait for the recovery waiter to be registered
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 2 seconds")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 	if waiter.Preset != "codex" || !waiter.ResetAt.Equal(earliest) {
 		t.Fatalf("waiter = %#v, want codex earliest reset %s", waiter, earliest)
 	}
@@ -2933,7 +2834,7 @@ printf 'called\n' >> %[1]q
 	}
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
