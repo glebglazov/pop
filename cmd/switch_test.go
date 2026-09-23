@@ -182,7 +182,8 @@ func TestCanonicalDir(t *testing.T) {
 }
 
 func TestProjectSwitchCommandTree(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	got, _, err := rootCmd.Find([]string{"project", "switch"})
 	if err != nil {
 		t.Fatal(err)

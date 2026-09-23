@@ -842,7 +842,8 @@ func TestBaseRefPickerItemsPutsMainFirstBranchesAtBottom(t *testing.T) {
 }
 
 func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	// ctrl-n is cursor-down in the picker; a create binding never shipped.
 	// Guard against a help line assigning create to ctrl-n while allowing its
 	// real navigation binding.
@@ -854,7 +855,8 @@ func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
 }
 
 func TestWorktreeHelpAndReadmeListCurrentBindings(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	readme, err := os.ReadFile(filepath.Join("..", "README.md"))
 	if err != nil {
 		t.Fatal(err)
