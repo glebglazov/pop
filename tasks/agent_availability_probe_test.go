@@ -292,18 +292,16 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	opts.AgentExplicit = true
 	opts.MaxTries = 3
 
-	start := time.Now()
-	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	elapsed := time.Since(start)
+	d := env.deps()
+	delays := recordRetryDelays(d)
+	result, err := RunTaskSetWith(d, nil, nil, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.TaskSetDone || len(result.Completed) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("fallback took %s, want no retry delay between agents", elapsed)
-	}
+	delays.assertNone(t)
 	out := buf.String()
 	if strings.Contains(out, "Attempt 1/3 · cursor") {
 		t.Fatalf("cursor should be skipped by probe before spawn:\n%s", out)
