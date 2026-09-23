@@ -94,7 +94,7 @@ func runTerminalHelper(t *testing.T, mode, answer string) string {
 	}()
 
 	var seen strings.Builder
-	deadline := time.After(30 * time.Second)
+	deadline := time.After(hangGuard)
 	answered := answer == ""
 	for {
 		select {

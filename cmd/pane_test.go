@@ -491,7 +491,7 @@ func TestRunPaneSetStatusWith_SocketFailureFallsBackAndStartsDaemon(t *testing.T
 
 	select {
 	case <-daemonStarted:
-	case <-time.After(time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("expected daemon startup hook after socket failure")
 	}
 

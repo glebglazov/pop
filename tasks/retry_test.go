@@ -297,15 +297,12 @@ func TestRunTaskTimeoutRetriesInstantlyThenFailsAtCap(t *testing.T) {
 	opts.Timeout = 100 * time.Millisecond
 	var buf bytes.Buffer
 	opts.Output = &buf
-	start := time.Now()
-	_, err := RunTaskWith(env.deps(), nil, nil, opts)
-	elapsed := time.Since(start)
+	d := env.deps()
+	delays := recordRetryDelays(d)
+	_, err := RunTaskWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	// A timeout on a non-final attempt retries with zero delay, so three 100ms
-	// timeouts finish well under the 2s the slow agent would take to complete.
-	if elapsed > 2*time.Second {
-		t.Fatalf("timeout retries took %s, want instant retries", elapsed)
-	}
+	// A timeout on a non-final attempt retries with zero delay.
+	delays.assertNone(t)
 	if !strings.Contains(err.Error(), "timed out after 100ms on attempt 3") {
 		t.Fatalf("err = %v", err)
 	}
@@ -329,14 +326,16 @@ func TestRunTaskTimeoutSharesRetryBudget(t *testing.T) {
 	// Attempt 1 hangs on a real `sleep` so the deadline SIGKILLs it; the
 	// never-hanging in-process fake cannot drive this.
 	agent := writeRealShimAttemptAgent(t, env.root, []attemptScript{
-		{sleep: 3 * time.Second}, // attempt 1: times out
+		{sleep: time.Minute}, // attempt 1: times out
 		{changeFile: "impl.txt", changeData: "a\n", checkTask: true, skipSentinel: true}, // attempt 2: assessment failure
 		{changeFile: "impl.txt", changeData: "b\n", checkTask: true, skipSentinel: true}, // attempt 3: assessment failure → Failed
 	})
 
 	opts := env.runOpts(true, agent)
 	opts.MaxTries = 3
-	opts.Timeout = 700 * time.Millisecond
+	// Attempts 2 and 3 must finish inside the same deadline that kills attempt
+	// 1, so it is sized for a loaded machine, not for the hang.
+	opts.Timeout = 5 * time.Second
 	var buf bytes.Buffer
 	opts.Output = &buf
 	_, err := RunTaskWith(env.deps(), nil, nil, opts)
@@ -344,7 +343,7 @@ func TestRunTaskTimeoutSharesRetryBudget(t *testing.T) {
 	if !strings.Contains(err.Error(), "failed after 3 attempts") {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(buf.String(), "✗ Attempt 1/3 timed out after 700ms") {
+	if !strings.Contains(buf.String(), "✗ Attempt 1/3 timed out after 5s") {
 		t.Fatalf("missing timeout line for attempt 1:\n%s", buf.String())
 	}
 	// The timeout consumed one slot, leaving two assessment-failure attempts
@@ -719,7 +718,7 @@ func signalOwnPidWhenAgentStarts(t *testing.T, root string) {
 	t.Helper()
 	sentinel := slowAgentSentinel(root)
 	go func() {
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(hangGuard)
 		for time.Now().Before(deadline) {
 			if _, err := os.Stat(sentinel); err == nil {
 				_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)

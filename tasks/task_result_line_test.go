@@ -105,24 +105,13 @@ func TestDrainResultLineOnQuotaPause(t *testing.T) {
 	}()
 	// The line is printed before the waiter is registered, so a registered
 	// waiter means the buffer already holds it.
-	var registered bool
-	for i := 0; i < 50 && !registered; i++ {
-		time.Sleep(20 * time.Millisecond)
-		waiter, err := GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		registered = waiter != nil
-	}
-	if !registered {
-		t.Fatal("drain never parked on a quota pause")
-	}
+	waitForRecoveryWaiter(t, d, "demo")
 	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
 		t.Fatalf("deregister recovery waiter: %v", err)
 	}
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("drain did not exit after its waiter was deregistered")
 	}
 	if want := "◌ demo/01-a quota-paused (claude)"; !strings.Contains(buf.String(), want) {

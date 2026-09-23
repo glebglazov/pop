@@ -81,7 +81,9 @@ import (
 //
 // These pace themselves on short (sub-second) deadlines or a start-sentinel
 // signal, not on the shims' nominal multi-second sleeps, so they no longer cost
-// real seconds even though they spawn.
+// real seconds even though they spawn. TestRunTaskTimeoutSharesRetryBudget is
+// the exception: two of its attempts must finish inside the deadline that kills
+// the first, so it waits out a 5s deadline sized for a loaded machine.
 var realShimSmokeSet = []string{
 	"TestRunTaskSetDrainsMultipleAFKTasksInOrder",
 	"TestRunTaskStructuredAttemptWritesStream",
