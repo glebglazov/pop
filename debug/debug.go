@@ -5,7 +5,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+// mu guards the loggers and their files. Commands open and close them per
+// call, so two callers in one process — parallel tests running pane commands —
+// would otherwise race on them.
+var mu sync.Mutex
 
 var logger *log.Logger
 var file *os.File
@@ -34,6 +40,8 @@ func defaultErrorLogPath() string {
 // $XDG_DATA_HOME/pop/pop.log). The debug logger is only active when
 // POP_LOG is set or the binary was built with DEBUG=true.
 func Init() {
+	mu.Lock()
+	defer mu.Unlock()
 	// Always-on error logger
 	if errPath := defaultErrorLogPath(); errPath != "" {
 		if err := os.MkdirAll(filepath.Dir(errPath), 0o755); err == nil {
@@ -65,6 +73,8 @@ func Init() {
 
 // Log writes a formatted message to the debug log. No-op if logging is disabled.
 func Log(format string, args ...any) {
+	mu.Lock()
+	defer mu.Unlock()
 	if logger == nil {
 		return
 	}
@@ -75,6 +85,8 @@ func Log(format string, args ...any) {
 // (unlike Log which requires POP_LOG). Use for errors that should be
 // persisted for post-crash forensics.
 func Error(format string, args ...any) {
+	mu.Lock()
+	defer mu.Unlock()
 	if errorLogger == nil {
 		return
 	}
@@ -83,6 +95,8 @@ func Error(format string, args ...any) {
 
 // Close flushes and closes all log files.
 func Close() {
+	mu.Lock()
+	defer mu.Unlock()
 	if file != nil {
 		file.Close()
 		file = nil

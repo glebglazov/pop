@@ -7,7 +7,8 @@ import (
 
 // TestPositiveIntegrateFlagsHardError: --pane-skill and --task-skills are rejected.
 func TestPositiveIntegrateFlagsHardError(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	prevPane := integratePaneSkill
 	prevTask := integrateTaskSkills
 	prevUpdate := integrateUpdateExisting
@@ -38,7 +39,8 @@ func TestPositiveIntegrateFlagsHardError(t *testing.T) {
 // TestLegacyNoPaneSkillsFlagHardError: the retired --no-pane-skills spelling
 // errors naming its replacement, --no-pane-skill, instead of aliasing it.
 func TestLegacyNoPaneSkillsFlagHardError(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	prevLegacy := integrateNoPaneSkillsLegacy
 	prevUpdate := integrateUpdateExisting
 	t.Cleanup(func() {
