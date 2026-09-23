@@ -1,7 +1,7 @@
 {
   "name": "2026-08-28-work-lift",
   "repository_url": "git@github.com:glebglazov/pop.git",
-  "parent_commit": "7dea26d6a6094f6d0834ce0b86c4118bae5fe1d0",
+  "parent_commit": "6aff13a354fd706dc02e385ef01d92e9b2e3a214",
   "reference_range": "9a24df8d8d6be535929889619bf7c1561d97a637..f21c8e220079d8fc16ebf23f40ff57481bac58cd",
   "gate_commands": [
     "go build ./...",
