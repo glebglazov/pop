@@ -26,6 +26,12 @@ const remediationSummaryMaxLen = 72
 // the set's remediation depth is derived from these entries.
 var remediationIDPattern = regexp.MustCompile(`^\d+-remediation$`)
 
+// IsRemediation reports whether t is a Remediation task. It reads the id alone,
+// because a legacy Remediation entry carries no origin.
+func (t Task) IsRemediation() bool {
+	return remediationIDPattern.MatchString(t.ID)
+}
+
 // Remediation origins (ADR-0105) tag a Remediation task's provenance so depth
 // counts only the unattended run. Auto = Verifier-spawned on FIXABLE, human =
 // spawned via the Remediate disposition.
@@ -70,7 +76,7 @@ func remediationDepth(m *Manifest) int {
 	}
 	n := 0
 	for _, t := range m.Tasks {
-		if !remediationIDPattern.MatchString(t.ID) {
+		if !t.IsRemediation() {
 			continue
 		}
 		if remediationOrigin(t) == RemediationOriginHuman {

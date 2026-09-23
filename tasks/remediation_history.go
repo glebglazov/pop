@@ -40,7 +40,7 @@ func CollectDoneRemediationHistory(d *Deps, m *Manifest) []RemediationHistoryEnt
 	remediationByFile := make(map[string]Task)
 	var remediationFiles []string
 	for _, task := range m.Tasks {
-		if !remediationIDPattern.MatchString(task.ID) {
+		if !task.IsRemediation() {
 			continue
 		}
 		if _, seen := remediationByFile[task.File]; !seen {

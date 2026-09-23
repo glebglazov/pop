@@ -34,7 +34,7 @@ func refineComposition(m *Manifest) string {
 	}
 	var ids []string
 	for _, task := range m.Tasks {
-		if task.Type == "AFK" && task.Status == TaskDone && !remediationIDPattern.MatchString(task.ID) {
+		if task.Type == "AFK" && task.Status == TaskDone && !task.IsRemediation() {
 			ids = append(ids, task.ID)
 		}
 	}

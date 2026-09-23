@@ -116,13 +116,15 @@ func TestPrepareCaseFromHistoricalTaskSet(t *testing.T) {
   "tasks": [
     {"id":"01-build","file":"01-build.md","title":"Build it","type":"AFK","status":"done","blocked_by":[],"commit":{"sha":"old","subject":"old"}},
     {"id":"02-check","file":"02-check.md","title":"Check it","type":"AFK","status":"failed","blocked_by":["01-build","03-sign-off"],"failed_after":2},
-    {"id":"03-sign-off","file":"03-sign-off.md","title":"Sign off","type":"HITL","status":"open","blocked_by":["02-check"]}
+    {"id":"03-sign-off","file":"03-sign-off.md","title":"Sign off","type":"HITL","status":"open","blocked_by":["02-check"]},
+    {"id":"04-remediation","file":"04-remediation.md","title":"Remediation 1: resolve verification findings","type":"AFK","status":"done","blocked_by":[]}
   ]
 }`
 	writeFile(t, filepath.Join(setDir, tasks.ManifestFileName), manifest)
 	writeFile(t, filepath.Join(setDir, "01-build.md"), taskBody("Build it", "First behaviour"))
 	writeFile(t, filepath.Join(setDir, "02-check.md"), taskBody("Check it", "Second behaviour"))
 	writeFile(t, filepath.Join(setDir, "03-sign-off.md"), taskBody("Sign off", "Human approval"))
+	writeFile(t, filepath.Join(setDir, "04-remediation.md"), taskBody("Resolve the findings", "Verifier finding"))
 
 	writeFile(t, filepath.Join(repo, "one.go"), "package project\n")
 	runGit(t, repo, "add", ".")
@@ -191,15 +193,17 @@ func TestPrepareCaseFromHistoricalTaskSet(t *testing.T) {
 	if !preparedSet.Valid {
 		t.Fatalf("prepared Task set is not valid: %v", preparedSet.Errors)
 	}
-	if _, err := os.Stat(filepath.Join(caseDir, "tasks", "03-sign-off.md")); !os.IsNotExist(err) {
-		t.Fatalf("HITL task file exists: %v", err)
+	for _, file := range []string{"03-sign-off.md", "04-remediation.md"} {
+		if _, err := os.Stat(filepath.Join(caseDir, "tasks", file)); !os.IsNotExist(err) {
+			t.Fatalf("stripped task file %s exists: %v", file, err)
+		}
 	}
 	spec := readFile(t, filepath.Join(caseDir, tasks.SpecFileName))
-	if !strings.Contains(spec, "First behaviour") || !strings.Contains(spec, "Second behaviour") || strings.Contains(spec, "Human approval") {
+	if !strings.Contains(spec, "First behaviour") || !strings.Contains(spec, "Second behaviour") || strings.Contains(spec, "Human approval") || strings.Contains(spec, "Verifier finding") {
 		t.Fatalf("spec content:\n%s", spec)
 	}
 	acceptance := readFile(t, filepath.Join(caseDir, acceptanceName))
-	if !strings.Contains(acceptance, "Status: not approved") || !strings.Contains(acceptance, "- [ ] First behaviour") || !strings.Contains(acceptance, "- [ ] Second behaviour") || strings.Contains(acceptance, "Human approval") {
+	if !strings.Contains(acceptance, "Status: not approved") || !strings.Contains(acceptance, "- [ ] First behaviour") || !strings.Contains(acceptance, "- [ ] Second behaviour") || strings.Contains(acceptance, "Human approval") || strings.Contains(acceptance, "Verifier finding") {
 		t.Fatalf("acceptance content:\n%s", acceptance)
 	}
 

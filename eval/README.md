@@ -69,6 +69,11 @@ Create a Case from a historical Task set:
 go run ./eval prepare <repo-path> <set-id>
 ```
 
+The spec and the Pop arm's task split hold only the set's planned AFK tasks.
+`prepare` leaves out HITL tasks and Remediation tasks, because a Remediation
+task holds the historical Verifier's findings and would tell both Arms what the
+first implementation missed.
+
 The default Case name is the Task-set identifier. The default Objective gates
 are `go build ./...` and `go test ./...`; the default scope is `.`. Standard
 documents default to `docs/agents/implementation.md` and `AGENTS.md` when each

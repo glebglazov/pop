@@ -371,8 +371,8 @@ func defaultStandardDocuments(repoPath, parent string) ([]string, error) {
 }
 
 // preparedCase is the file set a Case directory is written from: the Case
-// manifest, the stripped Task-set manifest, the AFK task bodies keyed by their
-// file name, and the two documents lifted out of those bodies.
+// manifest, the stripped Task-set manifest, the planned AFK task bodies keyed by
+// their file name, and the two documents lifted out of those bodies.
 type preparedCase struct {
 	manifest     []byte
 	taskManifest []byte
@@ -382,9 +382,12 @@ type preparedCase struct {
 }
 
 func prepareTaskSet(manifest *tasks.Manifest, setDir string) (preparedCase, error) {
+	// A Case keeps only the planned work. A HITL task is a human sign-off, and a
+	// Remediation task carries the historical Verifier's findings, which would
+	// tell a Trial what the first implementation missed.
 	stripped := make(map[string]bool)
 	for _, task := range manifest.Tasks {
-		if task.Type == "HITL" {
+		if task.Type == "HITL" || task.IsRemediation() {
 			stripped[task.ID] = true
 		}
 	}
