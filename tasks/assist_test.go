@@ -363,7 +363,7 @@ func TestAssistAcceptWaitsForTheCheckoutThenRuns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AssistTaskSetWith: %v", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("Accept never took the checkout after the holder let go")
 	}
 
@@ -419,7 +419,7 @@ func TestAssistAcceptInterruptedWaitReturnsToTheMenu(t *testing.T) {
 		if err != nil {
 			t.Fatalf("an interrupted wait must not end the session: %v", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("SIGINT did not end the wait")
 	}
 
@@ -464,7 +464,7 @@ func TestAssistRemediateWaitsForTheCheckoutThenRuns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AssistTaskSetWith: %v", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("Remediate never took the checkout after the holder let go")
 	}
 
@@ -812,7 +812,7 @@ func (b *liveBuffer) String() string {
 
 func waitForOutput(t *testing.T, b *liveBuffer, want string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(hangGuard)
 	for time.Now().Before(deadline) {
 		if strings.Contains(b.String(), want) {
 			return

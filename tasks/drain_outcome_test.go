@@ -30,24 +30,7 @@ func TestRunTaskSetQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 	
-	// Wait for the recovery waiter to be registered.
-	// Poll the store a few times to give the goroutine time to register.
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-	
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 2 seconds")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 	if waiter.Preset != "claude" {
 		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
 	}
@@ -70,7 +53,7 @@ func TestRunTaskSetQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
 	select {
 	case <-done:
 		// Success
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }
@@ -92,23 +75,7 @@ func TestRunTaskSetCodexQuotaPauseRegistersWaiterWithResetAt(t *testing.T) {
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 	
-	// Wait for the recovery waiter to be registered
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
-	
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 2 seconds")
-	}
+	waiter := waitForRecoveryWaiter(t, d, "demo")
 	if waiter.Preset != "codex" {
 		t.Fatalf("waiter preset = %q, want codex", waiter.Preset)
 	}
@@ -131,7 +98,7 @@ func TestRunTaskSetCodexQuotaPauseRegistersWaiterWithResetAt(t *testing.T) {
 	select {
 	case <-done:
 		// Success
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("goroutine did not exit after waiter deregistration")
 	}
 }

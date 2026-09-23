@@ -125,15 +125,8 @@ func TestSpentCapOutlivesAQuotaPark(t *testing.T) {
 		_, _ = RunTaskSetWith(d, nil, nil, opts)
 	}()
 
-	var waiter *RecoveryWaiter
-	for i := 0; i < 200 && waiter == nil; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		if waiter, err = GetRecoveryWaiter(d, "demo"); err != nil {
-			t.Fatalf("GetRecoveryWaiter: %v", err)
-		}
-	}
-	if waiter == nil || waiter.Preset != "claude" {
+	waiter := waitForRecoveryWaiter(t, d, "demo")
+	if waiter.Preset != "claude" {
 		t.Fatalf("waiter = %#v, want the drain parked on claude's quota", waiter)
 	}
 
@@ -151,7 +144,7 @@ func TestSpentCapOutlivesAQuotaPark(t *testing.T) {
 	}
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("the parked drain did not return after its waiter was deregistered")
 	}
 }

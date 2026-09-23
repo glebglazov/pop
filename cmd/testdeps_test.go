@@ -3,6 +3,7 @@ package cmd
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -12,6 +13,11 @@ import (
 	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/wayfinder"
 )
+
+// hangGuard is how long a test waits for an event that must come. It only stops
+// a broken run from hanging the package; it is never the assertion, so it is
+// sized for a loaded machine running the whole tree, not for the event.
+const hangGuard = time.Minute
 
 // cmdTestFS builds a MockFileSystem routing XDG_* through the deps seam
 // (ADR-0145). File operations delegate to the real filesystem.

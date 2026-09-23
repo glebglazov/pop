@@ -80,7 +80,7 @@ func TestDispatcherDaemon_WritesFinalFirstNonEmptyWins(t *testing.T) {
 		disp := newTestDispatcher(func() *config.Config { return cfg }, noTopicState, noPaneNote, run, recordingWriter(&recs, &mu))
 		disp.Enqueue(topicDeriveJob{PaneID: "%5", Prompt: "refactor auth"})
 
-		waitForWrites(t, &mu, &recs, 1, 2*time.Second)
+		waitForWrites(t, &mu, &recs, 1)
 		ranMu.Lock()
 		got := ran
 		ranMu.Unlock()
@@ -116,7 +116,7 @@ func TestDispatcherDaemon_WritesFinalFirstNonEmptyWins(t *testing.T) {
 		disp := newTestDispatcher(func() *config.Config { return cfg }, noTopicState, noPaneNote, run, recordingWriter(&recs, &mu))
 		disp.Enqueue(topicDeriveJob{PaneID: "%5", Prompt: "refactor auth"})
 
-		waitForWrites(t, &mu, &recs, 1, 2*time.Second)
+		waitForWrites(t, &mu, &recs, 1)
 		ranMu.Lock()
 		if ran["claude"] {
 			t.Error("claude must not run after ollama succeeds (first non-empty stops the chain)")
@@ -148,7 +148,7 @@ func TestDispatcherDaemon_WritesFinalFirstNonEmptyWins(t *testing.T) {
 		disp := newTestDispatcher(func() *config.Config { return cfg }, noTopicState, noPaneNote, run, recordingWriter(&recs, &mu))
 		disp.Enqueue(topicDeriveJob{PaneID: "%9", Prompt: "fix the build"})
 
-		waitForWrites(t, &mu, &recs, 1, 2*time.Second)
+		waitForWrites(t, &mu, &recs, 1)
 		mu.Lock()
 		defer mu.Unlock()
 		if len(recs) != 1 || recs[0].Topic != "local-topic" || recs[0].Kind != "final" {
@@ -230,7 +230,7 @@ func TestDispatcherDaemon_GatingHonorsKind(t *testing.T) {
 		disp := newTestDispatcher(func() *config.Config { return cfg }, lookup, noPaneNote, run, recordingWriter(&recs, &mu))
 		disp.Enqueue(topicDeriveJob{PaneID: "%3", Prompt: "new prompt"})
 
-		waitForWrites(t, &mu, &recs, 1, 2*time.Second)
+		waitForWrites(t, &mu, &recs, 1)
 		mu.Lock()
 		defer mu.Unlock()
 		if len(recs) != 1 || recs[0] != (writeRecord{"%3", "regenerated", "final"}) {
@@ -261,7 +261,7 @@ func TestDispatcherDaemon_EnqueueReturnsImmediately(t *testing.T) {
 	// The recipe started running in the background…
 	select {
 	case <-started:
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("recipe did not start")
 	}
 	// …but no write has happened yet (the recipe is still blocked), and
@@ -273,7 +273,7 @@ func TestDispatcherDaemon_EnqueueReturnsImmediately(t *testing.T) {
 	mu.Unlock()
 
 	close(gate)
-	waitForWrites(t, &mu, &recs, 1, 2*time.Second)
+	waitForWrites(t, &mu, &recs, 1)
 	mu.Lock()
 	defer mu.Unlock()
 	if recs[0] != (writeRecord{"%5", "async-topic", "final"}) {
@@ -324,7 +324,7 @@ func TestDispatcherDaemon_SingleFlightSupersede(t *testing.T) {
 	disp.Enqueue(topicDeriveJob{PaneID: "%5", Prompt: "alpha prompt"})
 	select {
 	case <-started1:
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("first recipe did not start")
 	}
 
@@ -334,18 +334,18 @@ func TestDispatcherDaemon_SingleFlightSupersede(t *testing.T) {
 
 	// The newer (beta) derivation should write its result; the older (alpha)
 	// derivation is in flight and will be dropped when it finishes.
-	waitForWrites(t, &mu, &recs, 1, 2*time.Second)
+	waitForWrites(t, &mu, &recs, 1)
 
 	// The newer derivation cancelled the older's context (killing a real
 	// exec promptly). Wait briefly for the cancels propagation to register.
-	if !waitUntil(2*time.Second, func() bool { return firstCtxCancelled.Load() }) {
+	if !waitUntil(func() bool { return firstCtxCancelled.Load() }) {
 		t.Fatal("the superseded derivation's context was not cancelled")
 	}
 
 	// 3. Release the older derivation. It computes topic-alpha, but the
 	//    generation guard must drop the write — only the newest may persist.
 	close(gate1)
-	if !waitUntil(time.Second, func() bool {
+	if !waitUntil(func() bool {
 		ranOrderMu.Lock()
 		defer ranOrderMu.Unlock()
 		return len(ranOrder) == 3 && ranOrder[2] == "alpha-finish"
@@ -398,12 +398,12 @@ func TestDispatcherDaemon_SingleFlightAcrossPanes(t *testing.T) {
 	for _, ch := range []chan struct{}{startA, startB} {
 		select {
 		case <-ch:
-		case <-time.After(2 * time.Second):
+		case <-time.After(hangGuard):
 			t.Fatal("a cross-pane derivation did not start")
 		}
 	}
 	close(gate)
-	waitForWrites(t, &mu, &recs, 2, 2*time.Second)
+	waitForWrites(t, &mu, &recs, 2)
 	mu.Lock()
 	defer mu.Unlock()
 	got := map[string]string{}
@@ -445,18 +445,18 @@ func TestHandleDeriveTopic_ReturnsImmediately(t *testing.T) {
 	select {
 	case <-done:
 		// Handler returned before the recipe finished — instant enqueue.
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("handleDeriveTopic blocked on the recipe")
 	}
 
 	// The recipe is running in the background now.
 	select {
 	case <-started:
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("recipe did not start after handleDeriveTopic returned")
 	}
 	close(gate)
-	waitForWrites(t, &mu, &recs, 1, 2*time.Second)
+	waitForWrites(t, &mu, &recs, 1)
 }
 
 // TestHandleDeriveTopic_NoopOnEmpty confirms a derive request with no pane id
@@ -601,7 +601,7 @@ func TestDeriveTopicSeedWith_RegenerationOverwrite(t *testing.T) {
 	run := func(context.Context, []string, []byte) (string, error) { return "regenerated-final", nil }
 	disp := newTestDispatcher(func() *config.Config { return cfg }, daemonLookup, noPaneNote, run, recordingWriter(&daemonWrites, &dmu))
 	disp.Enqueue(job)
-	waitForWrites(t, &dmu, &daemonWrites, 1, 2*time.Second)
+	waitForWrites(t, &dmu, &daemonWrites, 1)
 	dmu.Lock()
 	defer dmu.Unlock()
 	if daemonWrites[0] != (writeRecord{"%5", "regenerated-final", "final"}) {
@@ -755,9 +755,9 @@ func TestDeriveTopicSeedWith_NoOpCases(t *testing.T) {
 // --- helpers ---
 
 // waitForWrites polls until recs holds at least n entries (or times out).
-func waitForWrites(t *testing.T, mu *sync.Mutex, recs *[]writeRecord, n int, timeout time.Duration) {
+func waitForWrites(t *testing.T, mu *sync.Mutex, recs *[]writeRecord, n int) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(hangGuard)
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		got := len(*recs)
@@ -771,8 +771,8 @@ func waitForWrites(t *testing.T, mu *sync.Mutex, recs *[]writeRecord, n int, tim
 }
 
 // waitUntil polls until cond returns true (or times out).
-func waitUntil(timeout time.Duration, cond func() bool) bool {
-	deadline := time.Now().Add(timeout)
+func waitUntil(cond func() bool) bool {
+	deadline := time.Now().Add(hangGuard)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return true
