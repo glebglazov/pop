@@ -304,21 +304,18 @@ func TestSendRequest_Timeout(t *testing.T) {
 		if err != nil {
 			return
 		}
-		// Stay silent just past the client's 2s read deadline so it times out;
-		// no need for a long real sleep here.
-		time.Sleep(3 * time.Second)
+		// Stay silent until the client gives up. The close only stops a client
+		// with no read deadline from hanging the test, and its error then is
+		// not a timeout.
+		time.Sleep(time.Minute)
 		conn.Close()
 	}()
 
-	start := time.Now()
 	_, err = SendRequest(ln.Addr().String(), Request{Cmd: "set-status", PaneID: "%1", Status: "working"})
-	elapsed := time.Since(start)
 
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	if elapsed > 5*time.Second {
-		t.Errorf("timeout took %v, expected ~2s", elapsed)
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("err = %v, want the client's read deadline to time out", err)
 	}
 }
 

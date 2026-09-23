@@ -48,25 +48,6 @@ func setDirManifest(env *runTaskSetFixture, setID string) *Manifest {
 	return &Manifest{Dir: filepath.Join(env.tasksDir, setID)}
 }
 
-// waitForRecoveryWaiter blocks until the drain under test has parked on its quota
-// pause and registered its recovery waiter — the point from which the wait can be
-// interrupted.
-func waitForRecoveryWaiter(t *testing.T, d *Deps, setID string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		waiter, err := GetRecoveryWaiter(d, setID)
-		if err != nil {
-			t.Fatalf("GetRecoveryWaiter: %v", err)
-		}
-		if waiter != nil {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("recovery waiter for %q was never registered", setID)
-}
-
 // TestDrainInterruptedInQuotaRecoveryWaitClearsAutoDrain: a drain parked in the
 // quota-recovery wait shows no interrupt gate — it ends straight from the wait —
 // and the exit still revokes the set's Auto-drain consent (ADR-0120 names
@@ -101,7 +82,7 @@ func TestDrainInterruptedInQuotaRecoveryWaitClearsAutoDrain(t *testing.T) {
 	select {
 	case err := <-errCh:
 		assertExitCode(t, err, ExitInterrupted)
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("the drain did not exit after its recovery wait was interrupted")
 	}
 

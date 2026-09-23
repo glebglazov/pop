@@ -115,7 +115,7 @@ func TestSetupGroupWaitsBeforeOutputAndReportsDeclaredFailure(t *testing.T) {
 	for range 3 {
 		select {
 		case <-started:
-		case <-time.After(5 * time.Second):
+		case <-time.After(hangGuard):
 			t.Fatal("group did not start together")
 		}
 	}
@@ -135,7 +135,7 @@ func TestSetupGroupWaitsBeforeOutputAndReportsDeclaredFailure(t *testing.T) {
 		if !strings.HasSuffix(output.String(), "held:twoheld:oneheld:three") {
 			t.Fatalf("output = %q", output.String())
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("group did not finish")
 	}
 }
