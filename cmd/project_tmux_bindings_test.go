@@ -9,7 +9,8 @@ import (
 )
 
 func TestProjectTmuxBindingsPrintsFragment(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	cmd, _, err := rootCmd.Find([]string{"project", "tmux-bindings"})
 	if err != nil {
 		t.Fatalf("Find: %v", err)

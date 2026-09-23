@@ -12,7 +12,8 @@ import (
 )
 
 func TestRoutineCommandTree(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	tests := []struct {
 		path []string
 	}{
@@ -28,7 +29,6 @@ func TestRoutineCommandTree(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.path, " "), func(t *testing.T) {
-			t.Parallel()
 			if _, _, err := rootCmd.Find(tt.path); err != nil {
 				t.Fatalf("Find(%v): %v", tt.path, err)
 			}

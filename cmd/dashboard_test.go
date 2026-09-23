@@ -528,7 +528,8 @@ func TestSessionAccessTime(t *testing.T) {
 // project.SessionName, which spawns git subprocesses per entry. Scanning the
 // whole history must cost zero git calls regardless of entry count.
 func TestSessionAccessTimeTasksNoGitCalls(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: countingGitDeps swaps project's process-global default Deps —
+	// stays serial.
 	now := time.Now()
 	hist := &history.History{}
 	for i := 0; i < 20; i++ {

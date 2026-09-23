@@ -157,7 +157,8 @@ func TestConfigKeysSettableMarkerOnlyInRepoScope(t *testing.T) {
 
 // TestConfigKeysWhyFlagInHelp verifies --why is registered on pop config keys.
 func TestConfigKeysWhyFlagInHelp(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	f := configKeysCmd.Flags().Lookup("why")
 	if f == nil {
 		t.Fatal("expected --why flag registered on config keys")
