@@ -1,6 +1,6 @@
 # Acceptance list
 
-Status: draft
+Status: approved
 
 1. A Verifier invocation writes a Verify report document under the set's own directory, with the instant it was written stamped into the filename.
 2. Each Verifier invocation leaves its own report, so a verify-remediate-verify lap leaves one document per invocation rather than one rewritten answer.

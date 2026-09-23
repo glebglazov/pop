@@ -1,6 +1,6 @@
 # Acceptance list
 
-Status: draft
+Status: approved
 
 1. A whole-set `pop tasks implement` run prints, as its very first output line and before the status table, a Drain header naming the Task set identifier, the resolved Runtime path, and the Worktree binding kind (managed or adopted).
 2. The Drain header prints unconditionally on every whole-set run, including when the run is invoked from inside the bound checkout.

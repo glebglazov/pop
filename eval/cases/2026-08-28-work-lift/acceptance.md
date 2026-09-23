@@ -1,6 +1,6 @@
 # Acceptance list
 
-Status: draft
+Status: approved
 
 1. A Work view preset that declares `lift = true` grants the Work dashboard's derived row ordering.
 2. The shipped `active` preset is the only shipped preset that declares the grant.
