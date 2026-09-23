@@ -347,11 +347,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 			return DashboardDrainResult{}, resolveErr
 		}
 	}
-	loadConfig := config.Load
-	if d.LoadConfig != nil {
-		loadConfig = d.LoadConfig
-	}
-	runtimePath, _, err := tasks.ValidateAssistLaunch(d.Tasks, d.Project, loadConfig, tasks.AssistOptions{
+	runtimePath, _, err := tasks.ValidateAssistLaunch(d.Tasks, d.Project, d.ConfigLoader(), tasks.AssistOptions{
 		ResolveInput: tasks.ResolveInput{
 			CWD:             projectPath,
 			RuntimeOverride: runtimeOverride,
