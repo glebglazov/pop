@@ -31,7 +31,7 @@ func (s Shell) buildConfigModal() *ui.ConfigDashboard {
 	if s.openConfig != nil {
 		return s.openConfig()
 	}
-	deps := config.DefaultDeps()
+	deps := s.d.Tasks.ConfigDeps()
 	return confighost.Open(deps, s.cfgPath, confighost.WorkingCheckout(deps))
 }
 
@@ -77,8 +77,5 @@ func (s Shell) reloadedConfig() (*config.Config, error) {
 	if s.reloadConfig != nil {
 		return s.reloadConfig()
 	}
-	if s.d != nil && s.d.LoadConfig != nil {
-		return s.d.LoadConfig(s.cfgPath)
-	}
-	return config.Load(s.cfgPath)
+	return s.d.ConfigLoader()(s.cfgPath)
 }
