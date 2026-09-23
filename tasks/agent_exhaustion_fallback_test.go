@@ -105,8 +105,8 @@ func TestEveryAgentTimingOutHandsTheTurnOn(t *testing.T) {
 	})
 	// Real subprocesses: the in-process fake never hangs, so a timeout kill needs
 	// a shim that really sleeps past the deadline (ADR-0144).
-	codexCalls := installHangingAgent(t, env.root, "codex", `if [ "$1" = login ]; then exit 0; fi`)
-	claudeCalls := installHangingAgent(t, env.root, "claude", `if [ "$1" = auth ] && [ "$2" = status ]; then printf '{"loggedIn":true}\n'; exit 0; fi`)
+	installHangingAgent(t, env.root, "codex", `if [ "$1" = login ]; then exit 0; fi`)
+	installHangingAgent(t, env.root, "claude", `if [ "$1" = auth ] && [ "$2" = status ]; then printf '{"loggedIn":true}\n'; exit 0; fi`)
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(true, "", &buf)
@@ -117,11 +117,19 @@ func TestEveryAgentTimingOutHandsTheTurnOn(t *testing.T) {
 
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if got := agentCalls(t, codexCalls); got != 1 {
-		t.Fatalf("codex attempts = %d, want 1", got)
+	runs, err := listSetRuns(env.deps(), env.execFixture().demoDir())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
 	}
-	if got := agentCalls(t, claudeCalls); got != 1 {
-		t.Fatalf("claude attempts = %d, want the turn handed on after codex timed out", got)
+	outcomes := map[string][]string{}
+	for _, run := range runs {
+		outcomes[run.meta.Agent] = append(outcomes[run.meta.Agent], run.meta.Outcome)
+	}
+	if got := outcomes["codex"]; len(got) != 1 || got[0] != streamOutcomeTimedOut {
+		t.Fatalf("codex attempts = %v, want one %s", got, streamOutcomeTimedOut)
+	}
+	if got := outcomes["claude"]; len(got) != 1 || got[0] != streamOutcomeTimedOut {
+		t.Fatalf("claude attempts = %v, want the turn handed on after codex timed out", got)
 	}
 	if want := "Agent codex spent its only attempt without finishing (last: timed out after 100ms)"; !strings.Contains(buf.String(), want) {
 		t.Fatalf("output missing the timeout fall-through %q:\n%s", want, buf.String())
@@ -187,10 +195,12 @@ func installFailsOnceThenFinishesClaudeAgent(t *testing.T, root string) string {
 }
 
 // installHangingAgent stubs an agent that never answers, for the Task attempt
-// timeout path: the attempt deadline SIGKILLs its process group.
-func installHangingAgent(t *testing.T, root, preset, guard string) string {
+// timeout path: the attempt deadline SIGKILLs its process group. It counts
+// nothing, because a short deadline can kill the shim before its first line
+// runs; the Captured runs are the record of which agents were attempted.
+func installHangingAgent(t *testing.T, root, preset, guard string) {
 	t.Helper()
-	return installCountingAgentShim(t, root, preset, guard, "sleep 5\n")
+	installAgentShim(t, root, preset, "#!/bin/sh\n"+guard+"\nsleep 5\n")
 }
 
 const claudeAuthStatusGuard = `if [ "$1" = auth ] && [ "$2" = status ]; then printf '{"loggedIn":true}\n'; exit 0; fi`

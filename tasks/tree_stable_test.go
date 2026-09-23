@@ -135,7 +135,7 @@ func TestStandaloneVerifyWaitsForTheTreeToHoldStill(t *testing.T) {
 		if r.res.Verdict != VerdictPass {
 			t.Fatalf("verdict = %q, want PASS", r.res.Verdict)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("verify never ran after the holder finished")
 	}
 	select {
@@ -188,7 +188,7 @@ func TestStandaloneReviewWaitsForTheTreeToHoldStill(t *testing.T) {
 		if err != nil {
 			t.Fatalf("review after the wait: %v", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("review never ran after the holder finished")
 	}
 	assertLeftNoDrainBehind(t, d, commonDir, "demo")

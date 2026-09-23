@@ -248,8 +248,8 @@ func TestCopyToClipboardWithFallsBackWhenLoadBufferFails(t *testing.T) {
 }
 
 func TestShowErrorNilIsNoop(t *testing.T) {
-	// Should return immediately without starting a Bubbletea program.
-	// If this hangs, the test times out and we know ShowError(nil) isn't handled.
+	// Should return without starting a Bubbletea program, which would block on
+	// the terminal. The deadline only stops that hang; it is not the assertion.
 	done := make(chan struct{})
 	go func() {
 		ShowError(nil, "")
@@ -257,7 +257,7 @@ func TestShowErrorNilIsNoop(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("ShowError(nil) should return immediately")
+	case <-time.After(time.Minute):
+		t.Fatal("ShowError(nil) started a program instead of returning")
 	}
 }

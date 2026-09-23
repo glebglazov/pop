@@ -35,7 +35,7 @@ func waitForAdmissionQueue(t *testing.T, d *Deps, runtimePath, setID string) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(hangGuard)
 	for time.Now().Before(deadline) {
 		line, err := s.AdmissionWaitersOn(runtimePath)
 		if err != nil {
@@ -85,7 +85,7 @@ func TestImplementWaitsAndNamesWhoHoldsTheCheckout(t *testing.T) {
 
 	waitForAdmissionQueue(t, d, repo, "demo")
 	// Let the loop print at least once before the window opens.
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(hangGuard)
 	for {
 		mu.Lock()
 		printed := out.String()
@@ -120,7 +120,7 @@ func TestImplementWaitsAndNamesWhoHoldsTheCheckout(t *testing.T) {
 			t.Fatal("a command that queued must report that it waited, so its caller re-derives")
 		}
 		t.Cleanup(func() { _ = r.handle.Finish(store.DrainEnding{State: store.StateFinished}) })
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("the wait never ended after the holder finished")
 	}
 	if status := ReadRuntimeLockStatus(d, repo); !status.Locked || status.Metadata.SetID != "demo" {
@@ -157,7 +157,7 @@ func TestAdmissionWaitReportsAGateParkedDrain(t *testing.T) {
 	}()
 
 	waitForAdmissionQueue(t, d, repo, "demo")
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(hangGuard)
 	for {
 		mu.Lock()
 		printed := out.String()
@@ -185,7 +185,7 @@ func TestAdmissionWaitReportsAGateParkedDrain(t *testing.T) {
 		if err != nil {
 			t.Fatalf("admission after the gate released: %v", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("the wait never ended after the gate hold was released")
 	}
 }
@@ -222,7 +222,7 @@ func TestAdmissionWaitInterruptLeavesTheQueue(t *testing.T) {
 	select {
 	case err := <-done:
 		assertExitCode(t, err, ExitInterrupted)
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("SIGINT did not end the wait")
 	}
 
@@ -377,7 +377,7 @@ func TestAdmittedRunReportsNothingLeftWhenTheWorkFinished(t *testing.T) {
 		if !strings.Contains(out.String(), "Nothing left to drain") {
 			t.Fatalf("output must say nothing is left: %q", out.String())
 		}
-	case <-time.After(20 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("the admitted run never returned")
 	}
 }
