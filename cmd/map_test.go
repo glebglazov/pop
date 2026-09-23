@@ -19,7 +19,8 @@ import (
 )
 
 func TestMapCommandTree(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	for _, path := range [][]string{
 		{"map", "status"},
 		{"map", "register"},
@@ -94,7 +95,8 @@ func TestMapShowRendersMap(t *testing.T) {
 // way a session does: a malformed manifest comes back as a fix list and no row,
 // the fix registers, and a re-run is a no-op.
 func TestMapRegisterValidatesThenRegisters(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	d, storageDir, dataHome := mapRegistryTestDeps(t, map[string]string{
 		"maps/2026-08-03-demo/map.md":             "Status: active\n\n## Destination\nShip it\n",
 		"maps/2026-08-03-demo/issues/01-first.md": "## Question\nWhy?\n",
@@ -453,7 +455,8 @@ func TestMapSpawnedRecordsTheHandoff(t *testing.T) {
 }
 
 func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
 	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
@@ -475,7 +478,8 @@ func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
 // window, the operator left where they were, and a re-run that says there is
 // nothing left instead of failing.
 func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
 	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
@@ -534,7 +538,8 @@ func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
 // one pane in the Map's window whatever the frontier looks like, says so without
 // moving the operator, and a second call returns to that same pane.
 func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
 	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
@@ -709,7 +714,8 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 // An unresolvable Trunk refuses before anything is claimed, and names the flag
 // that fixes it.
 func TestMapNextRefusesAnUnresolvableTrunk(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
 	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
@@ -894,7 +900,8 @@ func TestMapArchiveRoundTrip(t *testing.T) {
 // ADR-0215 asks for: picking a Map starts at the newest, walking its tickets
 // starts at the first, and the shell is told to keep pop's order either way.
 func TestMapCompletionOrdersMapsNewestFirstButTicketsAscending(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	files := oneTicketMapFiles("2026-08-03-demo")
 	for rel, content := range threeTicketMapFiles("2026-08-05-later") {
 		files[rel] = content
@@ -928,7 +935,8 @@ func TestMapCompletionOrdersMapsNewestFirstButTicketsAscending(t *testing.T) {
 // TestMapShellCompletionOffersMapIDs pins the completion split: every verb
 // offers the visible Maps, unarchive offers only the 2026-08-04-filed-away one.
 func TestMapShellCompletionOffersMapIDs(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	files := oneTicketMapFiles("visible")
 	for rel, content := range oneTicketMapFiles("2026-08-04-filed-away") {
 		files[rel] = content
@@ -975,7 +983,8 @@ func TestMapShowUnknownMap(t *testing.T) {
 // TestMapStatusAcceptsOptionalMapArg pins the Args validator show folded into:
 // bare status still lists, and a single map id still resolves to detail.
 func TestMapStatusAcceptsOptionalMapArg(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	if err := mapStatusCmd.Args(mapStatusCmd, []string{}); err != nil {
 		t.Fatalf("bare status: %v", err)
 	}

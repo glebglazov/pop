@@ -87,7 +87,8 @@ func TestConfigDashboardAgentKeysDeclareNoReach(t *testing.T) {
 // TestConfigDashboardHelpDocumentsThePopupBinding keeps the larger binding
 // ADR-0202 decision 13 promises beside the command a human runs.
 func TestConfigDashboardHelpDocumentsThePopupBinding(t *testing.T) {
-	t.Parallel()
+	// ADR-0145: the cobra command tree is process-global, and cobra writes to it
+	// lazily while it finds a command or merges flags — stays serial.
 	if !strings.Contains(configDashboardCmd.Long, "display-popup") {
 		t.Errorf("config dashboard help documents no tmux binding:\n%s", configDashboardCmd.Long)
 	}
