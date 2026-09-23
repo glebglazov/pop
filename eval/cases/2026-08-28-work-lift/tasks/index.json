@@ -34,15 +34,6 @@
       ],
       "effort": "standard",
       "commit_subject": "feat(work-lift): a repository's maps lift beside its task sets"
-    },
-    {
-      "id": "05-remediation",
-      "file": "05-remediation.md",
-      "title": "Remediation 1: Two comments outside the diff still call the Work lift a \"pin\" — `dashbo",
-      "type": "AFK",
-      "status": "open",
-      "blocked_by": null,
-      "commit_subject": "refactor(work-lift): two stray comments stop calling the lift a pin"
     }
   ]
 }
