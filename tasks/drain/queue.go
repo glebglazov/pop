@@ -284,11 +284,17 @@ func (d *Deps) resolveInput(defPath string) tasks.ResolveInput {
 	return tasks.ResolveInput{DefinitionOverride: defPath, CWD: defPath}
 }
 
+// ConfigLoader is the injected LoadConfig, else a load that resolves every
+// layer through d.Tasks' filesystem — so a Deps built without a loader still
+// reads the config of the environment it describes, not the process's.
 func (d *Deps) ConfigLoader() func(string) (*config.Config, error) {
 	if d.LoadConfig != nil {
 		return d.LoadConfig
 	}
-	return config.Load
+	cd := d.Tasks.ConfigDeps()
+	return func(path string) (*config.Config, error) {
+		return config.LoadWith(cd, path)
+	}
 }
 
 func (d *Deps) ProjectDeps() *project.Deps {
