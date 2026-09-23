@@ -2223,7 +2223,7 @@ command = "echo test"
 
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 
 			// Check number of commands
@@ -2320,7 +2320,7 @@ display_depth = 3
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 			if len(cfg.Projects) != tt.expectedCount {
 				t.Fatalf("got %d projects, want %d", len(cfg.Projects), tt.expectedCount)
@@ -2369,7 +2369,7 @@ func TestUpdateNoticeEnabled(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 			if got := cfg.UpdateNoticeEnabled(); got != tt.expected {
 				t.Errorf("UpdateNoticeEnabled() = %v, want %v", got, tt.expected)
@@ -2676,7 +2676,7 @@ func TestDashboardZoomOnSwitch(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 			if got := cfg.DashboardZoomOnSwitch(); got != tt.expected {
 				t.Errorf("DashboardZoomOnSwitch() = %v, want %v", got, tt.expected)
@@ -2727,7 +2727,7 @@ func TestGetDisambiguationStrategy(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 			if cfg.GetDisambiguationStrategy() != tt.expected {
 				t.Errorf("GetDisambiguationStrategy() = %q, want %q", cfg.GetDisambiguationStrategy(), tt.expected)
@@ -2976,7 +2976,7 @@ projects = [{ path = "~/Personal/*" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if len(cfg.Projects) != 2 {
 			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
@@ -3008,7 +3008,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if len(cfg.Projects) != 3 {
 			t.Fatalf("got %d projects, want 3", len(cfg.Projects))
@@ -3070,7 +3070,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if len(cfg.Projects) != 2 {
 			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
@@ -3123,7 +3123,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		// Main config values should be preserved (defaults)
 		if cfg.ShouldExcludeCurrentSession() {
@@ -3174,7 +3174,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		// Nested includes should not be processed
 		if len(cfg.Projects) != 2 {
@@ -3203,7 +3203,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if len(cfg.Projects) != 1 {
 			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
@@ -3217,7 +3217,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if len(cfg.Projects) != 1 {
 			t.Fatalf("got %d projects, want 1", len(cfg.Projects))
@@ -3335,7 +3335,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		block, ok := cfg.Repo["/home/user/secret"]
 		if !ok {
@@ -3372,7 +3372,7 @@ trunk = "/shared/repo/parent"
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		block, ok := cfg.Repo["/shared/repo"]
 		if !ok {
@@ -3413,7 +3413,7 @@ includes = ["first.toml", "second.toml"]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		block, ok := cfg.Repo["/shared/repo"]
 		if !ok {
@@ -3451,7 +3451,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if got, want := cfg.ImplementAgents(), []string{"codex", "claude"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("implement agents = %#v, want %#v", got, want)
@@ -3486,7 +3486,7 @@ agents = ["claude"]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if got, want := cfg.ImplementAgents(), []string{"claude"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("implement agents = %#v, want %#v", got, want)
@@ -3525,7 +3525,7 @@ includes = ["private.toml"]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		got := cfg.Effort["claude"].Heavy
 		want := []EffortModel{{Model: "opus", Reasoning: "xhigh"}}
@@ -3557,7 +3557,7 @@ heavy = [{ model = "opus", reasoning = "high" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		got := cfg.Effort["claude"].Heavy
 		want := []EffortModel{{Model: "opus", Reasoning: "high"}}
@@ -3602,7 +3602,7 @@ output = "auto"
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		// The include set a preset the parent never mentions, and the parent's own
 		// preset survives untouched: the merge is per preset, not whole-table.
@@ -3641,7 +3641,7 @@ attended_model = "opus"
 		}
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		for _, key := range []string{"attended_args", "attended_model"} {
 			found := false
@@ -3672,7 +3672,7 @@ attended_flags = ["--nope"]
 		}
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		found := false
 		for _, f := range cfg.Findings {
@@ -3707,7 +3707,7 @@ includes = ["private.toml"]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if len(cfg.Warnings) != 1 {
 			t.Fatalf("expected 1 warning for unknown key, got %d: %v", len(cfg.Warnings), cfg.Warnings)
@@ -3740,7 +3740,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if len(cfg.Projects) != 2 {
 			t.Fatalf("got %d projects, want 2", len(cfg.Projects))
@@ -3775,7 +3775,7 @@ projects = [{ path = "/main" }]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if !cfg.WorkbenchPickOnCreate() {
 			t.Error("pick_on_create from include should be enabled")
@@ -3812,7 +3812,7 @@ pick_on_create = false
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		// Main defined pick_on_create=false → wins; include's true is skipped.
 		if cfg.WorkbenchPickOnCreate() {
@@ -3854,7 +3854,7 @@ includes = ["first.toml", "second.toml"]
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if got := cfg.WorkbenchOrder(); len(got) != 1 || got[0] != "first" {
 			t.Errorf("WorkbenchOrder() = %v, want [first] (first definition wins)", got)
@@ -4065,7 +4065,7 @@ func TestShouldExcludeCurrentSession(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 			if got := cfg.ShouldExcludeCurrentSession(); got != tt.expected {
 				t.Errorf("ShouldExcludeCurrentSession() = %v, want %v", got, tt.expected)
@@ -4137,7 +4137,7 @@ attention_notifications_enabled = true
 
 	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+		t.Fatalf("LoadWith() error: %v", err)
 	}
 
 	// Accessors should honor the legacy keys.
@@ -4174,7 +4174,7 @@ unread_notifications_enabled = true
 
 	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+		t.Fatalf("LoadWith() error: %v", err)
 	}
 
 	if !cfg.UnreadNotificationsEnabled("project") {
@@ -4214,7 +4214,7 @@ unread_notifications_enabled = true
 
 	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+		t.Fatalf("LoadWith() error: %v", err)
 	}
 
 	if !cfg.DismissUnreadInActivePane() {
@@ -4331,7 +4331,7 @@ func TestMonitorDashboardAlias(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 			if got := cfg.DashboardCursorPosition(); got != tt.wantCursor {
 				t.Errorf("DashboardCursorPosition() = %q, want %q", got, tt.wantCursor)
@@ -4368,7 +4368,7 @@ func TestDashboardKillPanePromptEnabled(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+				t.Fatalf("LoadWith() error: %v", err)
 			}
 			if got := cfg.DashboardKillPanePromptEnabled(); got != tt.want {
 				t.Errorf("DashboardKillPanePromptEnabled() = %v, want %v", got, tt.want)
@@ -5014,7 +5014,7 @@ projects = ["should-warn"]
 }
 
 // TestRepoBlockQueueBaseRenameIsFinding proves the migration tripwire is
-// confined (ADR 0054): the queue_base→trunk rename no longer aborts LoadWith(isolatedDeps(t), ); it
+// confined (ADR 0054): the queue_base→trunk rename no longer aborts Load(); it
 // becomes a blocking "repo" finding that ResolveRepoConfig (the execution-config
 // getter consuming commands hit) returns as its error, while getters for other
 // sections (EffortFor) stay clean.
@@ -5029,7 +5029,7 @@ queue_base = true
 	}
 	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("Load err = %v, want the rename to be a finding, not a LoadWith(isolatedDeps(t), ) error", err)
+		t.Fatalf("Load err = %v, want the rename to be a finding, not a LoadWith() error", err)
 	}
 	if cfg.blockingFindingFor("repo") == nil {
 		t.Fatalf("expected a blocking 'repo' finding, findings = %+v", cfg.Findings)
@@ -5244,12 +5244,12 @@ display_depth = "two"
 			cfg, loadErr := LoadWith(isolatedDeps(t), configPath)
 			if tt.loadFails {
 				if loadErr == nil {
-					t.Fatal("LoadWith(isolatedDeps(t), ) succeeded, want fatal parse error")
+					t.Fatal("LoadWith() succeeded, want fatal parse error")
 				}
 				return
 			}
 			if loadErr != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ) = %v, want nil (class-B problems must not abort Load)", loadErr)
+				t.Fatalf("LoadWith() = %v, want nil (class-B problems must not abort Load)", loadErr)
 			}
 
 			// Finding path check
@@ -5317,7 +5317,7 @@ func TestPaneMonitoringTopicWords(t *testing.T) {
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if got := cfg.PaneMonitoringTopicWords(); got != 3 {
 			t.Errorf("PaneMonitoringTopicWords() = %d, want 3", got)
@@ -5359,7 +5359,7 @@ func TestPaneMonitoringTopicDerivationTimeout(t *testing.T) {
 
 		cfg, err := LoadWith(isolatedDeps(t), configPath)
 		if err != nil {
-			t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+			t.Fatalf("LoadWith() error: %v", err)
 		}
 		if got := cfg.PaneMonitoringTopicDerivationTimeout(); got != 45*time.Second {
 			t.Errorf("PaneMonitoringTopicDerivationTimeout() = %v, want 45s", got)
@@ -5745,7 +5745,7 @@ func TestProjectWorktreeDisplay(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ): %v", err)
+				t.Fatalf("LoadWith(): %v", err)
 			}
 			if got := cfg.ProjectWorktreeDisplay(); got != tt.want {
 				t.Errorf("ProjectWorktreeDisplay() = %q, want %q", got, tt.want)
@@ -5835,7 +5835,7 @@ func TestProjectSessionOrdering(t *testing.T) {
 			}
 			cfg, err := LoadWith(isolatedDeps(t), configPath)
 			if err != nil {
-				t.Fatalf("LoadWith(isolatedDeps(t), ): %v", err)
+				t.Fatalf("LoadWith(): %v", err)
 			}
 			if got := cfg.ProjectSessionOrdering(); got != tt.want {
 				t.Errorf("ProjectSessionOrdering() = %q, want %q", got, tt.want)
@@ -5927,7 +5927,7 @@ effort = "heavy"
 
 	cfg, err := LoadWith(isolatedDeps(t), configPath)
 	if err != nil {
-		t.Fatalf("LoadWith(isolatedDeps(t), ) error: %v", err)
+		t.Fatalf("LoadWith() error: %v", err)
 	}
 
 	verify := cfg.Work.Verify
