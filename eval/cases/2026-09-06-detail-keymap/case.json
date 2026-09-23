@@ -1,7 +1,7 @@
 {
   "name": "2026-09-06-detail-keymap",
   "repository_url": "git@github.com:glebglazov/pop.git",
-  "parent_commit": "4d2536fd2094bcbfa729eb45d92d031fe52a4cbb",
+  "parent_commit": "801845fe685a54e78573094658717bb6e82e22c2",
   "reference_range": "ad903575067cb93b265d3d41ec3740231e52e807..40203d4cd9bd2167cc1f26dce44aa9ec88400747",
   "gate_commands": [
     "go build ./...",
