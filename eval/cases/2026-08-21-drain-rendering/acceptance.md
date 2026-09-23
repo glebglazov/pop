@@ -12,10 +12,10 @@ Status: draft
 8. The implementation-commit detail (commit sha or verified no-op) still prints, beneath the green result line, not above it.
 9. The old success-only "✓ Completed <set>/<task>" line no longer prints, and no task prints two terminal lines for one ending.
 10. A task that fails after all retries prints exactly one red Task result line `✗ <set>/<task> failed`, and the task ends failed.
-11. A task whose agent list is exhausted prints exactly one red line `✗ <set>/<task> out of agents (left open)`, does not read as failed, and the task stays open.
+11. A task whose agent list is exhausted prints exactly one red line `✗ <set>/<task> out of agents (left open)` instead of the `failed` line, and the task stays open.
 12. A task parked by a quota pause prints a yellow line `◌ <set>/<task> quota-paused (<preset>)` naming the active agent preset.
 13. An interrupted task prints a yellow line `◌ <set>/<task> interrupted`.
-14. Tasks that end Blocked or Deferred produce no Task result line, while a task that did run in the same drain still prints its own result line.
+14. When a set ends Blocked or Deferred, the drain reports it only through the set's terminal status and the end-of-run summary; neither status prints a Task result line, while a task that did run in that drain still prints its own result line.
 15. Per-attempt narration (`✗ Attempt N/M failed`) and the attempt breakdown still print alongside the new per-task result line.
 16. Drain header lines and Task result lines print in full when output is redirected to a non-TTY, carrying no ANSI escape sequences.
 17. On a TTY the header and result lines carry color, and setting NO_COLOR suppresses that color on a TTY.

@@ -10,7 +10,7 @@ Status: draft
 6. The Verifier response contract asks a passing run to state what it checked and why each acceptance criterion is met, and no longer instructs it to leave findings empty for a PASS.
 7. A verdict served from the cache without invoking an agent writes no new report.
 8. Verify reports survive verification invalidation, while the verdict cache is still deleted on invalidation.
-9. The Verifier prompt never carries any previous Verify report.
+9. The Verifier prompt never carries any previous Verify report. A human PASS note still reaches later Verifier prompts as it does today.
 10. Recording a human PASS over a non-PASS judgment writes a Verify report with no agent invoked on that path.
 11. The human-authored report carries the human's own rationale and names the verdict it overrode.
 12. A reader scanning the set's reports can tell a human-authored report apart from a Verifier-authored one.
@@ -19,10 +19,11 @@ Status: draft
 15. The sign-off gate offers a paging entry that opens the Verify report document without leaving the prompt.
 16. The set's detail view carries the Verify report pointer.
 17. The Verify report appears in the set's artifact list, ranked above the Refine report.
-18. No agent-facing prompt view gains the Verify report pointer, and the agent-facing prompt goldens are unmodified.
+18. No agent-facing prompt view gains the Verify report pointer, and no prompt golden changes except for the Verifier response-contract change of item 6.
 19. A set that has never been verified renders nothing at all on the gate preamble, the paging entry, the detail view and the artifact list.
 20. The verified-at badge behaves exactly as before, and a report older than HEAD never makes a set count as unverified.
 21. The one-line truncation of verification reasons stays where a status row has room for only one line, with the pointer to the full document beside it.
-22. Refine's observable behaviour is unchanged: the same directory, the same filename stamps, the same header, and every surface it renders on looks exactly as before.
-23. The refine prompt goldens are unmodified.
-24. `go build ./...`, `go vet ./tasks/...` and `make test` all pass.
+22. Verify reports and Refine reports are rendered, filed, scanned for the newest and have their header fields read back from the document itself (no side-car file) by one shared machinery that takes the pass as a parameter, and Refine keeps no private copy of it.
+23. Refine's observable behaviour is unchanged: the same directory, the same filename stamps, the same header, and every surface it renders on looks exactly as before.
+24. The refine prompt goldens are unmodified.
+25. `go build ./...`, `go vet ./tasks/...` and `make test` all pass.
