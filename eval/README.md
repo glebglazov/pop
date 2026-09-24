@@ -131,6 +131,13 @@ The spec and the Pop arm's task split hold only the set's planned AFK tasks.
 task holds the historical Verifier's findings and would tell both Arms what the
 first implementation missed.
 
+The Reference range starts at the parent of the set's first Task commit and
+ends at its last Task or Refine commit. `prepare` refuses the set when a commit
+in that range carries no Task or Refine trailer of the set, and it names each
+such commit. Work of another set in the range would go into the Reference diff,
+which then asks for more than the spec. A later Task could also build on that
+work, which the Case parent does not hold.
+
 The default Case name is the Task-set identifier. The default Objective gates
 are `go build ./...` and `go test ./...`; the default scope is `.`. Standard
 documents default to `docs/agents/implementation.md` and `AGENTS.md` when each

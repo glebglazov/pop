@@ -84,6 +84,56 @@ func TestCleanEvalWorkEmptyOrAbsent(t *testing.T) {
 	}
 }
 
+func TestPrepareRefusesAReferenceRangeWithOtherWork(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "config", "user.name", "Eval Test")
+	runGit(t, repo, "config", "user.email", "eval@example.test")
+	runGit(t, repo, "remote", "add", "origin", "https://example.test/project.git")
+	writeFile(t, filepath.Join(repo, "go.mod"), "module example.test/project\n\ngo 1.23\n")
+	writeFile(t, filepath.Join(repo, "doc.go"), "package project\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "initial")
+
+	setID := "2026-09-08-fixture"
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
+	identity, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setDir := filepath.Join(identity.TasksDir, setID)
+	if err := os.MkdirAll(setDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(setDir, tasks.ManifestFileName), `{
+  "tasks": [
+    {"id":"01-build","file":"01-build.md","title":"Build it","type":"AFK","status":"done","blocked_by":[]},
+    {"id":"02-check","file":"02-check.md","title":"Check it","type":"AFK","status":"done","blocked_by":["01-build"]}
+  ]
+}`)
+	writeFile(t, filepath.Join(setDir, "01-build.md"), taskBody("Build it", "First behaviour"))
+	writeFile(t, filepath.Join(setDir, "02-check.md"), taskBody("Check it", "Second behaviour"))
+
+	writeFile(t, filepath.Join(repo, "one.go"), "package project\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "build\n\nPop-Task: "+setID+"/01-build")
+	writeFile(t, filepath.Join(repo, "other.go"), "package project\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "work of another set\n\nPop-Task: 2026-09-08-other/01-other")
+	writeFile(t, filepath.Join(repo, "two.go"), "package project\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "check\n\nPop-Task: "+setID+"/02-check")
+
+	outputRoot := filepath.Join(t.TempDir(), "cases")
+	_, err = prepareCase(prepareOptions{repositoryPath: repo, setID: setID, outputRoot: outputRoot, work: filepath.Join(t.TempDir(), "work")})
+	if err == nil || !strings.Contains(err.Error(), "work of another set") {
+		t.Fatalf("prepare with another set's commit in the Reference range: err = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outputRoot, setID)); !os.IsNotExist(statErr) {
+		t.Fatalf("Case written despite other work in its Reference range: %v", statErr)
+	}
+}
+
 func TestPrepareCaseFromHistoricalTaskSet(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

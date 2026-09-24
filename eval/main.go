@@ -320,26 +320,22 @@ func git(repoPath string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// referenceCommits finds the Reference of a Task set: from the parent of its
+// first Task commit to its last Task or Refine commit. It refuses a range that
+// also holds other work, because the Reference diff would then ask for more
+// than the spec, and the Case parent would miss work that later Tasks build on.
 func referenceCommits(repoPath, setID string) (string, string, error) {
-	format := "%H%x1f%(trailers:key=" + tasks.TaskTrailerKey + ",valueonly,separator=%x1e)%x1f%(trailers:key=" + tasks.RefineTrailerKey + ",valueonly,separator=%x1e)%x00"
-	output, err := git(repoPath, "log", "--reverse", "--topo-order", "--format="+format, "HEAD")
+	history, err := taskSetHistory(repoPath, setID, "HEAD")
 	if err != nil {
 		return "", "", fmt.Errorf("read repository history: %w", err)
 	}
 	var firstTask, lastReference string
-	for _, record := range strings.Split(output, "\x00") {
-		fields := strings.Split(strings.TrimSpace(record), "\x1f")
-		if len(fields) != 3 {
-			continue
+	for _, commit := range history {
+		if commit.task && firstTask == "" {
+			firstTask = commit.sha
 		}
-		sha := strings.TrimSpace(fields[0])
-		taskMatch := trailerContains(fields[1], setID+"/", true)
-		refineMatch := trailerContains(fields[2], setID, false)
-		if taskMatch && firstTask == "" {
-			firstTask = sha
-		}
-		if taskMatch || refineMatch {
-			lastReference = sha
+		if commit.task || commit.refine {
+			lastReference = commit.sha
 		}
 	}
 	if firstTask == "" {
@@ -349,7 +345,50 @@ func referenceCommits(repoPath, setID string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("the earliest %s commit for %q has no parent: %w", tasks.TaskTrailerKey, setID, err)
 	}
+	reference, err := taskSetHistory(repoPath, setID, parent+".."+lastReference)
+	if err != nil {
+		return "", "", fmt.Errorf("read the Reference range: %w", err)
+	}
+	var foreign []string
+	for _, commit := range reference {
+		if !commit.task && !commit.refine {
+			foreign = append(foreign, commit.sha[:12]+" "+commit.subject)
+		}
+	}
+	if len(foreign) > 0 {
+		return "", "", fmt.Errorf("the Reference range %s..%s holds %d commits that are not from Task set %q, so its diff is not the set's work:\n  %s",
+			parent[:12], lastReference[:12], len(foreign), setID, strings.Join(foreign, "\n  "))
+	}
 	return parent, lastReference, nil
+}
+
+type taskSetCommit struct {
+	sha, subject string
+	task, refine bool
+}
+
+// taskSetHistory lists the commits of revisions, oldest first, and marks each
+// one that carries a Task trailer or a Refine trailer of the Task set.
+func taskSetHistory(repoPath, setID, revisions string) ([]taskSetCommit, error) {
+	format := "%H%x1f%(trailers:key=" + tasks.TaskTrailerKey + ",valueonly,separator=%x1e)%x1f%(trailers:key=" + tasks.RefineTrailerKey + ",valueonly,separator=%x1e)%x1f%s%x00"
+	output, err := git(repoPath, "log", "--reverse", "--topo-order", "--format="+format, revisions)
+	if err != nil {
+		return nil, err
+	}
+	var history []taskSetCommit
+	for _, record := range strings.Split(output, "\x00") {
+		fields := strings.Split(strings.TrimSpace(record), "\x1f")
+		if len(fields) != 4 {
+			continue
+		}
+		history = append(history, taskSetCommit{
+			sha:     strings.TrimSpace(fields[0]),
+			subject: strings.TrimSpace(fields[3]),
+			task:    trailerContains(fields[1], setID+"/", true),
+			refine:  trailerContains(fields[2], setID, false),
+		})
+	}
+	return history, nil
 }
 
 func trailerContains(values, wanted string, prefix bool) bool {
