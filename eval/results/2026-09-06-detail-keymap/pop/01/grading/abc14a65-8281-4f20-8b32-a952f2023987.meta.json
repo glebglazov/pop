@@ -1,0 +1,14 @@
+{
+  "run_id": "abc14a65-8281-4f20-8b32-a952f2023987",
+  "phase": "eval",
+  "task_set_id": "",
+  "task_id": "",
+  "task_file": "",
+  "start_time": "2026-09-23T08:20:33.689918Z",
+  "end_time": "2026-09-23T08:24:00.551395Z",
+  "outcome": "completed",
+  "agent": "codex",
+  "requested_agent": "codex --model \"gpt-5.5\"",
+  "model": "gpt-5.5",
+  "attempt": 1
+}

@@ -1,0 +1,438 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "2472e33e71f0f433d91e38128c4b0eb6656ca184a72f7308887ce97f23485810",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t93.883s\nok  \tgithub.com/glebglazov/pop/config\t3.214s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.836s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t102.418s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.013s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t2.126s\nok  \tgithub.com/glebglazov/pop/integrate\t81.320s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.067s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.896s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.182s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.484s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.566s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t8.699s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.540s\nok  \tgithub.com/glebglazov/pop/layout\t2.211s\nok  \tgithub.com/glebglazov/pop/monitor\t4.276s\nok  \tgithub.com/glebglazov/pop/project\t3.860s\nok  \tgithub.com/glebglazov/pop/release\t2.278s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.233s\nok  \tgithub.com/glebglazov/pop/routine\t18.149s\nok  \tgithub.com/glebglazov/pop/store\t7.209s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t30.243s\nok  \tgithub.com/glebglazov/pop/tasks\t160.051s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t42.974s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t0.595s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t61.820s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t7.360s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t6.638s\nok  \tgithub.com/glebglazov/pop/ui\t8.349s\nok  \tgithub.com/glebglazov/pop/wayfinder\t6.454s\nok  \tgithub.com/glebglazov/pop/work\t1.844s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.041s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t155.098s\nok  \tgithub.com/glebglazov/pop/config\t1.678s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.355s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t153.306s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.826s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.972s\nok  \tgithub.com/glebglazov/pop/integrate\t154.507s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.600s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.572s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.856s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.321s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.388s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t8.557s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.802s\nok  \tgithub.com/glebglazov/pop/layout\t3.067s\nok  \tgithub.com/glebglazov/pop/monitor\t5.245s\nok  \tgithub.com/glebglazov/pop/project\t4.038s\nok  \tgithub.com/glebglazov/pop/release\t2.310s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.065s\nok  \tgithub.com/glebglazov/pop/routine\t11.457s\nok  \tgithub.com/glebglazov/pop/store\t7.168s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t30.034s\nok  \tgithub.com/glebglazov/pop/tasks\t225.706s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t47.429s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.368s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t71.679s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.401s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.911s\nok  \tgithub.com/glebglazov/pop/ui\t7.598s\nok  \tgithub.com/glebglazov/pop/wayfinder\t7.215s\nok  \tgithub.com/glebglazov/pop/work\t0.944s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.268s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "The Lift field grants row movement and marking through WorkBuildOptions."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Only the shipped active preset sets Lift to true."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "The pin alias sets Lift without adding a warning or finding."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "The decoder reads lift after pin, so lift takes precedence."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "An undeclared Lift field defaults to false."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Both spellings record non-bool values as findings without failing the load."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Derived-ordering identifiers, comments, and test filenames use lift; alias references remain explicit."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "The diff leaves the listed manual and unrelated pin meanings unchanged."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "The field description and shipped grant use lift; pin is a read alias."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "The sibling-worktree test checks that the trunk-bound Task set lifts."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Checkout attribution returns before repository attribution and keeps its existing ranking."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Tag attribution remains first and has a repository regression test."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Repository candidates include Task sets with and without bindings."
+        },
+        {
+          "item": 14,
+          "met": false,
+          "reason": "Cursor keys still use project name and container ID; matching IDs in repositories with the same project name can lift the wrong row."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Missing repository identity and unknown repositories produce no lift or message."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "The repository pass merges all answers, with a test where two kinds answer."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Launch stores repository identity; a counting git test checks five rebuilds add no identity calls."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Status uses empty pane facts and bypasses attribution and its git resolution."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Lifting operates on admitted rows and does not change preset filtering."
+        },
+        {
+          "item": 20,
+          "met": false,
+          "reason": "Repository attribution indexes every Map without a live-state check; archived Maps can lift when a preset admits them."
+        },
+        {
+          "item": 21,
+          "met": true,
+          "reason": "Repository answers place Task sets before Maps, checked with both real kinds."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "Map session attribution returns before repository attribution, with a regression test."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Routines implement no locality pass, and a comment explains the deliberate difference."
+        }
+      ],
+      "list_ratio": 0.9130434782608695,
+      "quality": 3,
+      "rationale": "Clear structure and broad tests, but repository key collisions and non-live Map lifting remain; Map attribution also ignores ascending preset order."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "335760fa-3917-489d-9768-5fdee4790a07",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 969730,
+          "Output": 2850,
+          "CacheRead": 868352,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 13,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 111522,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 MET: The Lift field grants row movement and marking through WorkBuildOptions.\nITEM 2 MET: Only the shipped active preset sets Lift to true.\nITEM 3 MET: The pin alias sets Lift without adding a warning or finding.\nITEM 4 MET: The decoder reads lift after pin, so lift takes precedence.\nITEM 5 MET: An undeclared Lift field defaults to false.\nITEM 6 MET: Both spellings record non-bool values as findings without failing the load.\nITEM 7 MET: Derived-ordering identifiers, comments, and test filenames use lift; alias references remain explicit.\nITEM 8 MET: The diff leaves the listed manual and unrelated pin meanings unchanged.\nITEM 9 MET: The field description and shipped grant use lift; pin is a read alias.\nITEM 10 MET: The sibling-worktree test checks that the trunk-bound Task set lifts.\nITEM 11 MET: Checkout attribution returns before repository attribution and keeps its existing ranking.\nITEM 12 MET: Tag attribution remains first and has a repository regression test.\nITEM 13 MET: Repository candidates include Task sets with and without bindings.\nITEM 14 NOT_MET: Cursor keys still use project name and container ID; matching IDs in repositories with the same project name can lift the wrong row.\nITEM 15 MET: Missing repository identity and unknown repositories produce no lift or message.\nITEM 16 MET: The repository pass merges all answers, with a test where two kinds answer.\nITEM 17 MET: Launch stores repository identity; a counting git test checks five rebuilds add no identity calls.\nITEM 18 MET: Status uses empty pane facts and bypasses attribution and its git resolution.\nITEM 19 MET: Lifting operates on admitted rows and does not change preset filtering.\nITEM 20 NOT_MET: Repository attribution indexes every Map without a live-state check; archived Maps can lift when a preset admits them.\nITEM 21 MET: Repository answers place Task sets before Maps, checked with both real kinds.\nITEM 22 MET: Map session attribution returns before repository attribution, with a regression test.\nITEM 23 MET: Routines implement no locality pass, and a comment explains the deliberate difference.\nQUALITY 3: Clear structure and broad tests, but repository key collisions and non-live Map lifting remain; Map attribution also ignores ascending preset order.\n"
+  },
+  "case": "2026-08-28-work-lift",
+  "arm": "pop",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "started_at": "2026-09-23T18:31:33.417568Z",
+  "ended_at": "2026-09-23T19:00:31.022933Z",
+  "outcome": "completed",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-165287782",
+  "set_status": "DONE",
+  "set_spend": {
+    "task_set_id": "2026-08-28-work-lift",
+    "completed_tasks": 3,
+    "tokens_per_completed_task": 1655658,
+    "implement_input_tokens": 166,
+    "implement_output_tokens": 66076,
+    "implement_cache_read_tokens": 4570994,
+    "implement_cache_write_tokens": 329738,
+    "implement_partial_cost_usd": 4.8742868,
+    "implement_notional_cost_usd": 4.8742868,
+    "implement_run_count": 4,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 14,
+    "verification_output_tokens": 3815,
+    "verification_cache_read_tokens": 237856,
+    "verification_cache_write_tokens": 48253,
+    "verification_partial_cost_usd": 0.5099512,
+    "verification_notional_cost_usd": 0.5099512,
+    "verification_run_count": 1,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 22,
+    "refine_output_tokens": 5094,
+    "refine_cache_read_tokens": 460718,
+    "refine_cache_write_tokens": 55446,
+    "refine_partial_cost_usd": 0.6376796,
+    "refine_notional_cost_usd": 0.6376796,
+    "refine_run_count": 1,
+    "refine_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "",
+        "title": "",
+        "input_tokens": 26,
+        "output_tokens": 7388,
+        "cache_read_tokens": 648929,
+        "cache_write_tokens": 82888,
+        "partial_cost_usd": 0.9407538000000001,
+        "notional_cost_usd": 0.9407538000000001,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 13,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 82890,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 26,
+            "output_tokens": 7388,
+            "cache_read_tokens": 648929,
+            "cache_write_tokens": 82888
+          }
+        }
+      },
+      {
+        "task_id": "01-lift-is-not-a-pin",
+        "title": "The derived row ordering is called a lift",
+        "input_tokens": 52,
+        "output_tokens": 21179,
+        "cache_read_tokens": 1498760,
+        "cache_write_tokens": 87784,
+        "partial_cost_usd": 1.4258119999999999,
+        "notional_cost_usd": 1.4258119999999999,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 26,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 94681,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 52,
+            "output_tokens": 21179,
+            "cache_read_tokens": 1498760,
+            "cache_write_tokens": 87784
+          }
+        }
+      },
+      {
+        "task_id": "02-a-repository-pass-lifts-its-task-sets",
+        "title": "A repository pass lifts its task sets",
+        "input_tokens": 38,
+        "output_tokens": 20356,
+        "cache_read_tokens": 1118888,
+        "cache_write_tokens": 82166,
+        "partial_cost_usd": 1.2883776,
+        "notional_cost_usd": 1.2883776,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 19,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 89063,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 38,
+            "output_tokens": 20356,
+            "cache_read_tokens": 1118888,
+            "cache_write_tokens": 82166
+          }
+        }
+      },
+      {
+        "task_id": "03-maps-lift-with-their-repository",
+        "title": "Maps lift with their repository",
+        "input_tokens": 50,
+        "output_tokens": 17153,
+        "cache_read_tokens": 1304417,
+        "cache_write_tokens": 76900,
+        "partial_cost_usd": 1.2193434000000003,
+        "notional_cost_usd": 1.2193434000000003,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 25,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 83797,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 50,
+            "output_tokens": 17153,
+            "cache_read_tokens": 1304417,
+            "cache_write_tokens": 76900
+          }
+        }
+      },
+      {
+        "task_id": "refine",
+        "title": "Refine",
+        "input_tokens": 22,
+        "output_tokens": 5094,
+        "cache_read_tokens": 460718,
+        "cache_write_tokens": 55446,
+        "partial_cost_usd": 0.6376796,
+        "notional_cost_usd": 0.6376796,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 11,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 62343,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 22,
+            "output_tokens": 5094,
+            "cache_read_tokens": 460718,
+            "cache_write_tokens": 55446
+          }
+        }
+      },
+      {
+        "task_id": "verify",
+        "title": "Verify",
+        "input_tokens": 14,
+        "output_tokens": 3815,
+        "cache_read_tokens": 237856,
+        "cache_write_tokens": 48253,
+        "partial_cost_usd": 0.5099512,
+        "notional_cost_usd": 0.5099512,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 7,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 55150,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 14,
+            "output_tokens": 3815,
+            "cache_read_tokens": 237856,
+            "cache_write_tokens": 48253
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}

@@ -1,0 +1,247 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "2472e33e71f0f433d91e38128c4b0eb6656ca184a72f7308887ce97f23485810",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t126.906s\nok  \tgithub.com/glebglazov/pop/config\t5.064s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.762s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t131.475s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.729s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t2.853s\nok  \tgithub.com/glebglazov/pop/integrate\t115.503s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.931s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.253s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.380s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.468s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.166s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t11.946s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.714s\nok  \tgithub.com/glebglazov/pop/layout\t2.673s\nok  \tgithub.com/glebglazov/pop/monitor\t3.989s\nok  \tgithub.com/glebglazov/pop/project\t3.543s\nok  \tgithub.com/glebglazov/pop/release\t2.289s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.572s\nok  \tgithub.com/glebglazov/pop/routine\t21.243s\nok  \tgithub.com/glebglazov/pop/store\t6.963s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t29.207s\nok  \tgithub.com/glebglazov/pop/tasks\t354.104s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t49.984s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t3.733s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t79.507s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.935s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t5.377s\nok  \tgithub.com/glebglazov/pop/ui\t9.015s\nok  \tgithub.com/glebglazov/pop/wayfinder\t8.469s\nok  \tgithub.com/glebglazov/pop/work\t2.778s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.636s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t133.416s\nok  \tgithub.com/glebglazov/pop/config\t6.214s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.269s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t144.643s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.905s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.478s\nok  \tgithub.com/glebglazov/pop/integrate\t134.166s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t9.093s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.933s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.624s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.304s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t5.220s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t12.693s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.930s\nok  \tgithub.com/glebglazov/pop/layout\t3.654s\nok  \tgithub.com/glebglazov/pop/monitor\t4.296s\nok  \tgithub.com/glebglazov/pop/project\t4.366s\nok  \tgithub.com/glebglazov/pop/release\t2.454s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.549s\nok  \tgithub.com/glebglazov/pop/routine\t13.516s\nok  \tgithub.com/glebglazov/pop/store\t12.488s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t20.641s\nok  \tgithub.com/glebglazov/pop/tasks\t236.923s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t46.473s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.961s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t89.529s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t7.943s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t7.226s\nok  \tgithub.com/glebglazov/pop/ui\t7.728s\nok  \tgithub.com/glebglazov/pop/wayfinder\t7.595s\nok  \tgithub.com/glebglazov/pop/work\t1.853s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.548s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "The preset's Lift field controls row lifting in the snapshot builder."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Only the shipped active preset sets Lift to true."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "The pin alias sets Lift without a warning or finding."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "The decoder gives lift precedence over pin."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "Lift defaults to false when neither spelling is present."
+        },
+        {
+          "item": 6,
+          "met": false,
+          "reason": "With lift present, a non-bool pin value is ignored without a config finding."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "The diff renames derived-ordering identifiers, comments, and test files to lift."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Manual and unrelated uses of pin remain unchanged."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "The field description and shipped presets use lift; pin remains an input alias."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "The repository pass lifts sets from sibling worktrees, with a test."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Checkout attribution returns before the repository pass and retains its ordering."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Task-set tags retain precedence, with a repository-backed test."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Repository candidates include both bound and unbound Task sets."
+        },
+        {
+          "item": 14,
+          "met": false,
+          "reason": "Matching uses the common directory, but row keys still use project name and container ID; identical IDs in same-named projects can lift another repository's row."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Unknown repositories and directories outside repositories produce no attribution or message."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "The repository pass merges all answering kinds; a two-kind test checks this."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Launch resolves the repository once; a counting git test checks five rebuilds."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Status uses empty pane facts and does not call repository resolution for attribution."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Lifting only moves admitted rows and does not widen the preset."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Repository attribution includes live Maps and excludes broken or inactive Maps."
+        },
+        {
+          "item": 21,
+          "met": true,
+          "reason": "The merged answer places Task sets before Maps, with a test."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "A Map session stamp returns before repository attribution, with a test."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Routines implement no locality pass, and a comment explains this decision."
+        }
+      ],
+      "list_ratio": 0.9130434782608695,
+      "quality": 3,
+      "rationale": "Clear separation and broad tests, but alias validation and cross-repository row identity remain incomplete."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "22e35797-b91b-4636-a717-9fff3b94ed54",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 718585,
+          "Output": 2192,
+          "CacheRead": 630272,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 11,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 98624,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 MET: The preset's Lift field controls row lifting in the snapshot builder.\nITEM 2 MET: Only the shipped active preset sets Lift to true.\nITEM 3 MET: The pin alias sets Lift without a warning or finding.\nITEM 4 MET: The decoder gives lift precedence over pin.\nITEM 5 MET: Lift defaults to false when neither spelling is present.\nITEM 6 NOT_MET: With lift present, a non-bool pin value is ignored without a config finding.\nITEM 7 MET: The diff renames derived-ordering identifiers, comments, and test files to lift.\nITEM 8 MET: Manual and unrelated uses of pin remain unchanged.\nITEM 9 MET: The field description and shipped presets use lift; pin remains an input alias.\nITEM 10 MET: The repository pass lifts sets from sibling worktrees, with a test.\nITEM 11 MET: Checkout attribution returns before the repository pass and retains its ordering.\nITEM 12 MET: Task-set tags retain precedence, with a repository-backed test.\nITEM 13 MET: Repository candidates include both bound and unbound Task sets.\nITEM 14 NOT_MET: Matching uses the common directory, but row keys still use project name and container ID; identical IDs in same-named projects can lift another repository's row.\nITEM 15 MET: Unknown repositories and directories outside repositories produce no attribution or message.\nITEM 16 MET: The repository pass merges all answering kinds; a two-kind test checks this.\nITEM 17 MET: Launch resolves the repository once; a counting git test checks five rebuilds.\nITEM 18 MET: Status uses empty pane facts and does not call repository resolution for attribution.\nITEM 19 MET: Lifting only moves admitted rows and does not widen the preset.\nITEM 20 MET: Repository attribution includes live Maps and excludes broken or inactive Maps.\nITEM 21 MET: The merged answer places Task sets before Maps, with a test.\nITEM 22 MET: A Map session stamp returns before repository attribution, with a test.\nITEM 23 MET: Routines implement no locality pass, and a comment explains this decision.\nQUALITY 3: Clear separation and broad tests, but alias validation and cross-repository row identity remain incomplete.\n"
+  },
+  "case": "2026-08-28-work-lift",
+  "arm": "bare",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "actual_model": "claude-opus-5-5",
+  "started_at": "2026-09-23T18:05:22.64909Z",
+  "ended_at": "2026-09-23T18:22:37.206013Z",
+  "outcome": "completed",
+  "agent_outcome": "completed",
+  "run_id": "7dff7768-7ae5-4eb6-b3bd-2c8a95568b84",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-222102410",
+  "spend": {
+    "Tokens": {
+      "Input": 128,
+      "Output": 53540,
+      "CacheRead": 8384823,
+      "CacheWrite": 203811,
+      "HasInput": true,
+      "HasOutput": true,
+      "HasCacheRead": true,
+      "HasCacheWrite": true
+    },
+    "Cost": {
+      "Dollars": 4.378764599999999,
+      "HasCost": true
+    },
+    "Turns": {
+      "Count": 64,
+      "HasTurn": true
+    },
+    "PeakInput": {
+      "Tokens": 210708,
+      "HasPeak": true
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 4.378764599999999,
+      "HasCost": true
+    },
+    "RateSource": "",
+    "ModelKey": "anthropic/claude-opus-5-5",
+    "ModelKeySource": "actual"
+  }
+}

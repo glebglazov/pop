@@ -1,0 +1,436 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "a6a07e0f5e2de64e81c032b6b491a869fe37f49f31314ecfc4274dfb5d3ed622",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t166.641s\nok  \tgithub.com/glebglazov/pop/config\t1.460s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.389s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t179.294s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.694s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.814s\nok  \tgithub.com/glebglazov/pop/integrate\t200.384s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.711s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.707s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.884s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.045s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.156s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.095s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.771s\nok  \tgithub.com/glebglazov/pop/layout\t2.834s\nok  \tgithub.com/glebglazov/pop/monitor\t5.222s\nok  \tgithub.com/glebglazov/pop/project\t4.654s\nok  \tgithub.com/glebglazov/pop/release\t2.250s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.651s\nok  \tgithub.com/glebglazov/pop/routine\t17.329s\nok  \tgithub.com/glebglazov/pop/store\t8.177s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t54.170s\nok  \tgithub.com/glebglazov/pop/tasks\t400.373s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t54.046s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.097s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t76.709s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t7.405s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t2.948s\nok  \tgithub.com/glebglazov/pop/ui\t8.430s\nok  \tgithub.com/glebglazov/pop/wayfinder\t4.339s\nok  \tgithub.com/glebglazov/pop/work\t1.394s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.578s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t201.801s\nok  \tgithub.com/glebglazov/pop/config\t5.171s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.180s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t192.168s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.688s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.394s\nok  \tgithub.com/glebglazov/pop/integrate\t214.401s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.316s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t2.167s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.990s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.397s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.479s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t11.299s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.889s\nok  \tgithub.com/glebglazov/pop/layout\t3.671s\nok  \tgithub.com/glebglazov/pop/monitor\t4.417s\nok  \tgithub.com/glebglazov/pop/project\t4.373s\nok  \tgithub.com/glebglazov/pop/release\t2.197s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.278s\nok  \tgithub.com/glebglazov/pop/routine\t11.899s\nok  \tgithub.com/glebglazov/pop/store\t8.057s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t49.682s\nok  \tgithub.com/glebglazov/pop/tasks\t396.990s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t70.654s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.258s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t126.751s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t8.813s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t2.108s\nok  \tgithub.com/glebglazov/pop/ui\t8.801s\nok  \tgithub.com/glebglazov/pop/wayfinder\t10.364s\nok  \tgithub.com/glebglazov/pop/work\t3.681s\nok  \tgithub.com/glebglazov/pop/work/ref\t2.825s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Detail `s` uses the same Status menu builder with the detail container."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Detail `y` opens the container’s Copy menu without copying."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "Detail `m` opens the container’s Mute menu."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Both views use the same container `I` handler."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "Direct `y` and `p` handling is removed from document peeks."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Direct `p` handling is removed from both detail lists."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Item and artifact Run menu handling remains unchanged."
+        },
+        {
+          "item": 8,
+          "met": false,
+          "reason": "An existing detail flash takes priority over the new status refusal and hides it until that flash expires."
+        },
+        {
+          "item": 9,
+          "met": false,
+          "reason": "An existing detail flash can also hide the new copy or mute refusal."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Container menus use the detail frame’s reserved Block and body height calculation."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Detail menus use the existing menu navigation and verb dispatch."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Escape clears the menu and preserves the detail."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Detail menu openers bypass Selection handling and create singular menus."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Search narrows both detail lists; Enter restores normal detail key handling."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Search uses case-insensitive substrings across id, title and type, with terms AND-ed."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "Item status is excluded from search fields."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Artifact search uses the same grammar over name and type."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Escape discards the buffer and restores the applied term."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Search opens with an empty buffer; applying it clears the query."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Printable keys, including `j`, `k`, `v` and `r`, go to the search field."
+        },
+        {
+          "item": 21,
+          "met": true,
+          "reason": "Detail refresh applies the current query, and the header shows the applied term."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "Empty search results name the query and explain how to clear it."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Artifact availability uses the full collection, so filtering preserves the view switch."
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "Detail search state is separate and is discarded when the detail closes."
+        },
+        {
+          "item": 25,
+          "met": true,
+          "reason": "Detail hints name the required menus and search; peek hints remove direct copy keys."
+        },
+        {
+          "item": 26,
+          "met": true,
+          "reason": "Search typing hints name only apply, cancel and help."
+        },
+        {
+          "item": 27,
+          "met": true,
+          "reason": "Detail help lists the required menus, container verb, search and conditional clear entry; peek copy shortcuts are removed."
+        },
+        {
+          "item": 28,
+          "met": true,
+          "reason": "Help handles detail search separately and adjusts menu help for detail use."
+        }
+      ],
+      "list_ratio": 0.9285714285714286,
+      "quality": 4,
+      "rationale": "Shared handlers and focused tests support maintainability; flash priority is incorrect, and menu dispatch and layout tests are incomplete."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "501eb7ef-325e-4b3c-bdbb-d73f70ce545e",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 418895,
+          "Output": 1895,
+          "CacheRead": 350592,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 8,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 79081,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 MET: Detail `s` uses the same Status menu builder with the detail container.\nITEM 2 MET: Detail `y` opens the container’s Copy menu without copying.\nITEM 3 MET: Detail `m` opens the container’s Mute menu.\nITEM 4 MET: Both views use the same container `I` handler.\nITEM 5 MET: Direct `y` and `p` handling is removed from document peeks.\nITEM 6 MET: Direct `p` handling is removed from both detail lists.\nITEM 7 MET: Item and artifact Run menu handling remains unchanged.\nITEM 8 NOT_MET: An existing detail flash takes priority over the new status refusal and hides it until that flash expires.\nITEM 9 NOT_MET: An existing detail flash can also hide the new copy or mute refusal.\nITEM 10 MET: Container menus use the detail frame’s reserved Block and body height calculation.\nITEM 11 MET: Detail menus use the existing menu navigation and verb dispatch.\nITEM 12 MET: Escape clears the menu and preserves the detail.\nITEM 13 MET: Detail menu openers bypass Selection handling and create singular menus.\nITEM 14 MET: Search narrows both detail lists; Enter restores normal detail key handling.\nITEM 15 MET: Search uses case-insensitive substrings across id, title and type, with terms AND-ed.\nITEM 16 MET: Item status is excluded from search fields.\nITEM 17 MET: Artifact search uses the same grammar over name and type.\nITEM 18 MET: Escape discards the buffer and restores the applied term.\nITEM 19 MET: Search opens with an empty buffer; applying it clears the query.\nITEM 20 MET: Printable keys, including `j`, `k`, `v` and `r`, go to the search field.\nITEM 21 MET: Detail refresh applies the current query, and the header shows the applied term.\nITEM 22 MET: Empty search results name the query and explain how to clear it.\nITEM 23 MET: Artifact availability uses the full collection, so filtering preserves the view switch.\nITEM 24 MET: Detail search state is separate and is discarded when the detail closes.\nITEM 25 MET: Detail hints name the required menus and search; peek hints remove direct copy keys.\nITEM 26 MET: Search typing hints name only apply, cancel and help.\nITEM 27 MET: Detail help lists the required menus, container verb, search and conditional clear entry; peek copy shortcuts are removed.\nITEM 28 MET: Help handles detail search separately and adjusts menu help for detail use.\nQUALITY 4: Shared handlers and focused tests support maintainability; flash priority is incorrect, and menu dispatch and layout tests are incomplete.\n"
+  },
+  "case": "2026-09-06-detail-keymap",
+  "arm": "pop",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "started_at": "2026-09-22T19:29:02.655585Z",
+  "ended_at": "2026-09-22T20:10:01.385759Z",
+  "outcome": "completed",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-3590616841",
+  "set_status": "DONE",
+  "set_spend": {
+    "task_set_id": "2026-09-06-detail-keymap",
+    "completed_tasks": 2,
+    "tokens_per_completed_task": 2407622,
+    "implement_input_tokens": 142,
+    "implement_output_tokens": 60518,
+    "implement_cache_read_tokens": 4469925,
+    "implement_cache_write_tokens": 284659,
+    "implement_partial_cost_usd": 4.382185,
+    "implement_notional_cost_usd": 4.382185,
+    "implement_run_count": 3,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 44,
+    "verification_output_tokens": 14872,
+    "verification_cache_read_tokens": 1053643,
+    "verification_cache_write_tokens": 70114,
+    "verification_partial_cost_usd": 1.0692566000000001,
+    "verification_notional_cost_usd": 1.0692566000000001,
+    "verification_run_count": 1,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 72,
+    "refine_output_tokens": 26260,
+    "refine_cache_read_tokens": 2813535,
+    "refine_cache_write_tokens": 110397,
+    "refine_partial_cost_usd": 1.9713710000000002,
+    "refine_notional_cost_usd": 1.9713710000000002,
+    "refine_run_count": 1,
+    "refine_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "",
+        "title": "",
+        "input_tokens": 34,
+        "output_tokens": 8408,
+        "cache_read_tokens": 944222,
+        "cache_write_tokens": 90647,
+        "partial_cost_usd": 1.0823164,
+        "notional_cost_usd": 1.0823164,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 17,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 90649,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 34,
+            "output_tokens": 8408,
+            "cache_read_tokens": 944222,
+            "cache_write_tokens": 90647
+          }
+        }
+      },
+      {
+        "task_id": "01-container-openers-in-the-detail",
+        "title": "Container menus and the flat verb answer in the detail view",
+        "input_tokens": 62,
+        "output_tokens": 31074,
+        "cache_read_tokens": 2232400,
+        "cache_write_tokens": 114818,
+        "partial_cost_usd": 1.986752,
+        "notional_cost_usd": 1.986752,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 31,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 121715,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 62,
+            "output_tokens": 31074,
+            "cache_read_tokens": 2232400,
+            "cache_write_tokens": 114818
+          }
+        }
+      },
+      {
+        "task_id": "02-search-narrows-the-item-list",
+        "title": "Search narrows a detail view's item list",
+        "input_tokens": 46,
+        "output_tokens": 21036,
+        "cache_read_tokens": 1293303,
+        "cache_write_tokens": 79194,
+        "partial_cost_usd": 1.3131165999999996,
+        "notional_cost_usd": 1.3131165999999996,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 23,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 86091,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 46,
+            "output_tokens": 21036,
+            "cache_read_tokens": 1293303,
+            "cache_write_tokens": 79194
+          }
+        }
+      },
+      {
+        "task_id": "refine",
+        "title": "Refine",
+        "input_tokens": 72,
+        "output_tokens": 26260,
+        "cache_read_tokens": 2813535,
+        "cache_write_tokens": 110397,
+        "partial_cost_usd": 1.9713710000000002,
+        "notional_cost_usd": 1.9713710000000002,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 36,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 117294,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 72,
+            "output_tokens": 26260,
+            "cache_read_tokens": 2813535,
+            "cache_write_tokens": 110397
+          }
+        }
+      },
+      {
+        "task_id": "verify",
+        "title": "Verify",
+        "input_tokens": 44,
+        "output_tokens": 14872,
+        "cache_read_tokens": 1053643,
+        "cache_write_tokens": 70114,
+        "partial_cost_usd": 1.0692566000000001,
+        "notional_cost_usd": 1.0692566000000001,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 22,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 77011,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 44,
+            "output_tokens": 14872,
+            "cache_read_tokens": 1053643,
+            "cache_write_tokens": 70114
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}

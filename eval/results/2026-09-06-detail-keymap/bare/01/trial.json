@@ -1,0 +1,272 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "a6a07e0f5e2de64e81c032b6b491a869fe37f49f31314ecfc4274dfb5d3ed622",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t248.503s\nok  \tgithub.com/glebglazov/pop/config\t16.494s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t5.136s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t244.240s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.226s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.477s\nok  \tgithub.com/glebglazov/pop/integrate\t285.757s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.605s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.701s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.709s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.947s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.977s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.232s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.796s\nok  \tgithub.com/glebglazov/pop/layout\t2.476s\nok  \tgithub.com/glebglazov/pop/monitor\t4.664s\nok  \tgithub.com/glebglazov/pop/project\t9.233s\nok  \tgithub.com/glebglazov/pop/release\t2.087s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.969s\nok  \tgithub.com/glebglazov/pop/routine\t12.461s\nok  \tgithub.com/glebglazov/pop/store\t16.159s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t80.275s\nok  \tgithub.com/glebglazov/pop/tasks\t382.878s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t89.178s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.399s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t118.934s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t16.120s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t9.639s\nok  \tgithub.com/glebglazov/pop/ui\t14.369s\nok  \tgithub.com/glebglazov/pop/wayfinder\t15.328s\nok  \tgithub.com/glebglazov/pop/work\t2.947s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.875s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t192.212s\nok  \tgithub.com/glebglazov/pop/config\t12.568s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t5.039s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t188.668s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.546s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t4.334s\nok  \tgithub.com/glebglazov/pop/integrate\t203.319s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t9.779s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.418s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t1.446s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t2.579s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.701s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t11.255s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t1.169s\nok  \tgithub.com/glebglazov/pop/layout\t4.126s\nok  \tgithub.com/glebglazov/pop/monitor\t8.177s\nok  \tgithub.com/glebglazov/pop/project\t9.510s\nok  \tgithub.com/glebglazov/pop/release\t4.654s\nok  \tgithub.com/glebglazov/pop/repogroup\t3.911s\nok  \tgithub.com/glebglazov/pop/routine\t19.459s\nok  \tgithub.com/glebglazov/pop/store\t19.864s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t84.336s\nok  \tgithub.com/glebglazov/pop/tasks\t297.120s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t71.415s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t3.263s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t96.875s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t11.766s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t5.480s\nok  \tgithub.com/glebglazov/pop/ui\t10.281s\nok  \tgithub.com/glebglazov/pop/wayfinder\t14.629s\nok  \tgithub.com/glebglazov/pop/work\t2.520s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.107s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Detail Status menus use the same container and entries as row-list menus."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "`y` opens the container's Copy menu without copying."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "`m` opens the container's Mute menu."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Both views use the same `I` dispatch function."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "The peek's direct copy handlers are removed."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Neither detail list handles `p` directly."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Item, artifact and peek run-menu handlers remain unchanged."
+        },
+        {
+          "item": 8,
+          "met": false,
+          "reason": "An active detail flash hides the new status refusal stored in the dashboard flash."
+        },
+        {
+          "item": 9,
+          "met": false,
+          "reason": "An active detail flash also hides new copy and mute refusals."
+        },
+        {
+          "item": 10,
+          "met": false,
+          "reason": "The BROKEN detail returns before rendering the menu block, leaving opened menus invisible."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Detail menus use the existing navigation and verb dispatch handlers."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Escape clears the menu and keeps the detail open."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Detail openers bypass Selection and create singular menus."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Search narrows both detail lists; Enter applies it and restores detail controls."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Search uses case-insensitive substring terms AND-ed across id, title and type."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "Item search fields exclude status."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Artifact search uses the same grammar over name and type."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Escape discards the buffer and restores the applied term."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Search opens with an empty buffer; applying it clears the query."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Printable keys reach the text field instead of detail actions."
+        },
+        {
+          "item": 21,
+          "met": true,
+          "reason": "Refresh uses the active query, and the detail header shows the applied term."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "Empty search results name the query and explain how to clear it."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Artifact availability depends on the full list, so filtering preserves the view switch."
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "Detail search state is separate and is discarded when the detail closes."
+        },
+        {
+          "item": 25,
+          "met": true,
+          "reason": "Detail hints name the required menus and search; peek hints remove direct copy keys."
+        },
+        {
+          "item": 26,
+          "met": true,
+          "reason": "Search typing hints name only apply, cancel and help."
+        },
+        {
+          "item": 27,
+          "met": true,
+          "reason": "Help lists the required menus, container verb, search and conditional clear-search entry."
+        },
+        {
+          "item": 28,
+          "met": true,
+          "reason": "Menu and detail-search modes have separate help handling."
+        }
+      ],
+      "list_ratio": 0.8928571428571429,
+      "quality": 3,
+      "rationale": "Shared handlers and focused tests support maintainability, but flash precedence and BROKEN detail rendering leave visible failures."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "95be73a9-fa0e-4c34-96e3-3245165f482b",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 473977,
+          "Output": 1738,
+          "CacheRead": 407808,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 9,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 77014,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 MET: Detail Status menus use the same container and entries as row-list menus.\nITEM 2 MET: `y` opens the container's Copy menu without copying.\nITEM 3 MET: `m` opens the container's Mute menu.\nITEM 4 MET: Both views use the same `I` dispatch function.\nITEM 5 MET: The peek's direct copy handlers are removed.\nITEM 6 MET: Neither detail list handles `p` directly.\nITEM 7 MET: Item, artifact and peek run-menu handlers remain unchanged.\nITEM 8 NOT_MET: An active detail flash hides the new status refusal stored in the dashboard flash.\nITEM 9 NOT_MET: An active detail flash also hides new copy and mute refusals.\nITEM 10 NOT_MET: The BROKEN detail returns before rendering the menu block, leaving opened menus invisible.\nITEM 11 MET: Detail menus use the existing navigation and verb dispatch handlers.\nITEM 12 MET: Escape clears the menu and keeps the detail open.\nITEM 13 MET: Detail openers bypass Selection and create singular menus.\nITEM 14 MET: Search narrows both detail lists; Enter applies it and restores detail controls.\nITEM 15 MET: Search uses case-insensitive substring terms AND-ed across id, title and type.\nITEM 16 MET: Item search fields exclude status.\nITEM 17 MET: Artifact search uses the same grammar over name and type.\nITEM 18 MET: Escape discards the buffer and restores the applied term.\nITEM 19 MET: Search opens with an empty buffer; applying it clears the query.\nITEM 20 MET: Printable keys reach the text field instead of detail actions.\nITEM 21 MET: Refresh uses the active query, and the detail header shows the applied term.\nITEM 22 MET: Empty search results name the query and explain how to clear it.\nITEM 23 MET: Artifact availability depends on the full list, so filtering preserves the view switch.\nITEM 24 MET: Detail search state is separate and is discarded when the detail closes.\nITEM 25 MET: Detail hints name the required menus and search; peek hints remove direct copy keys.\nITEM 26 MET: Search typing hints name only apply, cancel and help.\nITEM 27 MET: Help lists the required menus, container verb, search and conditional clear-search entry.\nITEM 28 MET: Menu and detail-search modes have separate help handling.\nQUALITY 3: Shared handlers and focused tests support maintainability, but flash precedence and BROKEN detail rendering leave visible failures.\n"
+  },
+  "case": "2026-09-06-detail-keymap",
+  "arm": "bare",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "actual_model": "claude-opus-5-5",
+  "started_at": "2026-09-22T19:06:48.477644Z",
+  "ended_at": "2026-09-22T19:24:29.262279Z",
+  "outcome": "completed",
+  "agent_outcome": "completed",
+  "run_id": "e7eea53f-add8-4244-8297-2ffe948c722c",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-2959676032",
+  "spend": {
+    "Tokens": {
+      "Input": 86,
+      "Output": 42396,
+      "CacheRead": 4233835,
+      "CacheWrite": 156978,
+      "HasInput": true,
+      "HasOutput": true,
+      "HasCacheRead": true,
+      "HasCacheWrite": true
+    },
+    "Cost": {
+      "Dollars": 2.9508549999999993,
+      "HasCost": true
+    },
+    "Turns": {
+      "Count": 43,
+      "HasTurn": true
+    },
+    "PeakInput": {
+      "Tokens": 156980,
+      "HasPeak": true
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 2.9508549999999993,
+      "HasCost": true
+    },
+    "RateSource": "",
+    "ModelKey": "anthropic/claude-opus-5-5",
+    "ModelKeySource": "actual"
+  }
+}

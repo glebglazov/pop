@@ -1,0 +1,222 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "086f06b6fce02798bfe2ac79f58d9fed4f18de802d3c5bb8a29d5b852c0d6566",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t88.022s\nok  \tgithub.com/glebglazov/pop/config\t5.272s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.466s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t96.102s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.395s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t4.175s\nok  \tgithub.com/glebglazov/pop/integrate\t70.939s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.563s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.707s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.245s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.479s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.557s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.104s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.204s\nok  \tgithub.com/glebglazov/pop/layout\t2.229s\nok  \tgithub.com/glebglazov/pop/monitor\t4.136s\nok  \tgithub.com/glebglazov/pop/project\t3.563s\nok  \tgithub.com/glebglazov/pop/release\t2.130s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.322s\nok  \tgithub.com/glebglazov/pop/routine\t18.572s\nok  \tgithub.com/glebglazov/pop/store\t4.845s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t25.131s\nok  \tgithub.com/glebglazov/pop/tasks\t148.669s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t35.757s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t0.585s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t53.400s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t5.261s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.979s\nok  \tgithub.com/glebglazov/pop/ui\t8.117s\nok  \tgithub.com/glebglazov/pop/wayfinder\t5.788s\nok  \tgithub.com/glebglazov/pop/work\t1.778s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.357s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t91.555s\nok  \tgithub.com/glebglazov/pop/config\t2.379s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.194s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t96.169s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.528s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t0.937s\nok  \tgithub.com/glebglazov/pop/integrate\t74.081s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.836s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t1.530s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.029s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.336s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.420s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.788s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.358s\nok  \tgithub.com/glebglazov/pop/layout\t3.354s\nok  \tgithub.com/glebglazov/pop/monitor\t5.001s\nok  \tgithub.com/glebglazov/pop/project\t4.382s\nok  \tgithub.com/glebglazov/pop/release\t2.342s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.245s\nok  \tgithub.com/glebglazov/pop/routine\t17.060s\nok  \tgithub.com/glebglazov/pop/store\t6.669s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t28.444s\nok  \tgithub.com/glebglazov/pop/tasks\t146.694s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t39.075s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.143s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t57.613s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.186s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.777s\nok  \tgithub.com/glebglazov/pop/ui\t8.477s\nok  \tgithub.com/glebglazov/pop/wayfinder\t5.301s\nok  \tgithub.com/glebglazov/pop/work\t1.364s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.539s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": false,
+          "reason": "Forced rebind prompts can print before the Drain header."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Whole-set Implement supplies the header even inside the bound checkout."
+        },
+        {
+          "item": 3,
+          "met": false,
+          "reason": "The header uses the resolved checkout root, losing the actual invocation directory when invoked from a subdirectory."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "BoundDefault adds the required binding-recorded line."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "The old bound-checkout report is removed."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Single-task runs print the current checkout path without a Drain header."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Successful tasks print one green done result line."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Implementation-commit details print directly below the done line."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "Whole-set completion no longer prints the old Completed line or duplicates the result."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Exhausted task failures print one red failed line and retain the failed state."
+        },
+        {
+          "item": 11,
+          "met": false,
+          "reason": "Agent exhaustion after contract failures or overruns still prints failed and leaves the task failed."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Quota pauses print the yellow quota-paused line with the selected preset."
+        },
+        {
+          "item": 13,
+          "met": false,
+          "reason": "Interrupts during quota recovery return without an interrupted Task result line."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Blocked and Deferred remain set-level reports; executed tasks receive separate result lines."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Attempt failures, attempt breakdowns, and exhausted-walk reports remain."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "The shared output writer prints complete plain-text lines for redirected output."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "The shared output writer applies terminal styles and suppresses them with NO_COLOR."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Header and result rendering add no Work journal writes."
+        }
+      ],
+      "list_ratio": 0.7777777777777778,
+      "quality": 3,
+      "rationale": "Clear output helpers and useful tests, but invocation-path accuracy, interruption coverage, and some acceptance cases remain incomplete."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "1099d204-53ad-4e90-a7f0-4be2d197ce9b",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 464086,
+          "Output": 1502,
+          "CacheRead": 396160,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 9,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 70395,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 NOT_MET: Forced rebind prompts can print before the Drain header.\nITEM 2 MET: Whole-set Implement supplies the header even inside the bound checkout.\nITEM 3 NOT_MET: The header uses the resolved checkout root, losing the actual invocation directory when invoked from a subdirectory.\nITEM 4 MET: BoundDefault adds the required binding-recorded line.\nITEM 5 MET: The old bound-checkout report is removed.\nITEM 6 MET: Single-task runs print the current checkout path without a Drain header.\nITEM 7 MET: Successful tasks print one green done result line.\nITEM 8 MET: Implementation-commit details print directly below the done line.\nITEM 9 MET: Whole-set completion no longer prints the old Completed line or duplicates the result.\nITEM 10 MET: Exhausted task failures print one red failed line and retain the failed state.\nITEM 11 NOT_MET: Agent exhaustion after contract failures or overruns still prints failed and leaves the task failed.\nITEM 12 MET: Quota pauses print the yellow quota-paused line with the selected preset.\nITEM 13 NOT_MET: Interrupts during quota recovery return without an interrupted Task result line.\nITEM 14 MET: Blocked and Deferred remain set-level reports; executed tasks receive separate result lines.\nITEM 15 MET: Attempt failures, attempt breakdowns, and exhausted-walk reports remain.\nITEM 16 MET: The shared output writer prints complete plain-text lines for redirected output.\nITEM 17 MET: The shared output writer applies terminal styles and suppresses them with NO_COLOR.\nITEM 18 MET: Header and result rendering add no Work journal writes.\nQUALITY 3: Clear output helpers and useful tests, but invocation-path accuracy, interruption coverage, and some acceptance cases remain incomplete.\n"
+  },
+  "case": "2026-08-21-drain-rendering",
+  "arm": "bare",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "actual_model": "claude-opus-5-5",
+  "started_at": "2026-09-23T17:06:17.079555Z",
+  "ended_at": "2026-09-23T17:19:16.732021Z",
+  "outcome": "completed",
+  "agent_outcome": "completed",
+  "run_id": "2f45f309-e7f4-4071-9fdb-2037ca274c5a",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-4231826772",
+  "spend": {
+    "Tokens": {
+      "Input": 72,
+      "Output": 33725,
+      "CacheRead": 3024831,
+      "CacheWrite": 121935,
+      "HasInput": true,
+      "HasOutput": true,
+      "HasCacheRead": true,
+      "HasCacheWrite": true
+    },
+    "Cost": {
+      "Dollars": 2.2552342000000007,
+      "HasCost": true
+    },
+    "Turns": {
+      "Count": 36,
+      "HasTurn": true
+    },
+    "PeakInput": {
+      "Tokens": 128030,
+      "HasPeak": true
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 2.2552342000000007,
+      "HasCost": true
+    },
+    "RateSource": "",
+    "ModelKey": "anthropic/claude-opus-5-5",
+    "ModelKeySource": "actual"
+  }
+}

@@ -1,0 +1,470 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "b25cb7b613088419b6384a9de289a47ca9264a24298f3900a0fc3f1864eed9ef",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t171.512s\nok  \tgithub.com/glebglazov/pop/config\t12.573s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.211s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t170.254s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.723s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.404s\nok  \tgithub.com/glebglazov/pop/integrate\t181.412s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t6.774s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.921s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.247s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.382s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.625s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t8.502s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.649s\nok  \tgithub.com/glebglazov/pop/layout\t2.750s\nok  \tgithub.com/glebglazov/pop/monitor\t4.013s\nok  \tgithub.com/glebglazov/pop/project\t7.686s\nok  \tgithub.com/glebglazov/pop/release\t0.581s\nok  \tgithub.com/glebglazov/pop/repogroup\t1.095s\nok  \tgithub.com/glebglazov/pop/routine\t19.945s\nok  \tgithub.com/glebglazov/pop/store\t23.566s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t77.538s\nok  \tgithub.com/glebglazov/pop/tasks\t367.459s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t65.768s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.416s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t87.372s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t12.187s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t10.066s\nok  \tgithub.com/glebglazov/pop/ui\t12.972s\nok  \tgithub.com/glebglazov/pop/wayfinder\t15.247s\nok  \tgithub.com/glebglazov/pop/work\t2.393s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.556s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t130.937s\nok  \tgithub.com/glebglazov/pop/config\t6.585s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.818s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t144.183s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.777s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t4.372s\nok  \tgithub.com/glebglazov/pop/integrate\t149.318s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t9.231s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t1.172s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.550s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.614s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t5.057s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t11.770s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t4.404s\nok  \tgithub.com/glebglazov/pop/layout\t3.831s\nok  \tgithub.com/glebglazov/pop/monitor\t4.318s\nok  \tgithub.com/glebglazov/pop/project\t3.810s\nok  \tgithub.com/glebglazov/pop/release\t2.642s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.468s\nok  \tgithub.com/glebglazov/pop/routine\t13.464s\nok  \tgithub.com/glebglazov/pop/store\t9.598s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t55.468s\nok  \tgithub.com/glebglazov/pop/tasks\t310.610s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t53.221s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.338s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t76.512s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t8.705s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.201s\nok  \tgithub.com/glebglazov/pop/ui\t8.646s\nok  \tgithub.com/glebglazov/pop/wayfinder\t9.895s\nok  \tgithub.com/glebglazov/pop/work\t2.263s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.195s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Verifier results produce timestamped reports under the set’s verify directory."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Reports accumulate per verification; agent fallback produces one final report."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "The verdict line remains first in the response contract and is removed from the report body."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Parsing behavior is unchanged; malformed replies retain their raw text."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "Report writing covers PASS, FIXABLE, and NEEDS-HUMAN."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "PASS findings must explain the checks and why each criterion is met."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Cache reads bypass report writing."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Invalidation deletes verdict rows without deleting reports."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "Previous reports stay outside Verifier prompts; human notes still pass through."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Accept writes a human report without invoking an agent."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "The human report includes the rationale and overridden verdict."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "The Authored by field identifies human reports."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Human reports use the shared directory, filename, header, and latest-report reader."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "The gate preamble shows the latest report path and commit without its body."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "The paging entry opens the report and returns to the gate."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "The set detail view includes the Verify report pointer."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Verify reports rank above Refine reports in Artifacts."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Agent prompts gain no report pointer; golden changes cover only the Verifier response contract."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Missing reports produce no report preamble, paging entry, detail section, or artifact."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Verification status and badge logic remain unchanged."
+        },
+        {
+          "item": 21,
+          "met": false,
+          "reason": "Status rows retain reason truncation but gain no adjacent report pointer; the pointer appears only in the detail view."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "Both passes use shared rendering, storage, timestamp scanning, and document header reading."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Refine retains its directory, filename format, header, and existing display text."
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "Refine prompt golden files are unchanged."
+        }
+      ],
+      "list_ratio": 0.9583333333333334,
+      "quality": 4,
+      "rationale": "Clear shared implementation with broad tests, but the status-row pointer is missing; tests were not executed under the read-only grading constraint."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "c52d294f-423e-41b4-b62e-057887b28f71",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 457249,
+          "Output": 1492,
+          "CacheRead": 390272,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 9,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 77675,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 MET: Verifier results produce timestamped reports under the set’s verify directory.\nITEM 2 MET: Reports accumulate per verification; agent fallback produces one final report.\nITEM 3 MET: The verdict line remains first in the response contract and is removed from the report body.\nITEM 4 MET: Parsing behavior is unchanged; malformed replies retain their raw text.\nITEM 5 MET: Report writing covers PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: PASS findings must explain the checks and why each criterion is met.\nITEM 7 MET: Cache reads bypass report writing.\nITEM 8 MET: Invalidation deletes verdict rows without deleting reports.\nITEM 9 MET: Previous reports stay outside Verifier prompts; human notes still pass through.\nITEM 10 MET: Accept writes a human report without invoking an agent.\nITEM 11 MET: The human report includes the rationale and overridden verdict.\nITEM 12 MET: The Authored by field identifies human reports.\nITEM 13 MET: Human reports use the shared directory, filename, header, and latest-report reader.\nITEM 14 MET: The gate preamble shows the latest report path and commit without its body.\nITEM 15 MET: The paging entry opens the report and returns to the gate.\nITEM 16 MET: The set detail view includes the Verify report pointer.\nITEM 17 MET: Verify reports rank above Refine reports in Artifacts.\nITEM 18 MET: Agent prompts gain no report pointer; golden changes cover only the Verifier response contract.\nITEM 19 MET: Missing reports produce no report preamble, paging entry, detail section, or artifact.\nITEM 20 MET: Verification status and badge logic remain unchanged.\nITEM 21 NOT_MET: Status rows retain reason truncation but gain no adjacent report pointer; the pointer appears only in the detail view.\nITEM 22 MET: Both passes use shared rendering, storage, timestamp scanning, and document header reading.\nITEM 23 MET: Refine retains its directory, filename format, header, and existing display text.\nITEM 24 MET: Refine prompt golden files are unchanged.\nQUALITY 4: Clear shared implementation with broad tests, but the status-row pointer is missing; tests were not executed under the read-only grading constraint.\n"
+  },
+  "case": "2026-08-29-verify-report",
+  "arm": "pop",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "started_at": "2026-09-23T19:33:33.27543Z",
+  "ended_at": "2026-09-23T20:25:15.845902Z",
+  "outcome": "completed",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-489811743",
+  "set_status": "DONE",
+  "set_spend": {
+    "task_set_id": "2026-08-29-verify-report",
+    "completed_tasks": 4,
+    "tokens_per_completed_task": 1408391,
+    "implement_input_tokens": 202,
+    "implement_output_tokens": 74157,
+    "implement_cache_read_tokens": 5206831,
+    "implement_cache_write_tokens": 352377,
+    "implement_partial_cost_usd": 5.3443302,
+    "implement_notional_cost_usd": 5.3443302,
+    "implement_run_count": 5,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 28,
+    "verification_output_tokens": 5405,
+    "verification_cache_read_tokens": 603840,
+    "verification_cache_write_tokens": 60657,
+    "verification_partial_cost_usd": 0.7142360000000001,
+    "verification_notional_cost_usd": 0.7142360000000001,
+    "verification_run_count": 1,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 34,
+    "refine_output_tokens": 7409,
+    "refine_cache_read_tokens": 844698,
+    "refine_cache_write_tokens": 63920,
+    "refine_partial_cost_usd": 0.8286155999999999,
+    "refine_notional_cost_usd": 0.8286155999999999,
+    "refine_run_count": 1,
+    "refine_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "",
+        "title": "",
+        "input_tokens": 38,
+        "output_tokens": 10205,
+        "cache_read_tokens": 943404,
+        "cache_write_tokens": 84536,
+        "partial_cost_usd": 1.0692208,
+        "notional_cost_usd": 1.0692208,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 19,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 84538,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 38,
+            "output_tokens": 10205,
+            "cache_read_tokens": 943404,
+            "cache_write_tokens": 84536
+          }
+        }
+      },
+      {
+        "task_id": "01-shared-report-machinery",
+        "title": "The report document and pointer machinery is shared by both passes",
+        "input_tokens": 34,
+        "output_tokens": 15319,
+        "cache_read_tokens": 849267,
+        "cache_write_tokens": 62901,
+        "partial_cost_usd": 0.9795774,
+        "notional_cost_usd": 0.9795774,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 17,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 69798,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 34,
+            "output_tokens": 15319,
+            "cache_read_tokens": 849267,
+            "cache_write_tokens": 62901
+          }
+        }
+      },
+      {
+        "task_id": "02-verifier-writes-the-report",
+        "title": "The Verifier writes a report of every verdict it reaches",
+        "input_tokens": 56,
+        "output_tokens": 20644,
+        "cache_read_tokens": 1623886,
+        "cache_write_tokens": 77143,
+        "partial_cost_usd": 1.3550251999999998,
+        "notional_cost_usd": 1.3550251999999998,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 28,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 84040,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 56,
+            "output_tokens": 20644,
+            "cache_read_tokens": 1623886,
+            "cache_write_tokens": 77143
+          }
+        }
+      },
+      {
+        "task_id": "03-accepted-verdict-report",
+        "title": "A human's accepted verdict leaves a report of what it overrode",
+        "input_tokens": 28,
+        "output_tokens": 9696,
+        "cache_read_tokens": 512064,
+        "cache_write_tokens": 52940,
+        "partial_cost_usd": 0.7199648,
+        "notional_cost_usd": 0.7199648,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 14,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 59837,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 28,
+            "output_tokens": 9696,
+            "cache_read_tokens": 512064,
+            "cache_write_tokens": 52940
+          }
+        }
+      },
+      {
+        "task_id": "04-report-reaches-the-human",
+        "title": "The Verify report reaches the human wherever a set is read",
+        "input_tokens": 46,
+        "output_tokens": 18293,
+        "cache_read_tokens": 1278210,
+        "cache_write_tokens": 74857,
+        "partial_cost_usd": 1.2205419999999998,
+        "notional_cost_usd": 1.2205419999999998,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 23,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 81754,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 46,
+            "output_tokens": 18293,
+            "cache_read_tokens": 1278210,
+            "cache_write_tokens": 74857
+          }
+        }
+      },
+      {
+        "task_id": "refine",
+        "title": "Refine",
+        "input_tokens": 34,
+        "output_tokens": 7409,
+        "cache_read_tokens": 844698,
+        "cache_write_tokens": 63920,
+        "partial_cost_usd": 0.8286155999999999,
+        "notional_cost_usd": 0.8286155999999999,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 17,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 70817,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 34,
+            "output_tokens": 7409,
+            "cache_read_tokens": 844698,
+            "cache_write_tokens": 63920
+          }
+        }
+      },
+      {
+        "task_id": "verify",
+        "title": "Verify",
+        "input_tokens": 28,
+        "output_tokens": 5405,
+        "cache_read_tokens": 603840,
+        "cache_write_tokens": 60657,
+        "partial_cost_usd": 0.7142360000000001,
+        "notional_cost_usd": 0.7142360000000001,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 13,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 67554,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 28,
+            "output_tokens": 5405,
+            "cache_read_tokens": 603840,
+            "cache_write_tokens": 60657
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}

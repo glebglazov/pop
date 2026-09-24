@@ -1,0 +1,2818 @@
+diff --git a/cmd/work_status_pin_test.go b/cmd/work_status_lift_test.go
+similarity index 71%
+rename from cmd/work_status_pin_test.go
+rename to cmd/work_status_lift_test.go
+index 99f914af..e5000ac8 100644
+--- a/cmd/work_status_pin_test.go
++++ b/cmd/work_status_lift_test.go
+@@ -14,7 +14,7 @@ import (
+ 
+ // attributingStubKind is an orderingStubKind that recognises one pane as one of
+ // its containers' own, which is the strongest rung of the ladder — enough to make
+-// a pinning build actually pin.
++// a lifting build actually lift.
+ type attributingStubKind struct {
+ 	orderingStubKind
+ 	paneID, containerID string
+@@ -32,10 +32,10 @@ func (k attributingStubKind) AttributePane(facts work.PaneFacts) (work.Attributi
+ }
+ 
+ // `pop work status` is a printed list, not a page anyone is standing in: it builds
+-// with empty pane facts, so no preset's `pin` can reorder or mark it. The same
+-// rows under a pinning preset are the dashboard's pinned page and status' plain
++// with empty pane facts, so no preset's `lift` can reorder or mark it. The same
++// rows under a lifting preset are the dashboard's lifted page and status' plain
+ // one, which is the pair this test holds together.
+-func TestWorkStatusNeverPinsUnderAnyPreset(t *testing.T) {
++func TestWorkStatusNeverLiftsUnderAnyPreset(t *testing.T) {
+ 	day := func(month time.Month) time.Time { return time.Date(2026, month, 1, 0, 0, 0, 0, time.UTC) }
+ 	sets := attributingStubKind{
+ 		orderingStubKind: orderingStubKind{id: ref.KindTaskSet, containers: []work.Container{
+@@ -45,45 +45,45 @@ func TestWorkStatusNeverPinsUnderAnyPreset(t *testing.T) {
+ 		paneID:      "%5",
+ 		containerID: "2026-06-01-older",
+ 	}
+-	unpinned := []string{"task-set:2026-08-01-newer", "task-set:2026-06-01-older"}
++	unlifted := []string{"task-set:2026-08-01-newer", "task-set:2026-06-01-older"}
+ 
+ 	cfg := &config.Config{}
+-	for _, pin := range []bool{false, true} {
++	for _, lift := range []bool{false, true} {
+ 		d := &drain.Deps{
+-			ViewPreset:   config.WorkViewPreset{Name: "fixture", Pin: pin},
++			ViewPreset:   config.WorkViewPreset{Name: "fixture", Lift: lift},
+ 			Kinds:        func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{sets} },
+ 			RoutineKinds: func(*drain.Deps, *config.Config) []work.Kind { return nil },
+ 		}
+ 
+ 		tables, err := workBuildStatusTables(d, cfg)
+ 		if err != nil {
+-			t.Fatalf("workBuildStatusTables(pin=%v): %v", pin, err)
++			t.Fatalf("workBuildStatusTables(lift=%v): %v", lift, err)
+ 		}
+-		if got := orderingRowKeys(tables.TaskSets.Rows); !slices.Equal(got, unpinned) {
+-			t.Fatalf("status order under pin=%v = %v, want the sorted order %v", pin, got, unpinned)
++		if got := orderingRowKeys(tables.TaskSets.Rows); !slices.Equal(got, unlifted) {
++			t.Fatalf("status order under lift=%v = %v, want the sorted order %v", lift, got, unlifted)
+ 		}
+ 		for _, row := range tables.TaskSets.Rows {
+-			if row.Pinned {
+-				t.Fatalf("status marked %s under pin=%v: it never has a pane to attribute", row.ID, pin)
++			if row.Lifted {
++				t.Fatalf("status marked %s under lift=%v: it never has a pane to attribute", row.ID, lift)
+ 			}
+ 		}
+ 
+ 		// The same preset on a page launched from the attributed pane: that is where
+ 		// the grant lands, and it is what makes the identical status output a fact
+-		// about the surface rather than about a fixture that could not pin.
++		// about the surface rather than about a fixture that could not lift.
+ 		page, err := dashboard.BuildPageSnapshot(d, cfg, dashboard.PageWork, work.PaneFacts{PaneID: "%5"})
+ 		if err != nil {
+-			t.Fatalf("BuildPageSnapshot(pin=%v): %v", pin, err)
++			t.Fatalf("BuildPageSnapshot(lift=%v): %v", lift, err)
+ 		}
+-		wantPage := unpinned
+-		if pin {
++		wantPage := unlifted
++		if lift {
+ 			wantPage = []string{"task-set:2026-06-01-older", "task-set:2026-08-01-newer"}
+ 		}
+ 		if got := orderingRowKeys(page.Containers); !slices.Equal(got, wantPage) {
+-			t.Fatalf("dashboard order under pin=%v = %v, want %v", pin, got, wantPage)
++			t.Fatalf("dashboard order under lift=%v = %v, want %v", lift, got, wantPage)
+ 		}
+ 		if page.Attribution == nil {
+-			t.Fatalf("dashboard attribution under pin=%v = none, want the pane's container either way", pin)
++			t.Fatalf("dashboard attribution under lift=%v = none, want the pane's container either way", lift)
+ 		}
+ 	}
+ }
+diff --git a/config/work_view_presets.go b/config/work_view_presets.go
+index 99b140c3..bf9b0d26 100644
+--- a/config/work_view_presets.go
++++ b/config/work_view_presets.go
+@@ -42,7 +42,7 @@ var (
+ 	presetEntryKeys = map[string]bool{
+ 		"name": true, "label": true, "status": true, "unfolded": true,
+ 		"archived": true, "created_within": true, "sort": true, "hide": true,
+-		"system": true, "muted": true, "pin": true,
++		"system": true, "muted": true, "lift": true, "pin": true,
+ 	}
+ 	presetFilterKeys = map[string]bool{
+ 		"status": true, "unfolded": true, "archived": true,
+@@ -75,12 +75,12 @@ type WorkViewPreset struct {
+ 	WorkViewPresetFilter
+ 	Hide *WorkViewPresetFilter `toml:"hide,omitempty" desc:"Subtract rows matching this conjunction (one level only)."`
+ 
+-	// Pin is the sole grant of the Pane pin: only under a preset declaring it do
+-	// the rows the launching pane is attributed to lift above the sorted list,
++	// Lift is the sole grant of the Work lift: only under a preset declaring it
++	// do the rows the launching pane is attributed to lift above the sorted list,
+ 	// marked. It is not a filter field — it decides where admitted rows sit, not
+ 	// which rows exist — so it lives beside Hide rather than inside the filter,
+ 	// and a hide clause may not declare it. Roster position grants nothing.
+-	Pin bool `toml:"pin,omitempty" desc:"Lift the rows the launching pane is attributed to above the list (default false)."`
++	Lift bool `toml:"lift,omitempty" desc:"Lift the rows the launching pane is attributed to above the list (default false)."`
+ 
+ 	// Number is the 1-based position in the resolved roster. Positional: the
+ 	// first entry is the default, and 1–9 map to digit shortcuts.
+@@ -123,9 +123,9 @@ func ShippedWorkViewPresets() []WorkViewPreset {
+ 	return []WorkViewPreset{
+ 		{
+ 			Name: "active",
+-			// The one shipped preset that pins: the pane's own work belongs at the
++			// The one shipped preset that lifts: the pane's own work belongs at the
+ 			// top of the view a human lives in, and nowhere else.
+-			Pin: true,
++			Lift: true,
+ 			WorkViewPresetFilter: WorkViewPresetFilter{
+ 				// Mute means the human said "not now" about this row, so the view
+ 				// they sit in is the one it has to leave (ADR-0200 decision 8). It
+@@ -383,12 +383,19 @@ func (p *WorkViewPreset) UnmarshalTOML(v interface{}) error {
+ 			p.Name = strings.TrimSpace(s)
+ 		}
+ 	}
+-	if raw, ok := m["pin"]; ok {
++	// `pin` is the Work lift's old spelling, accepted forever and never warned
++	// about (ADR-0241 decision 9). It is read first so that `lift`, when a preset
++	// declares both, is the one that stands.
++	for _, key := range []string{"pin", "lift"} {
++		raw, ok := m[key]
++		if !ok {
++			continue
++		}
+ 		b, ok := raw.(bool)
+ 		if !ok {
+-			p.problems = append(p.problems, fmt.Sprintf("pin must be a bool, got %T", raw))
++			p.problems = append(p.problems, fmt.Sprintf("%s must be a bool, got %T", key, raw))
+ 		} else {
+-			p.Pin = b
++			p.Lift = b
+ 		}
+ 	}
+ 	if raw, ok := m["label"]; ok {
+diff --git a/config/work_view_presets_test.go b/config/work_view_presets_test.go
+index 31734157..f1ff1435 100644
+--- a/config/work_view_presets_test.go
++++ b/config/work_view_presets_test.go
+@@ -319,60 +319,114 @@ name = "from-parent"
+ 	}
+ }
+ 
+-// The pin is declared, never inherited (glossary: Work view preset): a user
+-// roster keeps the Pane pin only by writing `pin = true`, and of the shipped
++// The lift is declared, never inherited (glossary: Work view preset): a user
++// roster keeps the Work lift only by writing `lift = true`, and of the shipped
+ // roster only `active` does.
+-func TestOnlyTheShippedActivePresetDeclaresPin(t *testing.T) {
++func TestOnlyTheShippedActivePresetDeclaresLift(t *testing.T) {
+ 	for _, p := range ShippedWorkViewPresets() {
+-		if want := p.Name == "active"; p.Pin != want {
+-			t.Errorf("shipped %q pin = %v, want %v", p.Name, p.Pin, want)
++		if want := p.Name == "active"; p.Lift != want {
++			t.Errorf("shipped %q lift = %v, want %v", p.Name, p.Lift, want)
+ 		}
+ 	}
+ }
+ 
+-func TestPresetPinDecodesAndDefaultsToFalse(t *testing.T) {
++func TestPresetLiftDecodesAndDefaultsToFalse(t *testing.T) {
+ 	body := `
+ [[work.dashboard.tasks.presets]]
+ name = "mine"
+-pin = true
++lift = true
+ 
+ [[work.dashboard.tasks.presets]]
+ name = "silent"
+ 
+ [[work.dashboard.tasks.presets]]
+ name = "wrong"
+-pin = "yes"
++lift = "yes"
+ 
+ [[work.dashboard.tasks.presets]]
+ name = "nested"
+-hide = { pin = true }
++hide = { lift = true }
+ `
+ 	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, body))
+ 	if err != nil {
+-		t.Fatalf("Load must not fail on a bad pin: %v", err)
++		t.Fatalf("Load must not fail on a bad lift: %v", err)
+ 	}
+-	byName := map[string]WorkViewPreset{}
+-	for _, p := range cfg.ResolveWorkViewPresets() {
+-		byName[p.Name] = p
++	byName := presetsByName(cfg)
++	if p := byName["mine"]; !p.Lift {
++		t.Errorf("declared lift = %v, want true", p.Lift)
+ 	}
+-	if p := byName["mine"]; !p.Pin {
+-		t.Errorf("declared pin = %v, want true", p.Pin)
++	// An unset lift is no lift: the field is a grant, so silence withholds it.
++	if p := byName["silent"]; p.Lift {
++		t.Errorf("undeclared lift = %v, want false", p.Lift)
+ 	}
+-	// An unset pin is no pin: the field is a grant, so silence withholds it.
+-	if p := byName["silent"]; p.Pin {
+-		t.Errorf("undeclared pin = %v, want false", p.Pin)
++	if p := byName["wrong"]; p.Lift {
++		t.Errorf("lift = \"yes\" resolved to %v, want the field ignored", p.Lift)
+ 	}
+-	if p := byName["wrong"]; p.Pin {
+-		t.Errorf("pin = \"yes\" resolved to %v, want the field ignored", p.Pin)
+-	}
+-	for _, want := range []string{`pin must be a bool`, `hide has unknown key "pin"`} {
++	for _, want := range []string{`lift must be a bool`, `hide has unknown key "lift"`} {
+ 		if !containsSubstring(cfg.Warnings, want) {
+ 			t.Errorf("Warnings missing %q; got: %v", want, cfg.Warnings)
+ 		}
+ 	}
+ 	// A hide clause decides which rows exist, never where they sit, so the grant
+ 	// has no meaning inside one.
+-	if p := byName["nested"]; p.Pin {
+-		t.Errorf("hide.pin granted the pin (%v), want it confined to the entry", p.Pin)
++	if p := byName["nested"]; p.Lift {
++		t.Errorf("hide.lift granted the lift (%v), want it confined to the entry", p.Lift)
++	}
++}
++
++// `pin` is the lift's old spelling (ADR-0241 decision 9): a config that already
++// says it keeps its behaviour and hears nothing about it, and `lift` stands
++// when a preset says both.
++func TestPresetPinIsASilentAliasForLift(t *testing.T) {
++	body := `
++[[work.dashboard.tasks.presets]]
++name = "old"
++pin = true
++
++[[work.dashboard.tasks.presets]]
++name = "both"
++pin = true
++lift = false
++
++[[work.dashboard.tasks.presets]]
++name = "both-other-way"
++pin = false
++lift = true
++`
++	cfg, err := LoadWith(isolatedDeps(t), writeConfig(t, body))
++	if err != nil {
++		t.Fatalf("Load: %v", err)
++	}
++	if len(cfg.Warnings) != 0 {
++		t.Errorf("Warnings = %v, want none: the alias is silent", cfg.Warnings)
++	}
++	byName := presetsByName(cfg)
++	for name, want := range map[string]bool{"old": true, "both": false, "both-other-way": true} {
++		if got := byName[name].Lift; got != want {
++			t.Errorf("%s: lift = %v, want %v", name, got, want)
++		}
++	}
++
++	bad, err := LoadWith(isolatedDeps(t), writeConfig(t, `
++[[work.dashboard.tasks.presets]]
++name = "wrong"
++pin = "yes"
++`))
++	if err != nil {
++		t.Fatalf("Load must not fail on a bad pin: %v", err)
++	}
++	if presetsByName(bad)["wrong"].Lift {
++		t.Error(`pin = "yes" granted the lift, want the field ignored`)
++	}
++	if !containsSubstring(bad.Warnings, `pin must be a bool`) {
++		t.Errorf("Warnings missing the bad pin; got: %v", bad.Warnings)
++	}
++}
++
++func presetsByName(cfg *Config) map[string]WorkViewPreset {
++	byName := map[string]WorkViewPreset{}
++	for _, p := range cfg.ResolveWorkViewPresets() {
++		byName[p.Name] = p
+ 	}
++	return byName
+ }
+diff --git a/dashboard/dashboard.go b/dashboard/dashboard.go
+index b4ec0004..44ac81a2 100644
+--- a/dashboard/dashboard.go
++++ b/dashboard/dashboard.go
+@@ -882,7 +882,7 @@ type QueueDashboard struct {
+ 	kinds workKinds
+ 	// pane is what the dashboard's own pane showed at launch, read once and kept.
+ 	// The pane does not move while the dashboard runs, so every rebuild re-asks
+-	// the kinds with these same facts and pins whatever the answer is now
++	// the kinds with these same facts and lifts whatever the answer is now
+ 	// (ADR-0209 decision 5).
+ 	pane    work.PaneFacts
+ 	snap    DashboardSnapshot
+@@ -1016,7 +1016,7 @@ func NewDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot, p
+ // pane is the launching pane's facts, the same ones the entry page was built
+ // with. A page built by the toggle is not a launch, but it is the same pane: the
+ // kinds this page lists get their turn at attributing it, which is how a Routine
+-// fire pane's row is already pinned when the human toggles over.
++// fire pane's row is already lifted when the human toggles over.
+ func OpenPage(d *drain.Deps, cfg *config.Config, page Page, pane work.PaneFacts) QueueDashboard {
+ 	snap, err := BuildPageSnapshot(d, cfg, page, pane)
+ 	m := NewDashboardOn(d, cfg, snap, page)
+@@ -1062,10 +1062,10 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
+ 		Anchor:          ui.AnchorTop,
+ 		TopEdgeOnChrome: true,
+ 		// The snapshot already moved the attributed rows to the top — when the active
+-		// preset granted the pin; under any other preset nothing is marked. The mark
++		// preset granted the lift; under any other preset nothing is marked. The mark
+ 		// is what says why the lifted rows are there, on every one of them
+ 		// (ADR-0209 decision 4).
+-		Pinned: func(r DashboardRow) bool { return r.Pinned },
++		Lifted: func(r DashboardRow) bool { return r.Lifted },
+ 		Cell: func(r DashboardRow, rs ui.RowState) string {
+ 			budget := dashboardListCellBudget(cols.width)
+ 			cache := livePaneCache{}
+@@ -1082,7 +1082,7 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
+ 			return ui.TruncateString(dashboardTableLine(page.styledCells(kinds, r, cache), cols.widths), budget)
+ 		},
+ 	})
+-	// Attribution has already had its say — it pinned its rows to the top of the
++	// Attribution has already had its say — it lifted its rows to the top of the
+ 	// snapshot. Nothing is printed about it, and the cursor rests where it always
+ 	// does, on the first row (ADR-0209 decision 8).
+ 	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, pane: snap.Pane, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
+@@ -2752,9 +2752,9 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
+ // pays for the other page's scan and the header it recomputes counts only what is
+ // on screen.
+ //
+-// It carries the pane facts the model has held since launch, so the pinned block
++// It carries the pane facts the model has held since launch, so the lifted block
+ // is whatever the pane belongs to now: a drain that has just gone live in the
+-// pane's checkout pins on this poll, and one that has ended un-pins on it. No
++// pane's checkout lifts on this poll, and one that has ended drops out on it. No
+ // tmux round-trip happens here — only the answer is re-derived.
+ // While rows are marked it also builds the same page unfiltered, because a mark
+ // outranks the preset and the preset build alone cannot tell a row it hides from
+@@ -2790,9 +2790,9 @@ func (m QueueDashboard) unfilteredRows() []DashboardRow {
+ 
+ // unfilteredDeps is this page's deps with the widest shipped preset installed,
+ // keeping the active preset's sort so both builds of one poll agree on order. The
+-// pin grant rides along with the sort for the same reason: the widening is about
++// lift grant rides along with the sort for the same reason: the widening is about
+ // which rows exist, not about where they sit, so a marked row it contributes must
+-// not appear lifted in a view whose preset does not pin.
++// not appear lifted in a view whose preset does not lift.
+ func (m QueueDashboard) unfilteredDeps() *drain.Deps {
+ 	preset, ok := config.ShippedWorkViewPreset("all")
+ 	if m.d == nil || !ok {
+@@ -2800,7 +2800,7 @@ func (m QueueDashboard) unfilteredDeps() *drain.Deps {
+ 	}
+ 	active := m.d.EffectiveViewPreset()
+ 	preset.Sort = active.Sort
+-	preset.Pin = active.Pin
++	preset.Lift = active.Lift
+ 	d := *m.d
+ 	d.ViewPreset = preset
+ 	return &d
+diff --git a/dashboard/dashboard_selection_test.go b/dashboard/dashboard_selection_test.go
+index ba619f83..57a49dfd 100644
+--- a/dashboard/dashboard_selection_test.go
++++ b/dashboard/dashboard_selection_test.go
+@@ -294,48 +294,48 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
+ 	}
+ }
+ 
+-// The pane pin keeps its column and its place: the pinned block is above the
+-// region, a marked row that is also attributed keeps its `▸`, and a pin still
++// The Work lift keeps its column and its place: the lifted block is above the
++// region, a marked row that is also attributed keeps its `▸`, and a lift still
+ // yields to the narrowings a mark is exempt from (ADR-0209 decision 7 stands for
+ // pop's own inference).
+-func TestWorkSelectionLeavesThePanePinAtTheHead(t *testing.T) {
++func TestWorkSelectionLeavesTheWorkLiftAtTheHead(t *testing.T) {
+ 	rows := selRows("set-a", "set-b", "set-c")
+-	rows[0].Pinned = true
+-	rows[1].Pinned = true
+-	// The snapshot builder has already lifted the pinned rows to the top.
++	rows[0].Lifted = true
++	rows[1].Lifted = true
++	// The snapshot builder has already lifted the attributed rows to the top.
+ 	m := selDashboard(rows)
+ 
+ 	m = markRow(t, m, "set-b")
+ 	m = markRow(t, m, "set-c")
+ 
+ 	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
+-		t.Fatalf("rows = %v, want the pinned ordinary row above the marked rows", got)
++		t.Fatalf("rows = %v, want the lifted ordinary row above the marked rows", got)
+ 	}
+ 	m.list.Resize(m.list.Len() + 2)
+ 	body := m.list.VisibleRows()
+ 	if got := ui.StripANSI(body[0]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
+-		t.Fatalf("the pane pin is not at the head of the list: %q", got)
++		t.Fatalf("the Work lift is not at the head of the list: %q", got)
+ 	}
+-	pinned := -1
++	lifted := -1
+ 	for i, line := range body {
+ 		if strings.Contains(ui.StripANSI(line), "set-a") {
+-			pinned = i
++			lifted = i
+ 		}
+ 	}
+-	if pinned < 0 {
+-		t.Fatalf("the unmarked pinned row is not on screen:\n%s", strings.Join(body, "\n"))
++	if lifted < 0 {
++		t.Fatalf("the unmarked lifted row is not on screen:\n%s", strings.Join(body, "\n"))
+ 	}
+-	if got := ui.StripANSI(body[pinned]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
+-		t.Fatalf("the pin at the head is not marked: %q", got)
++	if got := ui.StripANSI(body[lifted]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
++		t.Fatalf("the lift at the head is not marked: %q", got)
+ 	}
+ }
+ 
+-// A mark outranks the query and a pin does not: the marked row stays on screen
+-// through a search that excludes it, the pinned row does not, and neither is on
++// A mark outranks the query and a lift does not: the marked row stays on screen
++// through a search that excludes it, the lifted row does not, and neither is on
+ // the list twice.
+-func TestWorkSelectionOutranksTheSearchAndThePinDoesNot(t *testing.T) {
++func TestWorkSelectionOutranksTheSearchAndTheLiftDoesNot(t *testing.T) {
+ 	rows := selRows("set-a", "set-b", "other-c")
+-	rows[0].Pinned = true
++	rows[0].Lifted = true
+ 	m := selDashboard(rows)
+ 
+ 	m = markRow(t, m, "set-b")
+@@ -346,7 +346,7 @@ func TestWorkSelectionOutranksTheSearchAndThePinDoesNot(t *testing.T) {
+ 	m = selPress(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+ 
+ 	if got := selIDs(m); !slices.Equal(got, []string{"other-c", "set-b"}) {
+-		t.Fatalf("rows = %v, want the marked row kept and the pinned row filtered away", got)
++		t.Fatalf("rows = %v, want the marked row kept and the lifted row filtered away", got)
+ 	}
+ 	if got := m.list.RegionCount(); got != 1 {
+ 		t.Fatalf("region holds %d rows under a search, want the marked one", got)
+diff --git a/dashboard/pane_bound_checkout_test.go b/dashboard/pane_bound_checkout_test.go
+index bc8eb8cb..89931835 100644
+--- a/dashboard/pane_bound_checkout_test.go
++++ b/dashboard/pane_bound_checkout_test.go
+@@ -19,7 +19,7 @@ import (
+ // to. Every test here drives the whole path — a fake tmux pane with a real
+ // directory, real bindings and a real store, through BuildSeededPageSnapshot into a
+ // model — because the rung is only worth anything if the directory, the ranking and
+-// the pinned block agree about which sets they are naming.
++// the lifted block agree about which sets they are naming.
+ 
+ // boundCheckoutFixture is the shared shape: three registered sets, one real
+ // checkout, and the caller sitting in an untagged shell inside it. Which sets are
+@@ -32,7 +32,7 @@ func boundCheckoutFixture(t *testing.T, bind ...int) (*drain.Deps, *config.Confi
+ 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
+ 	stems := registerDoneSets(t, repo, 3)
+ 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
+-	d.ViewPreset.Pin = true
++	d.ViewPreset.Lift = true
+ 	checkout := bindStemsToOneCheckout(t, d, repo, stems, bind...)
+ 	inPane(rt.Fake, "editor", "%7")
+ 	if rt.Fake.PaneCwd == nil {
+@@ -64,10 +64,10 @@ func bindStemsToOneCheckout(t *testing.T, d *drain.Deps, repo string, stems []st
+ }
+ 
+ // A bare shell in a checkout bound to exactly one set: the rung fires, and that set
+-// alone is pinned. The shell stands in a subdirectory, which is where an editor
++// alone is lifted. The shell stands in a subdirectory, which is where an editor
+ // shell usually is — the directory resolves to the checkout containing it, not only
+ // to the checkout root itself.
+-func TestBareShellInACheckoutBoundToOneSetPinsIt(t *testing.T) {
++func TestBareShellInACheckoutBoundToOneSetLiftsIt(t *testing.T) {
+ 	d, cfg, stems, checkout := boundCheckoutFixture(t, 1)
+ 	sub := filepath.Join(checkout, "internal", "deep")
+ 	if err := os.MkdirAll(sub, 0o755); err != nil {
+@@ -77,8 +77,8 @@ func TestBareShellInACheckoutBoundToOneSetPinsIt(t *testing.T) {
+ 
+ 	m := openFromPane(t, d, cfg)
+ 
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
+-		t.Fatalf("pinned %v, want the one set bound to the checkout the shell is in (%q)", got, stems[1])
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
++		t.Fatalf("lifted %v, want the one set bound to the checkout the shell is in (%q)", got, stems[1])
+ 	}
+ 	if m.flash.Text() != "" {
+ 		t.Fatalf("status = %q, want silence when only one set was a candidate", m.flash.Text())
+@@ -97,20 +97,20 @@ func TestLiveDrainAtThePaneDirectoryBeatsTheBindingFallback(t *testing.T) {
+ 
+ 	m := openFromPane(t, d, cfg)
+ 
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
+-		t.Fatalf("pinned %v, want only the set the live drain is running (%q)", got, stems[1])
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
++		t.Fatalf("lifted %v, want only the set the live drain is running (%q)", got, stems[1])
+ 	}
+ 	if m.flash.Text() != "" {
+ 		t.Fatalf("status = %q, want silence: a live drain names its set outright", m.flash.Text())
+ 	}
+ }
+ 
+-// With several sets bound to one checkout, every one of them pins: the shell really
++// With several sets bound to one checkout, every one of them lifts: the shell really
+ // is standing in all of their work. The claim only decides who leads, and nothing is
+ // said about it — a choice nobody made needs no confessing (ADR-0209 decision 2).
+-func TestEveryBoundSetPinsWithTheClaimHolderLeading(t *testing.T) {
++func TestEveryBoundSetLiftsWithTheClaimHolderLeading(t *testing.T) {
+ 	d, cfg, stems, checkout := boundCheckoutFixture(t, 0, 1, 2)
+-	baseline := unpinnedOrder(t, d, cfg)
++	baseline := unliftedOrder(t, d, cfg)
+ 	registerClaimHeldBy(t, d, stems[0], checkout)
+ 
+ 	m := openFromPane(t, d, cfg)
+@@ -119,22 +119,22 @@ func TestEveryBoundSetPinsWithTheClaimHolderLeading(t *testing.T) {
+ 	if len(got) != 3 || got[0] != stems[0] {
+ 		t.Fatalf("attributed %v, want all three bound sets with the claim holder %q leading", got, stems[0])
+ 	}
+-	if pinned := pinnedBlock(t, m); !slices.Equal(pinned, got) {
+-		t.Fatalf("pinned %v, want every attributed set in attribution order %v", pinned, got)
++	if lifted := liftedBlock(t, m); !slices.Equal(lifted, got) {
++		t.Fatalf("lifted %v, want every attributed set in attribution order %v", lifted, got)
+ 	}
+-	if rows := rowIDs(m); !slices.Equal(rows, wantPinnedFirst(baseline, got...)) {
+-		t.Fatalf("rows = %v, want %v — each pinned set once, the rest as they were", rows, wantPinnedFirst(baseline, got...))
++	if rows := rowIDs(m); !slices.Equal(rows, wantLiftedFirst(baseline, got...)) {
++		t.Fatalf("rows = %v, want %v — each lifted set once, the rest as they were", rows, wantLiftedFirst(baseline, got...))
+ 	}
+ 	if m.flash.Text() != "" {
+ 		t.Fatalf("status = %q, want silence: nothing was chosen", m.flash.Text())
+ 	}
+ }
+ 
+-// With no claim, the set drained most recently leads the pinned block, and the sets
++// With no claim, the set drained most recently leads the lifted block, and the sets
+ // that never drained follow in the order the active sort already puts them in. Every
+ // rung of the sub-ladder now orders candidates instead of picking one, so all three
+-// pin either way.
+-func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
++// lift either way.
++func TestLiftedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
+ 	t.Run("most recently drained leads", func(t *testing.T) {
+ 		d, cfg, stems, checkout := boundCheckoutFixture(t, 0, 1, 2)
+ 		recordFinishedDrain(t, d, checkout, stems[0])
+@@ -143,8 +143,8 @@ func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
+ 		m := openFromPane(t, d, cfg)
+ 
+ 		want := []string{stems[1], stems[0], stems[2]}
+-		if got := pinnedBlock(t, m); !slices.Equal(got, want) {
+-			t.Fatalf("pinned %v, want %v — recency first, the never-drained set last", got, want)
++		if got := liftedBlock(t, m); !slices.Equal(got, want) {
++			t.Fatalf("lifted %v, want %v — recency first, the never-drained set last", got, want)
+ 		}
+ 		if m.flash.Text() != "" {
+ 			t.Fatalf("status = %q, want silence", m.flash.Text())
+@@ -154,10 +154,10 @@ func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
+ 	t.Run("the current sort orders the rest", func(t *testing.T) {
+ 		d, cfg, stems, _ := boundCheckoutFixture(t, 0, 1, 2)
+ 		// The order the page has with no pane behind it, which is the order the
+-		// candidates keep inside the block: the pin lifts rows, it does not re-sort
++		// candidates keep inside the block: the lift moves rows, it does not re-sort
+ 		// them.
+ 		var want []string
+-		for _, id := range unpinnedOrder(t, d, cfg) {
++		for _, id := range unliftedOrder(t, d, cfg) {
+ 			if slices.Contains(stems, id) {
+ 				want = append(want, id)
+ 			}
+@@ -165,8 +165,8 @@ func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
+ 
+ 		m := openFromPane(t, d, cfg)
+ 
+-		if got := pinnedBlock(t, m); !slices.Equal(got, want) {
+-			t.Fatalf("pinned %v, want the rows in their current sort order %v", got, want)
++		if got := liftedBlock(t, m); !slices.Equal(got, want) {
++			t.Fatalf("lifted %v, want the rows in their current sort order %v", got, want)
+ 		}
+ 		if m.flash.Text() != "" {
+ 			t.Fatalf("status = %q, want silence", m.flash.Text())
+@@ -187,18 +187,22 @@ func attributedSets(t *testing.T, m QueueDashboard) []string {
+ 	return ids
+ }
+ 
+-// A shell somewhere no work is bound is the common case, and it is silent: a
++// A shell somewhere no work lives is the common case, and it is silent: a
+ // "nothing found" line on every launch trains the human to ignore the status line.
++// The shell stands outside every repository, because any checkout of the fixture's
++// repository is where its sets live (ADR-0241).
+ func TestShellInADirectoryWithNoBoundWorkIsSilent(t *testing.T) {
+-	d, cfg, _, checkout := boundCheckoutFixture(t)
++	d, cfg, _, _ := boundCheckoutFixture(t)
++	elsewhere := t.TempDir()
++	d.Tmux.(*queuetest.RecordingTmux).Fake.PaneCwd["%7"] = elsewhere
+ 
+ 	m := openFromPane(t, d, cfg)
+ 
+ 	if m.snap.Attribution != nil {
+-		t.Fatalf("attribution = %+v from %s, want none", *m.snap.Attribution, checkout)
++		t.Fatalf("attribution = %+v from %s, want none", *m.snap.Attribution, elsewhere)
+ 	}
+-	if got := pinnedBlock(t, m); len(got) != 0 {
+-		t.Fatalf("pinned %v, want nothing", got)
++	if got := liftedBlock(t, m); len(got) != 0 {
++		t.Fatalf("lifted %v, want nothing", got)
+ 	}
+ 	if m.flash.Text() != "" {
+ 		t.Fatalf("status = %q, want silence", m.flash.Text())
+diff --git a/dashboard/pane_repository_test.go b/dashboard/pane_repository_test.go
+new file mode 100644
+index 00000000..9b535d19
+--- /dev/null
++++ b/dashboard/pane_repository_test.go
+@@ -0,0 +1,183 @@
++package dashboard
++
++import (
++	"path/filepath"
++	"slices"
++	"testing"
++
++	"github.com/glebglazov/pop/config"
++	"github.com/glebglazov/pop/internal/queuetest"
++	tmuxmod "github.com/glebglazov/pop/internal/tmux"
++	"github.com/glebglazov/pop/tasks/binding"
++	"github.com/glebglazov/pop/tasks/drain"
++)
++
++// The ladder's repository pass (ADR-0241): a shell standing anywhere in a
++// repository lifts that repository's Task sets once no checkout rung answered.
++// Every test drives the whole path — a fake pane with a real directory, a real
++// git common directory resolved at launch, real bindings — because the pass is
++// only right if the launch and the kind agree about which repository is which.
++
++// siblingWorktreeFixture is the reported case: four registered sets in one
++// repository, one of them bound to its trunk, and the caller in an untagged shell
++// in a sibling feature worktree no set is bound to.
++func siblingWorktreeFixture(t *testing.T) (d *drain.Deps, cfg *config.Config, rt *queuetest.RecordingTmux, bound string, sibling string) {
++	t.Helper()
++	repo, setID, _ := queuetest.SetupSpawnRepo(t, "2026-01-01-done-1", []queuetest.SpawnTask{
++		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
++	})
++	d, cfg, _, rt = dashboardLaunchFixture(t, repo, setID)
++	stems := registerDoneSets(t, repo, 3)
++	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
++	d.ViewPreset.Lift = true
++	repoKey, err := drain.ResolveRepoKey(d, repo)
++	if err != nil {
++		t.Fatal(err)
++	}
++	bound = stems[1]
++	if err := binding.Put(d.Tasks, drain.SetScopedKey(repoKey, bound), binding.Binding{RuntimePath: repo}); err != nil {
++		t.Fatal(err)
++	}
++	sibling = filepath.Join(t.TempDir(), "feature-wt")
++	runGit(t, repo, "worktree", "add", "-b", "feature", sibling)
++	inPane(rt.Fake, "editor", "%7")
++	rt.Fake.PaneCwd = map[string]string{"%7": sibling}
++	return d, cfg, rt, bound, sibling
++}
++
++// A shell in a sibling worktree lifts every set in the repository, the bound one
++// and the ones bound nowhere alike, in the order the sort already gives them.
++func TestAShellInASiblingWorktreeLiftsTheRepositorysSets(t *testing.T) {
++	d, cfg, _, bound, _ := siblingWorktreeFixture(t)
++	baseline := unliftedOrder(t, d, cfg)
++
++	m := openFromPane(t, d, cfg)
++
++	got := liftedBlock(t, m)
++	if !slices.Contains(got, bound) {
++		t.Fatalf("lifted %v, want the set bound to the trunk %q among them", got, bound)
++	}
++	if !slices.Equal(got, baseline) {
++		t.Fatalf("lifted %v, want every set in the repository, bound or not, in sorted order %v", got, baseline)
++	}
++	if m.flash.Text() != "" {
++		t.Fatalf("status = %q, want silence: the lift says it", m.flash.Text())
++	}
++}
++
++// A shell in a checkout a set is bound to keeps today's answer: the bound set
++// alone, not the repository's other sets, though the pane's repository is known.
++func TestABoundCheckoutOutranksTheRepositoryPass(t *testing.T) {
++	d, cfg, stems, _ := boundCheckoutFixture(t, 1)
++	baseline := unliftedOrder(t, d, cfg)
++
++	if facts := LaunchPaneFacts(d.Tmux, d.Tasks); facts.RepoCommonDir == "" {
++		t.Fatal("the launch resolved no repository for a pane inside one — the test would pass for the wrong reason")
++	}
++	m := openFromPane(t, d, cfg)
++
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
++		t.Fatalf("lifted %v, want only the set bound to the pane's checkout %q", got, stems[1])
++	}
++	if got, want := rowIDs(m), wantLiftedFirst(baseline, stems[1]); !slices.Equal(got, want) {
++		t.Fatalf("rows = %v, want %v", got, want)
++	}
++}
++
++// A pane pop opened for a set is that set's, whatever else lives in the
++// repository it stands in.
++func TestATaggedPaneInTheRepositoryKeepsTheTagAnswer(t *testing.T) {
++	d, cfg, rt, _, _ := siblingWorktreeFixture(t)
++	baseline := unliftedOrder(t, d, cfg)
++	stem := baseline[len(baseline)-1]
++	tagPane(rt.Fake, "%7", tmuxmod.TagSet, stem)
++
++	m := openFromPane(t, d, cfg)
++
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stem}) {
++		t.Fatalf("lifted %v, want the tagged set %q alone", got, stem)
++	}
++}
++
++// Outside any repository, and in a repository pop holds no work for, the pass is
++// silent: nothing lifts and nothing is said.
++func TestAPaneWithNoWorkInItsRepositoryLiftsNothing(t *testing.T) {
++	unknown := t.TempDir()
++	queuetest.InitGitRepo(t, unknown)
++	for name, dir := range map[string]string{
++		"outside any repository": t.TempDir(),
++		"in an unknown one":      unknown,
++	} {
++		t.Run(name, func(t *testing.T) {
++			d, cfg, rt, _, _ := siblingWorktreeFixture(t)
++			rt.Fake.PaneCwd["%7"] = dir
++
++			m := openFromPane(t, d, cfg)
++
++			if got := liftedBlock(t, m); len(got) != 0 {
++				t.Fatalf("lifted %v, want nothing", got)
++			}
++			if m.flash.Text() != "" {
++				t.Fatalf("status = %q, want silence", m.flash.Text())
++			}
++		})
++	}
++}
++
++// The pane's repository is one fork at launch. Rebuilds carry it and ask git
++// nothing more about it, however long the dashboard stays open.
++func TestRebuildsResolveThePanesRepositoryNoSecondTime(t *testing.T) {
++	d, cfg, _, bound, _ := siblingWorktreeFixture(t)
++	counter := &countingGit{inner: d.Tasks.Git}
++	td := *d.Tasks
++	td.Git = counter
++	d.Tasks = &td
++	pd := *d.Project
++	pd.Git = counter
++	d.Project = &pd
++	resolves := func() int {
++		n := 0
++		for _, call := range counter.forks() {
++			if call == "rev-parse --git-common-dir" {
++				n++
++			}
++		}
++		return n
++	}
++
++	m := openFromPane(t, d, cfg)
++	atLaunch := resolves()
++	if atLaunch != 1 {
++		t.Fatalf("resolved the pane's repository %d times at launch, want one fork", atLaunch)
++	}
++	for range 5 {
++		m = rebuild(t, m)
++	}
++
++	if got := resolves(); got != atLaunch {
++		t.Fatalf("resolved a repository %d times after five polls, want the launch's %d", got, atLaunch)
++	}
++	if got := liftedBlock(t, m); !slices.Contains(got, bound) {
++		t.Fatalf("lifted %v, want %q — the carried fact still attributes", got, bound)
++	}
++}
++
++// The preset stays absolute under the repository pass: a hidden set is not lifted
++// and the view is not widened to show it.
++func TestTheRepositoryPassLiftsNoRowThePresetHides(t *testing.T) {
++	d, cfg, _, _, _ := siblingWorktreeFixture(t)
++	d.ViewPreset = config.WorkViewPreset{
++		Name: "_hide-done",
++		Lift: true,
++		Hide: &config.WorkViewPresetFilter{Status: []string{"done"}},
++	}
++
++	m := openFromPane(t, d, cfg)
++
++	if len(m.snap.Containers) != 0 {
++		t.Fatalf("rows = %v, want none — the lift must not widen the preset", rowIDs(m))
++	}
++	if m.flash.Text() != "" {
++		t.Fatalf("status = %q, want silence about a row nobody can see", m.flash.Text())
++	}
++}
+diff --git a/dashboard/panefacts.go b/dashboard/panefacts.go
+index a801284e..3ea0bdd5 100644
+--- a/dashboard/panefacts.go
++++ b/dashboard/panefacts.go
+@@ -3,20 +3,26 @@ package dashboard
+ import (
+ 	"github.com/glebglazov/pop/debug"
+ 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
++	"github.com/glebglazov/pop/tasks"
+ 	"github.com/glebglazov/pop/work"
+ )
+ 
+ // The launch half of Pane work attribution (ADR-0201): the pane facts are read
+-// once, here, and handed to every snapshot build that pins rows from them —
++// once, here, and handed to every snapshot build that lifts rows from them —
+ // either page's, at entry and on every rebuild. Nothing downstream reads tmux
+ // again; the ladder that consumes them runs kind-side, where there is no tmux to
+ // reach.
+ 
+ // LaunchPaneFacts reads the pane the dashboard is being opened from. Outside
+ // tmux, with no tmux wired, or when the read fails it answers zero facts: a
+-// dashboard that cannot tell which pane it is in pins nothing and says nothing,
++// dashboard that cannot tell which pane it is in lifts nothing and says nothing,
+ // which is the same silence an unrelated shell gets.
+-func LaunchPaneFacts(t tmuxmod.Tmux) work.PaneFacts {
++//
++// The pane's repository is resolved here too, with td's git: one fork, once per
++// session, because the directory it is asked about is never read again and a
++// snapshot build must not fork for an answer that cannot change (ADR-0241
++// decision 5).
++func LaunchPaneFacts(t tmuxmod.Tmux, td *tasks.Deps) work.PaneFacts {
+ 	if t == nil {
+ 		return work.PaneFacts{}
+ 	}
+@@ -26,16 +32,32 @@ func LaunchPaneFacts(t tmuxmod.Tmux) work.PaneFacts {
+ 		return work.PaneFacts{}
+ 	}
+ 	return work.PaneFacts{
+-		PaneID:    facts.PaneID,
+-		Session:   facts.Session,
+-		Directory: facts.Directory,
+-		Set:       facts.Tag(tmuxmod.TagSet),
+-		Verify:    facts.Tag(tmuxmod.TagVerify),
+-		Fold:      facts.Tag(tmuxmod.TagFold),
+-		Assist:    facts.Tag(tmuxmod.TagAssist),
+-		Ticket:    facts.Tag(tmuxmod.TagTicket),
+-		Routine:   facts.Tag(tmuxmod.TagRoutine),
+-		WorkKind:  facts.WorkKind,
+-		WorkID:    facts.WorkID,
++		PaneID:        facts.PaneID,
++		Session:       facts.Session,
++		Directory:     facts.Directory,
++		Set:           facts.Tag(tmuxmod.TagSet),
++		Verify:        facts.Tag(tmuxmod.TagVerify),
++		Fold:          facts.Tag(tmuxmod.TagFold),
++		Assist:        facts.Tag(tmuxmod.TagAssist),
++		Ticket:        facts.Tag(tmuxmod.TagTicket),
++		Routine:       facts.Tag(tmuxmod.TagRoutine),
++		WorkKind:      facts.WorkKind,
++		WorkID:        facts.WorkID,
++		RepoCommonDir: paneRepoCommonDir(td, facts.Directory),
+ 	}
+ }
++
++// paneRepoCommonDir is the canonical common directory of the repository dir is
++// in — the identity Task storage is keyed under, so a sibling worktree resolves
++// to the same answer as the trunk. Outside a repository, or with no directory to
++// ask about, it is empty and the repository pass stays silent.
++func paneRepoCommonDir(td *tasks.Deps, dir string) string {
++	if td == nil || td.Git == nil || dir == "" {
++		return ""
++	}
++	id, err := tasks.ResolveRepositoryIdentity(td, dir)
++	if err != nil {
++		return ""
++	}
++	return id.CommonDir
++}
+diff --git a/dashboard/status_render.go b/dashboard/status_render.go
+index 18a323e4..ea0fdf26 100644
+--- a/dashboard/status_render.go
++++ b/dashboard/status_render.go
+@@ -65,7 +65,7 @@ func RenderStatus(out io.Writer, snap drain.StatusSnapshot, tables StatusTables)
+ // Both `pop work status` and the daemon's run baseline build through here, so the
+ // baseline is that same render rather than an inventory of its own.
+ func BuildStatusTables(d *drain.Deps, cfg *config.Config) (StatusTables, error) {
+-	// Empty pane facts, so nothing is attributed and nothing pins whatever the
++	// Empty pane facts, so nothing is attributed and nothing lifts whatever the
+ 	// preset declares: `pop work status` is a printed list, not a page someone is
+ 	// standing in.
+ 	opts := work.BuildOptions{Ordering: d.WorkOrdering()}
+diff --git a/dashboard/pane_pin_rebuild_test.go b/dashboard/work_lift_rebuild_test.go
+similarity index 67%
+rename from dashboard/pane_pin_rebuild_test.go
+rename to dashboard/work_lift_rebuild_test.go
+index b748630d..d65ed3d3 100644
+--- a/dashboard/pane_pin_rebuild_test.go
++++ b/dashboard/work_lift_rebuild_test.go
+@@ -11,7 +11,7 @@ import (
+ 	"github.com/glebglazov/pop/tasks/drain"
+ )
+ 
+-// A pin is current, not historical (ADR-0209 decision 5): every poll asks the
++// A lift is current, not historical (ADR-0209 decision 5): every poll asks the
+ // kinds again, so the block follows what the pane belongs to *now*. Each test
+ // here drives a real launch and then a real poll — the model's own reload command
+ // and the message it returns — because the whole claim is about the second build,
+@@ -31,16 +31,18 @@ func bindStemTo(t *testing.T, d *drain.Deps, repo, stem, checkout string) {
+ 	}
+ }
+ 
+-// A drain starting in the checkout the pane sits in pins that set on the very next
+-// poll, with no relaunch — and when the drain ends, the pin goes with it and the
+-// row falls back to wherever the sort puts it.
+-func TestADrainGoingLiveInThePanesCheckoutPinsAndUnpinsAcrossRebuilds(t *testing.T) {
++// A drain starting in the checkout the pane sits in lifts that set alone on the very
++// next poll, with no relaunch — and when the drain ends, that lift goes with it and
++// the block falls back to the repository's answer. The pane stands in a worktree of
++// the sets' repository, so before and after the drain every set is lifted in its
++// sorted order (ADR-0241).
++func TestADrainGoingLiveInThePanesCheckoutLiftsAndDropsAcrossRebuilds(t *testing.T) {
+ 	d, cfg, stems, checkout := boundCheckoutFixture(t)
+-	baseline := unpinnedOrder(t, d, cfg)
++	baseline := unliftedOrder(t, d, cfg)
+ 
+ 	m := openFromPane(t, d, cfg)
+-	if got := pinnedBlock(t, m); len(got) != 0 {
+-		t.Fatalf("pinned %v at launch, want nothing: no work is bound or running here yet", got)
++	if got := liftedBlock(t, m); !slices.Equal(got, baseline) {
++		t.Fatalf("lifted %v at launch, want the whole repository %v: no work is bound or running here yet", got, baseline)
+ 	}
+ 
+ 	drained := stems[len(stems)-1]
+@@ -49,52 +51,52 @@ func TestADrainGoingLiveInThePanesCheckoutPinsAndUnpinsAcrossRebuilds(t *testing
+ 	}
+ 
+ 	m = rebuild(t, m)
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{drained}) {
+-		t.Fatalf("pinned %v after the drain went live, want %q — the pin appears the moment its cause does", got, drained)
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{drained}) {
++		t.Fatalf("lifted %v after the drain went live, want %q — the lift appears the moment its cause does", got, drained)
+ 	}
+-	if got, want := rowIDs(m), wantPinnedFirst(baseline, drained); !slices.Equal(got, want) {
++	if got, want := rowIDs(m), wantLiftedFirst(baseline, drained); !slices.Equal(got, want) {
+ 		t.Fatalf("rows = %v, want %v", got, want)
+ 	}
+ 	if m.flash.Text() != "" {
+-		t.Fatalf("status = %q, want silence: the pin says it", m.flash.Text())
++		t.Fatalf("status = %q, want silence: the lift says it", m.flash.Text())
+ 	}
+ 
+ 	d.LiveDrains = func() ([]tasks.RunningDrain, error) { return nil, nil }
+ 
+ 	m = rebuild(t, m)
+-	if got := pinnedBlock(t, m); len(got) != 0 {
+-		t.Fatalf("pinned %v after the drain ended, want nothing: a pin that loses its cause un-pins", got)
++	if got := liftedBlock(t, m); !slices.Equal(got, baseline) {
++		t.Fatalf("lifted %v after the drain ended, want the repository again %v: a lift that loses its cause is gone", got, baseline)
+ 	}
+ 	if got := rowIDs(m); !slices.Equal(got, baseline) {
+-		t.Fatalf("rows = %v, want the sorted order the page has with no pin, %v", got, baseline)
++		t.Fatalf("rows = %v, want the sorted order, %v", got, baseline)
+ 	}
+ }
+ 
+ // Binding a second set to the pane's checkout joins it to the block on the next
+ // poll: the block is the answer to a question re-asked, not a list fixed at launch.
+-func TestASetBoundMidSessionJoinsThePinnedBlock(t *testing.T) {
++func TestASetBoundMidSessionJoinsTheLiftedBlock(t *testing.T) {
+ 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "2026-01-01-done-1", []queuetest.SpawnTask{
+ 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+ 	})
+ 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
+ 	stems := registerDoneSets(t, repo, 3)
+ 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
+-	d.ViewPreset.Pin = true
++	d.ViewPreset.Lift = true
+ 	checkout := bindStemsToOneCheckout(t, d, repo, stems, 1)
+ 	inPane(rt.Fake, "editor", "%7")
+ 	rt.Fake.PaneCwd = map[string]string{"%7": checkout}
+ 
+ 	m := openFromPane(t, d, cfg)
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
+-		t.Fatalf("pinned %v at launch, want the one bound set %q", got, stems[1])
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
++		t.Fatalf("lifted %v at launch, want the one bound set %q", got, stems[1])
+ 	}
+ 
+ 	bindStemTo(t, d, repo, stems[2], checkout)
+ 
+ 	m = rebuild(t, m)
+-	got := pinnedBlock(t, m)
++	got := liftedBlock(t, m)
+ 	if len(got) != 2 || !slices.Contains(got, stems[1]) || !slices.Contains(got, stems[2]) {
+-		t.Fatalf("pinned %v, want both sets now bound to the checkout (%q, %q)", got, stems[1], stems[2])
++		t.Fatalf("lifted %v, want both sets now bound to the checkout (%q, %q)", got, stems[1], stems[2])
+ 	}
+ 	if m.flash.Text() != "" {
+ 		t.Fatalf("status = %q, want silence", m.flash.Text())
+@@ -122,22 +124,22 @@ func TestRebuildsReadThePaneNoSecondTime(t *testing.T) {
+ 	if fake.CurrentPaneFactsCalls != launchReads {
+ 		t.Fatalf("read the pane %d times over two polls, want the launch's %d", fake.CurrentPaneFactsCalls, launchReads)
+ 	}
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[2]}) {
+-		t.Fatalf("pinned %v, want the drained set %q — the carried facts still attribute", got, stems[2])
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[2]}) {
++		t.Fatalf("lifted %v, want the drained set %q — the carried facts still attribute", got, stems[2])
+ 	}
+ }
+ 
+ // Rows rearrange under a human who is reading; their selection does not move. The
+ // block grows beneath the cursor and the same row stays selected.
+-func TestTheCursorIsUntouchedWhenThePinnedBlockChangesBeneathIt(t *testing.T) {
++func TestTheCursorIsUntouchedWhenTheLiftedBlockChangesBeneathIt(t *testing.T) {
+ 	d, cfg, stems, checkout := boundCheckoutFixture(t, 1)
+ 
+ 	m := openFromPane(t, d, cfg)
+-	// Somewhere other than the pinned row, so a block that grows above the cursor
++	// Somewhere other than the lifted row, so a block that grows above the cursor
+ 	// really does change the index it sits at.
+ 	var moved string
+ 	for _, row := range m.snap.Containers {
+-		if !row.Pinned {
++		if !row.Lifted {
+ 			moved = row.ID
+ 			break
+ 		}
+@@ -152,8 +154,8 @@ func TestTheCursorIsUntouchedWhenThePinnedBlockChangesBeneathIt(t *testing.T) {
+ 	}
+ 	m = rebuild(t, m)
+ 
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[0]}) {
+-		t.Fatalf("pinned %v, want the newly drained set %q — the fixture must actually move rows", got, stems[0])
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[0]}) {
++		t.Fatalf("lifted %v, want the newly drained set %q — the fixture must actually move rows", got, stems[0])
+ 	}
+ 	if got := cursorRow(t, m); got != moved {
+ 		t.Fatalf("cursor on %q after the block changed, want the row the human left it on (%q)", got, moved)
+@@ -164,13 +166,13 @@ func TestTheCursorIsUntouchedWhenThePinnedBlockChangesBeneathIt(t *testing.T) {
+ }
+ 
+ // Decision 7 holds on a rebuild as much as on a launch: switching to a preset that
+-// hides the pinned row un-pins it, silently, and never widens the view to keep it.
+-func TestSwitchingToAPresetThatHidesAPinnedRowUnpinsItSilently(t *testing.T) {
++// hides the lifted row drops it from the block, silently, and never widens the view to keep it.
++func TestSwitchingToAPresetThatHidesALiftedRowDropsItSilently(t *testing.T) {
+ 	d, cfg, stems, _ := boundCheckoutFixture(t, 1)
+ 
+ 	m := openFromPane(t, d, cfg)
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
+-		t.Fatalf("pinned %v at launch, want %q", got, stems[1])
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
++		t.Fatalf("lifted %v at launch, want %q", got, stems[1])
+ 	}
+ 
+ 	// What the filter menu does when the operator picks a preset: install it on the
+@@ -178,13 +180,13 @@ func TestSwitchingToAPresetThatHidesAPinnedRowUnpinsItSilently(t *testing.T) {
+ 	d.ViewPreset = config.WorkViewPreset{
+ 		Name:  "_hide-done",
+ 		Label: "in flight",
+-		Pin:   true,
++		Lift:   true,
+ 		Hide:  &config.WorkViewPresetFilter{Status: []string{"done"}},
+ 	}
+ 	m = rebuild(t, m)
+ 
+ 	if len(m.snap.Containers) != 0 {
+-		t.Fatalf("rows = %v, want none — the pin must not widen the preset the operator chose", rowIDs(m))
++		t.Fatalf("rows = %v, want none — the lift must not widen the preset the operator chose", rowIDs(m))
+ 	}
+ 	if m.flash.Text() != "" {
+ 		t.Fatalf("status = %q, want silence about a row nobody can see", m.flash.Text())
+diff --git a/dashboard/pane_pin_test.go b/dashboard/work_lift_test.go
+similarity index 72%
+rename from dashboard/pane_pin_test.go
+rename to dashboard/work_lift_test.go
+index 565f6aab..635cb607 100644
+--- a/dashboard/pane_pin_test.go
++++ b/dashboard/work_lift_test.go
+@@ -25,7 +25,7 @@ import (
+ // page A through it, and construct the model that would take the first paint.
+ func openFromPane(t *testing.T, d *drain.Deps, cfg *config.Config) QueueDashboard {
+ 	t.Helper()
+-	snap, err := BuildPageSnapshot(d, cfg, PageWork, LaunchPaneFacts(d.Tmux))
++	snap, err := BuildPageSnapshot(d, cfg, PageWork, LaunchPaneFacts(d.Tmux, d.Tasks))
+ 	if err != nil {
+ 		t.Fatalf("BuildPageSnapshot: %v", err)
+ 	}
+@@ -65,19 +65,19 @@ func tagPane(f *tmuxtest.Fake, paneID string, tag tmuxmod.PaneTag, value string)
+ 	f.PaneTagValues[paneID][tag] = value
+ }
+ 
+-// pinnedBlock is the ids of the marked rows at the head of the list, and it
++// liftedBlock is the ids of the marked rows at the head of the list, and it
+ // insists the block really is a block: a marked row further down would mean the
+-// pin reordered nothing, and a row marked twice would mean it was copied rather
++// lift reordered nothing, and a row marked twice would mean it was copied rather
+ // than moved.
+-func pinnedBlock(t *testing.T, m QueueDashboard) []string {
++func liftedBlock(t *testing.T, m QueueDashboard) []string {
+ 	t.Helper()
+ 	var ids []string
+ 	for i, row := range m.snap.Containers {
+-		if !row.Pinned {
++		if !row.Lifted {
+ 			continue
+ 		}
+ 		if i != len(ids) {
+-			t.Fatalf("row %d (%s) is marked but sits below %d unmarked rows — the pinned rows are not a block at the top", i, row.ID, i-len(ids))
++			t.Fatalf("row %d (%s) is marked but sits below %d unmarked rows — the lifted rows are not a block at the top", i, row.ID, i-len(ids))
+ 		}
+ 		ids = append(ids, row.ID)
+ 	}
+@@ -93,9 +93,9 @@ func rowIDs(m QueueDashboard) []string {
+ 	return ids
+ }
+ 
+-// unpinnedOrder is the order this page has with no pane behind it: the baseline
+-// every pinning launch must leave untouched beneath its block.
+-func unpinnedOrder(t *testing.T, d *drain.Deps, cfg *config.Config) []string {
++// unliftedOrder is the order this page has with no pane behind it: the baseline
++// every lifting launch must leave untouched beneath its block.
++func unliftedOrder(t *testing.T, d *drain.Deps, cfg *config.Config) []string {
+ 	t.Helper()
+ 	snap, err := BuildPageSnapshot(d, cfg, PageWork, work.PaneFacts{})
+ 	if err != nil {
+@@ -103,21 +103,21 @@ func unpinnedOrder(t *testing.T, d *drain.Deps, cfg *config.Config) []string {
+ 	}
+ 	var ids []string
+ 	for _, row := range snap.Containers {
+-		if row.Pinned {
+-			t.Fatalf("a build with no pane behind it pinned %s", row.ID)
++		if row.Lifted {
++			t.Fatalf("a build with no pane behind it lifted %s", row.ID)
+ 		}
+ 		ids = append(ids, row.ID)
+ 	}
+ 	return ids
+ }
+ 
+-// wantPinnedFirst is the whole list a launch should render: the pinned ids in
+-// attribution order, then the baseline with those ids removed — pinned rows are
++// wantLiftedFirst is the whole list a launch should render: the lifted ids in
++// attribution order, then the baseline with those ids removed — lifted rows are
+ // moved, not copied, and nothing else shifts.
+-func wantPinnedFirst(baseline []string, pinned ...string) []string {
+-	want := append([]string{}, pinned...)
++func wantLiftedFirst(baseline []string, lifted ...string) []string {
++	want := append([]string{}, lifted...)
+ 	for _, id := range baseline {
+-		if !slices.Contains(pinned, id) {
++		if !slices.Contains(lifted, id) {
+ 			want = append(want, id)
+ 		}
+ 	}
+@@ -126,7 +126,7 @@ func wantPinnedFirst(baseline []string, pinned ...string) []string {
+ 
+ // taskSetPaneFixture is a machine with three registered sets, all visible, and a
+ // fake tmux the caller places itself in. Three rows is the point: with one row a
+-// pinned row is indistinguishable from no pinning at all.
++// lifted row is indistinguishable from no lifting at all.
+ func taskSetPaneFixture(t *testing.T) (*drain.Deps, *config.Config, *queuetest.RecordingTmux, []string) {
+ 	t.Helper()
+ 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "2026-01-01-done-1", []queuetest.SpawnTask{
+@@ -134,11 +134,11 @@ func taskSetPaneFixture(t *testing.T) (*drain.Deps, *config.Config, *queuetest.R
+ 	})
+ 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
+ 	stems := registerDoneSets(t, repo, 3)
+-	// `all` shows the done rows this fixture registers but declares no pin, so the
+-	// grant is added here: these tests are about what a pinning preset does, and
+-	// the gate itself is exercised by TestOnlyAPresetDeclaringPinLiftsTheRows.
++	// `all` shows the done rows this fixture registers but declares no lift, so the
++	// grant is added here: these tests are about what a lifting preset does, and
++	// the gate itself is exercised by TestOnlyAPresetDeclaringLiftMovesTheAttributedRows.
+ 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
+-	d.ViewPreset.Pin = true
++	d.ViewPreset.Lift = true
+ 	return d, cfg, rt, stems
+ }
+ 
+@@ -150,9 +150,9 @@ func movableStem(stems []string) string {
+ }
+ 
+ // The first rung: a pane pop opened for a Task set. All four tags name the set the
+-// pane is working on, so all four pin the same row — drain, verify, fold and assist
++// pane is working on, so all four lift the same row — drain, verify, fold and assist
+ // are activities on one container, not four kinds of pane.
+-func TestPaneTaggedForATaskSetPinsItsRowFirst(t *testing.T) {
++func TestPaneTaggedForATaskSetLiftsItsRowFirst(t *testing.T) {
+ 	for _, tag := range []struct {
+ 		name string
+ 		tag  tmuxmod.PaneTag
+@@ -165,7 +165,7 @@ func TestPaneTaggedForATaskSetPinsItsRowFirst(t *testing.T) {
+ 		t.Run(tag.name, func(t *testing.T) {
+ 			d, cfg, rt, stems := taskSetPaneFixture(t)
+ 			want := movableStem(stems)
+-			baseline := unpinnedOrder(t, d, cfg)
++			baseline := unliftedOrder(t, d, cfg)
+ 			if baseline[0] == want {
+ 				t.Fatalf("the tagged set already sorts first in %v — the fixture is not exercising a move", baseline)
+ 			}
+@@ -174,47 +174,47 @@ func TestPaneTaggedForATaskSetPinsItsRowFirst(t *testing.T) {
+ 
+ 			m := openFromPane(t, d, cfg)
+ 
+-			if got := pinnedBlock(t, m); !slices.Equal(got, []string{want}) {
+-				t.Fatalf("pinned %v, want only the tagged set %q", got, want)
++			if got := liftedBlock(t, m); !slices.Equal(got, []string{want}) {
++				t.Fatalf("lifted %v, want only the tagged set %q", got, want)
+ 			}
+-			if got := rowIDs(m); !slices.Equal(got, wantPinnedFirst(baseline, want)) {
+-				t.Fatalf("rows = %v, want %v — the tagged set first, the rest in their own order", got, wantPinnedFirst(baseline, want))
++			if got := rowIDs(m); !slices.Equal(got, wantLiftedFirst(baseline, want)) {
++				t.Fatalf("rows = %v, want %v — the tagged set first, the rest in their own order", got, wantLiftedFirst(baseline, want))
+ 			}
+ 			if m.flash.Text() != "" {
+-				t.Fatalf("status = %q, want silence: the pin says it (ADR-0209 decision 8)", m.flash.Text())
++				t.Fatalf("status = %q, want silence: the lift says it (ADR-0209 decision 8)", m.flash.Text())
+ 			}
+ 		})
+ 	}
+ }
+ 
+-// A pinned row is marked wherever the cursor is: `▸` on its own, `█▸` when the
++// A lifted row is marked wherever the cursor is: `▸` on its own, `█▸` when the
+ // cursor happens to be on it. The prefix column stays two cells wide either way,
+-// so a launch that pins and one that does not line their columns up identically.
+-func TestAPinnedRowIsMarkedInTheTwoCellPrefixColumn(t *testing.T) {
++// so a launch that lifts and one that does not line their columns up identically.
++func TestALiftedRowIsMarkedInTheTwoCellPrefixColumn(t *testing.T) {
+ 	d, cfg, rt, stems := taskSetPaneFixture(t)
+-	pinned := stems[len(stems)-1]
++	lifted := stems[len(stems)-1]
+ 	inPane(rt.Fake, "work", "%9")
+-	tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
++	tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
+ 
+ 	m := openFromPane(t, d, cfg)
+ 	m.list.Resize(len(m.snap.Containers))
+ 	rows := m.list.VisibleRows()
+ 
+ 	if got := ui.StripANSI(rows[0]); !strings.HasPrefix(got, "█▸") {
+-		t.Fatalf("cursored pinned row = %q, want the cursor block and the pin mark", got)
++		t.Fatalf("cursored lifted row = %q, want the cursor block and the lift mark", got)
+ 	}
+ 	m.list.SetCursor(1)
+ 	rows = m.list.VisibleRows()
+ 	if got := ui.StripANSI(rows[0]); !strings.HasPrefix(got, " ▸") {
+-		t.Fatalf("uncursored pinned row = %q, want the pin mark alone", got)
++		t.Fatalf("uncursored lifted row = %q, want the lift mark alone", got)
+ 	}
+ 	if got := ui.StripANSI(rows[1]); !strings.HasPrefix(got, "█ ") {
+-		t.Fatalf("cursored unpinned row = %q, want the cursor block and a blank pin cell", got)
++		t.Fatalf("cursored unlifted row = %q, want the cursor block and a blank lift cell", got)
+ 	}
+ }
+ 
+ // The ordinary case: an unrelated shell, and a pane tagged for a kind this page
+-// does not list. Both leave the dashboard exactly as it always looks — no pin, no
++// does not list. Both leave the dashboard exactly as it always looks — no lift, no
+ // line, no moved cursor. A "nothing found" line on every launch trains the human to
+ // ignore the status line, and a Routine resolves to a row on the other page, which
+ // page A does not follow.
+@@ -230,7 +230,7 @@ func TestUnattributedPaneChangesNothingAndSaysNothing(t *testing.T) {
+ 	} {
+ 		t.Run(tc.name, func(t *testing.T) {
+ 			d, cfg, rt, _ := taskSetPaneFixture(t)
+-			baseline := unpinnedOrder(t, d, cfg)
++			baseline := unliftedOrder(t, d, cfg)
+ 			inPane(rt.Fake, "editor", "%4")
+ 			if tc.value != "" {
+ 				tagPane(rt.Fake, "%4", tc.tag, tc.value)
+@@ -241,8 +241,8 @@ func TestUnattributedPaneChangesNothingAndSaysNothing(t *testing.T) {
+ 			if m.snap.Attribution != nil {
+ 				t.Fatalf("attribution = %+v, want none", *m.snap.Attribution)
+ 			}
+-			if got := pinnedBlock(t, m); len(got) != 0 {
+-				t.Fatalf("pinned %v, want nothing", got)
++			if got := liftedBlock(t, m); len(got) != 0 {
++				t.Fatalf("lifted %v, want nothing", got)
+ 			}
+ 			if got := rowIDs(m); !slices.Equal(got, baseline) {
+ 				t.Fatalf("rows = %v, want the untouched order %v", got, baseline)
+@@ -258,10 +258,10 @@ func TestUnattributedPaneChangesNothingAndSaysNothing(t *testing.T) {
+ }
+ 
+ // Decision 7: the preset is absolute. The set is attributed, but the active preset
+-// hides its row, so there is nothing to pin — and nothing to say either, because a
++// hides its row, so there is nothing to lift — and nothing to say either, because a
+ // dashboard that looks exactly as it always does is not an anomaly needing an
+ // explanation (decision 8).
+-func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
++func TestHiddenAttributedSetIsNotLiftedAndTheViewIsNotWidened(t *testing.T) {
+ 	d, cfg, rt, stems := taskSetPaneFixture(t)
+ 	hidden := stems[len(stems)-1]
+ 	inPane(rt.Fake, "work", "%9")
+@@ -269,7 +269,7 @@ func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
+ 	d.ViewPreset = config.WorkViewPreset{
+ 		Name:  "_hide-done",
+ 		Label: "in flight",
+-		Pin:   true,
++		Lift:   true,
+ 		Hide:  &config.WorkViewPresetFilter{Status: []string{"done"}},
+ 	}
+ 
+@@ -279,7 +279,7 @@ func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
+ 		t.Fatalf("rows = %v, want none — the launch must not widen the preset to reveal the row", rowIDs(m))
+ 	}
+ 	if m.snap.Attribution == nil {
+-		t.Fatal("attribution = none: a hidden row is still attributed, it simply has no row to pin")
++		t.Fatal("attribution = none: a hidden row is still attributed, it simply has no row to lift")
+ 	}
+ 	if m.flash.Text() != "" {
+ 		t.Fatalf("status = %q, want silence about a row nobody can see", m.flash.Text())
+@@ -289,17 +289,17 @@ func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
+ 	}
+ }
+ 
+-// The live filter is the preset's twin: a query that excludes the pinned row drops
++// The live filter is the preset's twin: a query that excludes the lifted row drops
+ // it like any other row, silently, and the rows it does match keep their order.
+-func TestAFilterQueryThatExcludesThePinnedRowDropsItSilently(t *testing.T) {
++func TestAFilterQueryThatExcludesTheLiftedRowDropsItSilently(t *testing.T) {
+ 	d, cfg, rt, stems := taskSetPaneFixture(t)
+-	pinned := stems[len(stems)-1]
++	lifted := stems[len(stems)-1]
+ 	inPane(rt.Fake, "work", "%9")
+-	tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
++	tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
+ 
+ 	m := openFromPane(t, d, cfg)
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{pinned}) {
+-		t.Fatalf("pinned %v before filtering, want %v", got, []string{pinned})
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{lifted}) {
++		t.Fatalf("lifted %v before filtering, want %v", got, []string{lifted})
+ 	}
+ 
+ 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+@@ -313,29 +313,29 @@ func TestAFilterQueryThatExcludesThePinnedRowDropsItSilently(t *testing.T) {
+ 		t.Fatalf("rows under the /%s filter = %v, want only %q", stems[0], got, stems[0])
+ 	}
+ 	if m.flash.Text() != "" {
+-		t.Fatalf("status = %q, want silence when the filter hid the pinned row", m.flash.Text())
++		t.Fatalf("status = %q, want silence when the filter hid the lifted row", m.flash.Text())
+ 	}
+ }
+ 
+-// Decision 1: the pin is position, never navigation. The cursor opens on the first
++// Decision 1: the lift is position, never navigation. The cursor opens on the first
+ // row the way it always does, and wherever the human moves it, a rebuild leaves
+ // them there — rows may rearrange under someone who is reading, but their selection
+ // does not.
+ func TestAttributionNeverMovesTheCursor(t *testing.T) {
+ 	d, cfg, rt, stems := taskSetPaneFixture(t)
+-	pinned := stems[len(stems)-1]
++	lifted := stems[len(stems)-1]
+ 	inPane(rt.Fake, "work", "%9")
+-	tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
++	tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
+ 
+ 	m := openFromPane(t, d, cfg)
+ 	if m.ListCursor() != 0 {
+ 		t.Fatalf("cursor = %d at launch, want the first row: attribution moves rows, not the cursor", m.ListCursor())
+ 	}
+ 
+-	// Wherever the human went, it is not the pinned row.
++	// Wherever the human went, it is not the lifted row.
+ 	moved := ""
+ 	for _, row := range m.snap.Containers {
+-		if row.ID != pinned {
++		if row.ID != lifted {
+ 			moved = row.ID
+ 			break
+ 		}
+@@ -374,13 +374,13 @@ func rowKeyFor(t *testing.T, m QueueDashboard, id string) string {
+ 	return ""
+ }
+ 
+-// Outside tmux there is no pane, and a dashboard that cannot tell where it is pins
++// Outside tmux there is no pane, and a dashboard that cannot tell where it is lifts
+ // nothing rather than guessing.
+ func TestLaunchPaneFactsWithoutAPaneIsEmpty(t *testing.T) {
+-	if got := LaunchPaneFacts(nil); !got.Empty() {
+-		t.Fatalf("LaunchPaneFacts(nil) = %+v, want zero facts", got)
++	if got := LaunchPaneFacts(nil, nil); !got.Empty() {
++		t.Fatalf("LaunchPaneFacts(nil, nil) = %+v, want zero facts", got)
+ 	}
+-	if got := LaunchPaneFacts(&tmuxtest.Fake{}); !got.Empty() {
++	if got := LaunchPaneFacts(&tmuxtest.Fake{}, nil); !got.Empty() {
+ 		t.Fatalf("LaunchPaneFacts(no current pane) = %+v, want zero facts", got)
+ 	}
+ 	if att := work.AttributePane(nil, work.PaneFacts{}); att != nil {
+@@ -388,48 +388,48 @@ func TestLaunchPaneFactsWithoutAPaneIsEmpty(t *testing.T) {
+ 	}
+ }
+ 
+-// The pin is not a sort key: it lifts rows off the top of whatever order the active
++// The lift is not a sort key: it lifts rows off the top of whatever order the active
+ // preset produced and changes nothing underneath. Every sort a preset can declare is
+-// checked against its own unpinned build, so a pin can never be mistaken for a
++// checked against its own unlifted build, so a lift can never be mistaken for a
+ // re-sort.
+-func TestPinningLeavesEveryPresetSortIntactBeneathTheBlock(t *testing.T) {
++func TestLiftingLeavesEveryPresetSortIntactBeneathTheBlock(t *testing.T) {
+ 	for _, sort := range []string{"", config.PresetSortCreatedDesc, config.PresetSortCreatedAsc} {
+ 		t.Run("sort="+sort, func(t *testing.T) {
+ 			d, cfg, rt, stems := taskSetPaneFixture(t)
+ 			d.ViewPreset.Sort = sort
+-			pinned := stems[len(stems)-1]
+-			baseline := unpinnedOrder(t, d, cfg)
++			lifted := stems[len(stems)-1]
++			baseline := unliftedOrder(t, d, cfg)
+ 			inPane(rt.Fake, "work", "%9")
+-			tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
++			tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
+ 
+ 			m := openFromPane(t, d, cfg)
+ 
+-			if got, want := rowIDs(m), wantPinnedFirst(baseline, pinned); !slices.Equal(got, want) {
++			if got, want := rowIDs(m), wantLiftedFirst(baseline, lifted); !slices.Equal(got, want) {
+ 				t.Fatalf("rows = %v, want %v — the rows beneath the block keep the sort's own order", got, want)
+ 			}
+ 		})
+ 	}
+ }
+ 
+-// The gate (glossary: Pane pin): the pin is a grant of the active preset, so the
+-// same launch that lifts and marks the attributed row under a pinning preset
++// The gate (glossary: Work lift): the lift is a grant of the active preset, so the
++// same launch that lifts and marks the attributed row under a lifting preset
+ // leaves it in its sorted place, unmarked, under one that declares nothing.
+ // Attribution is computed either way — it is the lift alone that the field owns.
+-func TestOnlyAPresetDeclaringPinLiftsTheAttributedRows(t *testing.T) {
++func TestOnlyAPresetDeclaringLiftMovesTheAttributedRows(t *testing.T) {
+ 	d, cfg, rt, stems := taskSetPaneFixture(t)
+ 	attributed := movableStem(stems)
+-	baseline := unpinnedOrder(t, d, cfg)
++	baseline := unliftedOrder(t, d, cfg)
+ 	if baseline[0] == attributed {
+ 		t.Fatalf("the tagged set already sorts first in %v — the fixture cannot tell a lift from no lift", baseline)
+ 	}
+ 	inPane(rt.Fake, "work", "%9")
+ 	tagPane(rt.Fake, "%9", tmuxmod.TagSet, attributed)
+ 
+-	d.ViewPreset.Pin = false
++	d.ViewPreset.Lift = false
+ 	m := openFromPane(t, d, cfg)
+ 
+-	if got := pinnedBlock(t, m); len(got) != 0 {
+-		t.Fatalf("pinned %v under a preset that declares no pin, want nothing lifted", got)
++	if got := liftedBlock(t, m); len(got) != 0 {
++		t.Fatalf("lifted %v under a preset that declares no lift, want nothing lifted", got)
+ 	}
+ 	if got := rowIDs(m); !slices.Equal(got, baseline) {
+ 		t.Fatalf("rows = %v, want the sorted order %v — the attributed row keeps its own place", got, baseline)
+@@ -445,71 +445,71 @@ func TestOnlyAPresetDeclaringPinLiftsTheAttributedRows(t *testing.T) {
+ 		t.Fatalf("cursor = %d, want the first row: the cursor is not the field's business", m.ListCursor())
+ 	}
+ 	if m.flash.Text() != "" {
+-		t.Fatalf("status = %q, want the same silence a pinning launch keeps", m.flash.Text())
++		t.Fatalf("status = %q, want the same silence a lifting launch keeps", m.flash.Text())
+ 	}
+ 	m.list.Resize(len(m.snap.Containers))
+ 	for i, row := range m.list.VisibleRows() {
+ 		if strings.Contains(ui.StripANSI(row), "▸") {
+-			t.Fatalf("row %d = %q carries the pin mark under a preset that grants no pin", i, ui.StripANSI(row))
++			t.Fatalf("row %d = %q carries the lift mark under a preset that grants no lift", i, ui.StripANSI(row))
+ 		}
+ 	}
+ 
+-	d.ViewPreset.Pin = true
+-	pinning := openFromPane(t, d, cfg)
++	d.ViewPreset.Lift = true
++	lifting := openFromPane(t, d, cfg)
+ 
+-	if got := pinnedBlock(t, pinning); !slices.Equal(got, []string{attributed}) {
+-		t.Fatalf("pinned %v once the preset declares pin, want %q", got, attributed)
++	if got := liftedBlock(t, lifting); !slices.Equal(got, []string{attributed}) {
++		t.Fatalf("lifted %v once the preset declares lift, want %q", got, attributed)
+ 	}
+-	if got, want := rowIDs(pinning), wantPinnedFirst(baseline, attributed); !slices.Equal(got, want) {
++	if got, want := rowIDs(lifting), wantLiftedFirst(baseline, attributed); !slices.Equal(got, want) {
+ 		t.Fatalf("rows = %v, want %v", got, want)
+ 	}
+ }
+ 
+-// Switching presets in the filter menu carries the pin with the choice: the same
++// Switching presets in the filter menu carries the lift with the choice: the same
+ // rows, the same sort, and the lift appearing or vanishing on that one rebuild.
+-func TestSelectingAPresetInTheFilterMenuAppliesAndRemovesThePin(t *testing.T) {
++func TestSelectingAPresetInTheFilterMenuAppliesAndRemovesTheLift(t *testing.T) {
+ 	d, cfg, rt, stems := taskSetPaneFixture(t)
+ 	attributed := stems[len(stems)-1]
+-	baseline := unpinnedOrder(t, d, cfg)
++	baseline := unliftedOrder(t, d, cfg)
+ 	inPane(rt.Fake, "work", "%9")
+ 	tagPane(rt.Fake, "%9", tmuxmod.TagSet, attributed)
+ 
+-	// A two-entry roster admitting exactly the same rows, so the pin is the only
++	// A two-entry roster admitting exactly the same rows, so the lift is the only
+ 	// thing the human's choice changes.
+ 	plain := config.WorkViewPreset{
+ 		Name:                 "plain",
+ 		WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedInclude},
+ 	}
+-	pinning := plain
+-	pinning.Name = "pinning"
+-	pinning.Pin = true
++	lifting := plain
++	lifting.Name = "lifting"
++	lifting.Lift = true
+ 	if cfg.Work == nil {
+ 		cfg.Work = &config.WorkConfig{}
+ 	}
+ 	cfg.Work.Dashboard = &config.WorkDashboardConfig{
+-		Tasks: &config.WorkDashboardTasksConfig{Presets: []config.WorkViewPreset{plain, pinning}},
++		Tasks: &config.WorkDashboardTasksConfig{Presets: []config.WorkViewPreset{plain, lifting}},
+ 	}
+ 	d.ViewPreset = cfg.DefaultWorkViewPreset()
+ 
+ 	m := openFromPane(t, d, cfg)
+-	if got := pinnedBlock(t, m); len(got) != 0 {
+-		t.Fatalf("pinned %v under the default (non-pinning) preset, want nothing", got)
++	if got := liftedBlock(t, m); len(got) != 0 {
++		t.Fatalf("lifted %v under the default (non-lifting) preset, want nothing", got)
+ 	}
+ 
+ 	m = selectFilterPreset(t, m, '2')
+-	if got := m.d.ViewPreset.Name; got != "pinning" {
+-		t.Fatalf("preset after digit 2 = %q, want pinning", got)
++	if got := m.d.ViewPreset.Name; got != "lifting" {
++		t.Fatalf("preset after digit 2 = %q, want lifting", got)
+ 	}
+-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{attributed}) {
+-		t.Fatalf("pinned %v after switching to the pinning preset, want %q", got, attributed)
++	if got := liftedBlock(t, m); !slices.Equal(got, []string{attributed}) {
++		t.Fatalf("lifted %v after switching to the lifting preset, want %q", got, attributed)
+ 	}
+ 
+ 	m = selectFilterPreset(t, m, '1')
+ 	if got := m.d.ViewPreset.Name; got != "plain" {
+ 		t.Fatalf("preset after digit 1 = %q, want plain", got)
+ 	}
+-	if got := pinnedBlock(t, m); len(got) != 0 {
+-		t.Fatalf("pinned %v after switching back, want the pin removed on that rebuild", got)
++	if got := liftedBlock(t, m); len(got) != 0 {
++		t.Fatalf("lifted %v after switching back, want the lift removed on that rebuild", got)
+ 	}
+ 	if got := rowIDs(m); !slices.Equal(got, baseline) {
+ 		t.Fatalf("rows = %v, want the sorted order %v", got, baseline)
+diff --git a/dashboardshell/shell.go b/dashboardshell/shell.go
+index 51d190f5..2cef8664 100644
+--- a/dashboardshell/shell.go
++++ b/dashboardshell/shell.go
+@@ -42,7 +42,7 @@ type Shell struct {
+ 	// modal edits and re-reads the same file the pages were built from.
+ 	cfgPath string
+ 	// pane is the launching pane's facts, read once at startup and kept for the
+-	// page the toggle builds later — the pin is per page, the tmux read is not.
++	// page the toggle builds later — the lift is per page, the tmux read is not.
+ 	pane   work.PaneFacts
+ 	width  int
+ 	height int
+@@ -112,16 +112,17 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Sh
+ }
+ 
+ // launchPaneFacts reads the launching pane's facts, whichever page the dashboard
+-// opened on. It is the session's one tmux round-trip for them: the shell keeps
+-// them, hands them to the entry build and to the page the toggle builds later,
+-// and each page model re-derives its own pins from the copy it holds.
++// opened on. It is the session's one tmux round-trip and one git fork for them:
++// the shell keeps them, hands them to the entry build and to the page the toggle
++// builds later, and each page model re-derives its own lifts from the copy it
++// holds.
+ //
+ // The dashboard still opens on the page it was asked for (ADR-0201 decision 5) —
+ // a pane attributed to a Routine does not drag the launch across the toggle. The
+-// pin is simply computed per page, and is waiting on page B when the human gets
++// lift is simply computed per page, and is waiting on page B when the human gets
+ // there.
+ func launchPaneFacts(d *drain.Deps) work.PaneFacts {
+-	return dashboard.LaunchPaneFacts(d.Tmux)
++	return dashboard.LaunchPaneFacts(d.Tmux, d.Tasks)
+ }
+ 
+ func runShell(s Shell) (Shell, error) {
+diff --git a/dashboardshell/pane_pin_test.go b/dashboardshell/work_lift_test.go
+similarity index 82%
+rename from dashboardshell/pane_pin_test.go
+rename to dashboardshell/work_lift_test.go
+index 312b1a46..3baed876 100644
+--- a/dashboardshell/pane_pin_test.go
++++ b/dashboardshell/work_lift_test.go
+@@ -59,17 +59,17 @@ func taggedPaneDeps(setID string) (*drain.Deps, *tmuxtest.Fake) {
+ }
+ 
+ // The launch reads the pane once and the entry page opens with the row it named
+-// pinned to the top and marked — with the cursor left where it always rests. Paging
++// lifted to the top and marked — with the cursor left where it always rests. Paging
+ // away and back is not a launch, so the facts are never asked for again.
+-func TestEntryOnPageAPinsTheLaunchingPanesRow(t *testing.T) {
++func TestEntryOnPageALiftsTheLaunchingPanesRow(t *testing.T) {
+ 	d, f := taggedPaneDeps("set-g")
+ 	s := newShellWith(t, PageWork, d)
+ 
+ 	// set-g sorts last of the three rows the fake page loads, so seeing it above
+-	// set-a is the whole of the pin.
+-	assertPinnedFirst(t, s, "set-g", "set-a")
++	// set-a is the whole of the lift.
++	assertLiftedFirst(t, s, "set-g", "set-a")
+ 	if got := s.PageDashboard(PageWork).ListCursor(); got != 0 {
+-		t.Fatalf("cursor = %d, want the untouched first row: the pin moves rows, not the cursor", got)
++		t.Fatalf("cursor = %d, want the untouched first row: the lift moves rows, not the cursor", got)
+ 	}
+ 	if f.CurrentPaneFactsCalls != 1 {
+ 		t.Fatalf("read the pane %d times at launch, want one round-trip", f.CurrentPaneFactsCalls)
+@@ -80,20 +80,20 @@ func TestEntryOnPageAPinsTheLaunchingPanesRow(t *testing.T) {
+ 	if f.CurrentPaneFactsCalls != 1 {
+ 		t.Fatalf("read the pane %d times after paging, want the launch's one", f.CurrentPaneFactsCalls)
+ 	}
+-	assertPinnedFirst(t, s, "set-g", "set-a")
++	assertLiftedFirst(t, s, "set-g", "set-a")
+ }
+ 
+-// assertPinnedFirst reads the rendered page the way the human does: the pinned row
+-// above the row that outranks it under the ordinary sort, carrying the pin mark.
+-func assertPinnedFirst(t *testing.T, s Shell, pinned, below string) {
++// assertLiftedFirst reads the rendered page the way the human does: the lifted row
++// above the row that outranks it under the ordinary sort, carrying the lift mark.
++func assertLiftedFirst(t *testing.T, s Shell, lifted, below string) {
+ 	t.Helper()
+ 	view := ui.StripANSI(s.View().Content)
+-	at, under := strings.Index(view, pinned), strings.Index(view, below)
++	at, under := strings.Index(view, lifted), strings.Index(view, below)
+ 	if at < 0 || under < 0 {
+-		t.Fatalf("view names %q at %d and %q at %d:\n%s", pinned, at, below, under, view)
++		t.Fatalf("view names %q at %d and %q at %d:\n%s", lifted, at, below, under, view)
+ 	}
+ 	if at > under {
+-		t.Fatalf("%q renders below %q, want it pinned above:\n%s", pinned, below, view)
++		t.Fatalf("%q renders below %q, want it lifted above:\n%s", lifted, below, view)
+ 	}
+ 	line := view[at:]
+ 	if end := strings.IndexByte(line, '\n'); end >= 0 {
+@@ -103,11 +103,11 @@ func assertPinnedFirst(t *testing.T, s Shell, pinned, below string) {
+ 		line = view[start+1:][:len(line)+at-start-1]
+ 	}
+ 	if !strings.Contains(line, "\u25b8") {
+-		t.Fatalf("pinned row = %q, want the pin mark in its prefix column", line)
++		t.Fatalf("lifted row = %q, want the lift mark in its prefix column", line)
+ 	}
+ }
+ 
+-// The pane is read for whichever page the dashboard opens on: the pin is computed
++// The pane is read for whichever page the dashboard opens on: the lift is computed
+ // per page, so the entry page decides nothing about whether the facts are worth
+ // having. Decision 5 survives as it always was — the launch opens the page it was
+ // asked for and never follows an answer across the toggle.
+@@ -163,12 +163,12 @@ func routinePaneDeps(routineID string) (*drain.Deps, *tmuxtest.Fake) {
+ 	return d, f
+ }
+ 
+-// A pane pop opened to fire a Routine pins that Routine's row on page B, whether
++// A pane pop opened to fire a Routine lifts that Routine's row on page B, whether
+ // the human entered on page A and toggled over or came straight in through
+ // `pop routine dashboard`. Page A, which lists no Routines, is left exactly as it
+ // always looks.
+-func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
+-	// "hourly" sorts after "daily", so seeing it first is the whole of the pin.
++func TestRoutinePaneLiftsOnPageBFromEitherEntry(t *testing.T) {
++	// "hourly" sorts after "daily", so seeing it first is the whole of the lift.
+ 	for _, tc := range []struct {
+ 		name  string
+ 		entry Page
+@@ -180,11 +180,11 @@ func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
+ 			d, f := routinePaneDeps("hourly")
+ 			s := newShellWith(t, tc.entry, d)
+ 			if tc.entry == PageWork {
+-				assertNothingPinned(t, s)
++				assertNothingLifted(t, s)
+ 				s = pressV(t, s)
+ 			}
+ 
+-			assertPinnedFirst(t, s, "hourly", "daily")
++			assertLiftedFirst(t, s, "hourly", "daily")
+ 			if got := s.PageDashboard(PageRoutines).ListCursor(); got != 0 {
+ 				t.Fatalf("cursor = %d, want the untouched first row", got)
+ 			}
+@@ -195,9 +195,9 @@ func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
+ 	}
+ }
+ 
+-// A routine-attributed pane pins nothing on the page that lists no Routines: the
++// A routine-attributed pane lifts nothing on the page that lists no Routines: the
+ // answer belongs to a row on the other page, and page A does not follow it.
+-func assertNothingPinned(t *testing.T, s Shell) {
++func assertNothingLifted(t *testing.T, s Shell) {
+ 	t.Helper()
+ 	view := ui.StripANSI(s.View().Content)
+ 	assertNoRowIsMarked(t, view)
+@@ -206,12 +206,12 @@ func assertNothingPinned(t *testing.T, s Shell) {
+ 	}
+ }
+ 
+-// A pinned row the human searches away is simply gone: the search is the active
++// A lifted row the human searches away is simply gone: the search is the active
+ // view on page B, and a launch does not widen it (ADR-0209 decisions 7 and 8).
+-func TestFilteringAwayAPinnedRoutineRowIsSilent(t *testing.T) {
++func TestFilteringAwayALiftedRoutineRowIsSilent(t *testing.T) {
+ 	d, _ := routinePaneDeps("hourly")
+ 	s := newShellWith(t, PageRoutines, d)
+-	assertPinnedFirst(t, s, "hourly", "daily")
++	assertLiftedFirst(t, s, "hourly", "daily")
+ 
+ 	for _, key := range []tea.KeyPressMsg{
+ 		{Code: '/', Text: "/"},
+@@ -224,19 +224,19 @@ func TestFilteringAwayAPinnedRoutineRowIsSilent(t *testing.T) {
+ 
+ 	view := ui.StripANSI(s.View().Content)
+ 	if strings.Contains(view, "hourly") {
+-		t.Fatalf("the filtered-away pinned row still renders:\n%s", view)
++		t.Fatalf("the filtered-away lifted row still renders:\n%s", view)
+ 	}
+ 	assertNoRowIsMarked(t, view)
+ }
+ 
+-// assertNoRowIsMarked reads the pin out of the table body alone. The frame's hint
++// assertNoRowIsMarked reads the lift out of the table body alone. The frame's hint
+ // line wears the same mark on every menu opener, so a whole-view scan answers a
+ // question about the footer rather than about the rows.
+ func assertNoRowIsMarked(t *testing.T, view string) {
+ 	t.Helper()
+ 	for _, row := range tableRows(view) {
+ 		if strings.Contains(row, "▸") {
+-			t.Fatalf("row %q carries the pin mark, want none:\n%s", row, view)
++			t.Fatalf("row %q carries the lift mark, want none:\n%s", row, view)
+ 		}
+ 	}
+ }
+diff --git a/routine/attribute.go b/routine/attribute.go
+index 9b068020..598ad74b 100644
+--- a/routine/attribute.go
++++ b/routine/attribute.go
+@@ -16,9 +16,16 @@ import (
+ // There is no neighbourhood half. A Routine is bound to a directory but scoped to
+ // the project that directory belongs to, so a "pane standing somewhere" rung
+ // would answer with a whole project's routine list for any shell in the
+-// repository — a block of rows pinned to the top of page B for a human who is not
++// repository — a block of rows lifted to the top of page B for a human who is not
+ // doing routines at all. A shell that merely sits in a project directory
+ // attributes to no Routine.
++//
++// There is no repository half either, though Task sets and Maps answer one
++// (ADR-0241 decision 7). This is deliberate, not a gap to fill: a Task set and a
++// Map each name a definite piece of work in a definite repository, while a
++// Routine names a schedule. It is project-scoped with no container-level locality
++// to narrow it, its fire pane is short-lived, and page B has no preset narrowing
++// to keep the pass to a row or two.
+ 
+ // recordPanes indexes the Routines one Load read, keyed by the id a fire pane is
+ // tagged with. It runs at Load rather than at attribution time so a pane belongs
+diff --git a/routine/attribute_test.go b/routine/attribute_test.go
+index 35a4fab9..52304496 100644
+--- a/routine/attribute_test.go
++++ b/routine/attribute_test.go
+@@ -40,7 +40,7 @@ func routineRowIDs(snap work.Snapshot) []string {
+ 
+ func buildForPane(t *testing.T, k *Kind, facts work.PaneFacts) work.Snapshot {
+ 	t.Helper()
+-	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.BuildOptions{Ordering: work.OrderByKindPrecedence, PinPane: true})
++	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.BuildOptions{Ordering: work.OrderByKindPrecedence, Lift: true})
+ 	if err != nil {
+ 		t.Fatalf("BuildSnapshotForPane: %v", err)
+ 	}
+@@ -50,8 +50,8 @@ func buildForPane(t *testing.T, k *Kind, facts work.PaneFacts) work.Snapshot {
+ // The tag rung: the pane pop opened to fire a Routine belongs to that Routine,
+ // and its row is lifted to the top of the page. `zzz-sweep` sorts last of the
+ // three under the kind's own comparator, so seeing it first is the whole of the
+-// pin.
+-func TestFirePanePinsItsRoutine(t *testing.T) {
++// lift.
++func TestFirePaneLiftsItsRoutine(t *testing.T) {
+ 	k, _ := paneRoutines(t)
+ 
+ 	snap := buildForPane(t, k, work.PaneFacts{PaneID: "%7", Session: RoutinesSessionName, Routine: "zzz-sweep"})
+@@ -68,23 +68,23 @@ func TestFirePanePinsItsRoutine(t *testing.T) {
+ 		t.Fatalf("attributed %+v, want just %+v", got, want)
+ 	}
+ 	if got, wantOrder := routineRowIDs(snap), []string{"zzz-sweep", "aaa-audit", "mmm-mirror"}; !slices.Equal(got, wantOrder) {
+-		t.Fatalf("rows = %v, want the fire pane's routine pinned above the rest: %v", got, wantOrder)
++		t.Fatalf("rows = %v, want the fire pane's routine lifted above the rest: %v", got, wantOrder)
+ 	}
+-	if !snap.Containers[0].Pinned {
+-		t.Fatal("the pinned row does not say it is pinned")
++	if !snap.Containers[0].Lifted {
++		t.Fatal("the lifted row does not say it is lifted")
+ 	}
+ 	for _, c := range snap.Containers[1:] {
+-		if c.Pinned {
+-			t.Fatalf("%s is pinned too, want only the tagged routine", c.ID)
++		if c.Lifted {
++			t.Fatalf("%s is lifted too, want only the tagged routine", c.ID)
+ 		}
+ 	}
+ }
+ 
+ // There is no neighbourhood rung. A Routine is project-scoped, so a shell merely
+ // standing in a project's checkout — the directory every one of these Routines is
+-// bound to — attributes to no Routine at all, rather than pinning the project's
++// bound to — attributes to no Routine at all, rather than lifting the project's
+ // whole routine list.
+-func TestShellInAProjectDirectoryPinsNoRoutine(t *testing.T) {
++func TestShellInAProjectDirectoryLiftsNoRoutine(t *testing.T) {
+ 	k, checkout := paneRoutines(t)
+ 	baseline := routineRowIDs(buildForPane(t, k, work.PaneFacts{}))
+ 
+@@ -97,15 +97,15 @@ func TestShellInAProjectDirectoryPinsNoRoutine(t *testing.T) {
+ 		t.Fatalf("rows = %v, want the untouched order %v", got, baseline)
+ 	}
+ 	for _, c := range snap.Containers {
+-		if c.Pinned {
+-			t.Fatalf("%s is pinned, want nothing pinned", c.ID)
++		if c.Lifted {
++			t.Fatalf("%s is lifted, want nothing lifted", c.ID)
+ 		}
+ 	}
+ }
+ 
+ // A tag naming a Routine this load did not find gets the same silence: the pane
+ // outlived the Routine it was opened for.
+-func TestFirePaneOfADeletedRoutinePinsNothing(t *testing.T) {
++func TestFirePaneOfADeletedRoutineLiftsNothing(t *testing.T) {
+ 	k, _ := paneRoutines(t)
+ 
+ 	snap := buildForPane(t, k, work.PaneFacts{PaneID: "%7", Routine: "gone-yesterday"})
+diff --git a/tasks/drain/queue.go b/tasks/drain/queue.go
+index 46fdb45d..3823c6e3 100644
+--- a/tasks/drain/queue.go
++++ b/tasks/drain/queue.go
+@@ -146,13 +146,13 @@ func (d *Deps) WorkOrdering() work.Ordering {
+ }
+ 
+ // WorkBuildOptions is everything the active preset grants a snapshot build: its
+-// ordering, plus whether it grants the Pane pin (its `pin` field). It sits here
++// ordering, plus whether it grants the Work lift (its `lift` field). It sits here
+ // for the reason WorkOrdering does — this is the layer that resolves which preset
+ // is active, so the `work` seam takes values it is handed rather than a preset it
+-// would have to read. Absent `pin` is no pin: the lift is asked for, never
++// would have to read. Absent `lift` is no lift: the lift is asked for, never
+ // inherited from a roster position.
+ func (d *Deps) WorkBuildOptions() work.BuildOptions {
+-	return work.BuildOptions{Ordering: d.WorkOrdering(), PinPane: d.EffectiveViewPreset().Pin}
++	return work.BuildOptions{Ordering: d.WorkOrdering(), Lift: d.EffectiveViewPreset().Lift}
+ }
+ 
+ type runtimeLock interface {
+diff --git a/tasks/setkind/attribute.go b/tasks/setkind/attribute.go
+index 0cb4e481..77eaa63e 100644
+--- a/tasks/setkind/attribute.go
++++ b/tasks/setkind/attribute.go
+@@ -23,7 +23,7 @@ import (
+ // lookup afterwards would mean scanning the machine a second time.
+ type paneIndex map[string]work.AttributedContainer
+ 
+-// boundSet is one candidate for the ladder's weakest rung: a set whose Worktree
++// boundSet is one candidate for the bound-checkout rung: a set whose Worktree
+ // binding points somewhere, so a pane standing in that checkout might be about
+ // it. The binding path is kept as recorded and canonicalised only if a launch
+ // actually asks — an ordinary rebuild must pay nothing for a question nobody
+@@ -43,6 +43,18 @@ type boundSet struct {
+ 	sortRow work.Container
+ }
+ 
++// repoSet is one candidate for the repository pass: a set in the repository's
++// Task storage, whether or not a binding points anywhere (ADR-0241 decision 3).
++type repoSet struct {
++	repoCommonDir string
++	// container is keyed by this set's own group, not by the id-first-wins index:
++	// a set of the same name in another repository is a different row.
++	container work.AttributedContainer
++	// sortRow is the projection the active sort compares, which is the only order
++	// this pass has.
++	sortRow work.Container
++}
++
+ // recordPanes indexes one group's rows for attribution. It runs before the
+ // preset filter by construction — it reads the refresh, not the containers the
+ // filter produced.
+@@ -54,35 +66,39 @@ func (k *Kind) recordPanes(g repogroup.Group, refresh *tasks.RefreshResult, snap
+ 		k.panes = paneIndex{}
+ 	}
+ 	for _, row := range refresh.Rows {
++		bnd, hasBinding := snap.bindingFor(g.RepoKey, row.ID)
++		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
++		sortRow := work.Container{
++			Kind:      ref.KindTaskSet,
++			ID:        row.ID,
++			Project:   g.ProjectName,
++			RawStatus: row.Status,
++			AutoDrain: row.AutoDrain,
++			Started:   row.Started,
++			Bound:     bound,
++			LiveDrain: liveDrain(snap, g.RepoKey, row.ID, bnd.RuntimePath),
++		}
++		attributed := work.AttributedContainer{
++			Ref:       ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: row.ID},
++			CursorKey: setCursorKey(g, row.ID),
++			Label:     "task set " + row.ID,
++		}
++		k.inRepo = append(k.inRepo, repoSet{repoCommonDir: g.RepoCommonDir, container: attributed, sortRow: sortRow})
+ 		if _, seen := k.panes[row.ID]; seen {
+ 			// Two repository groups can hold a set of the same name. The pane tag
+ 			// carries only the id, so the first group wins — the same rule the cursor
+ 			// key's own collision has always had.
+ 			continue
+ 		}
+-		k.panes[row.ID] = work.AttributedContainer{
+-			Ref:       ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: row.ID},
+-			CursorKey: setCursorKey(g, row.ID),
+-			Label:     "task set " + row.ID,
+-		}
+-		bnd, hasBinding := snap.bindingFor(g.RepoKey, row.ID)
+-		if !hasBinding || strings.TrimSpace(bnd.RuntimePath) == "" {
++		k.panes[row.ID] = attributed
++		if !bound {
+ 			continue
+ 		}
+ 		k.bound = append(k.bound, boundSet{
+ 			setID:         row.ID,
+ 			repoCommonDir: g.RepoCommonDir,
+ 			runtimePath:   bnd.RuntimePath,
+-			sortRow: work.Container{
+-				Kind:      ref.KindTaskSet,
+-				ID:        row.ID,
+-				Project:   g.ProjectName,
+-				RawStatus: row.Status,
+-				AutoDrain: row.AutoDrain,
+-				Started:   row.Started,
+-				Bound:     true,
+-				LiveDrain: liveDrain(snap, g.RepoKey, row.ID, bnd.RuntimePath),
+-			},
++			sortRow:       sortRow,
+ 		})
+ 	}
+ }
+@@ -104,7 +120,7 @@ func (k *Kind) AttributePane(facts work.PaneFacts) (work.Attribution, bool) {
+ 	return work.Attribution{}, false
+ }
+ 
+-// AttributePaneNeighbourhood answers the ladder's two weakest rungs, in order: a
++// AttributePaneNeighbourhood answers the ladder's two locality rungs, in order: a
+ // live Drain at the pane's directory, which names its set outright, and otherwise
+ // the checkout the pane sits in plus the sets bound to it. The second is the rung
+ // that fires for the ordinary editor shell the human opened themselves — which is
+@@ -263,6 +279,32 @@ func (k *Kind) drainStarts(cands []boundSet) map[string]time.Time {
+ 	return out
+ }
+ 
++// AttributePaneRepository answers the ladder's repository pass: every set in the
++// pane's repository, bound or not, in the order the active sort puts them. It is
++// reached only when no checkout answered, which is the pane in a sibling
++// worktree no set is bound to — or in the trunk of a repository whose sets are
++// bound nowhere (ADR-0241 decision 3). Both sides of the match are canonical
++// common directories, so it is a string comparison and forks nothing.
++func (k *Kind) AttributePaneRepository(facts work.PaneFacts) (work.Attribution, bool) {
++	if facts.RepoCommonDir == "" {
++		return work.Attribution{}, false
++	}
++	var cands []repoSet
++	for _, cand := range k.inRepo {
++		if cand.repoCommonDir == facts.RepoCommonDir {
++			cands = append(cands, cand)
++		}
++	}
++	sort.SliceStable(cands, func(i, j int) bool {
++		return tasks.WorkRowLess(cands[i].sortRow, cands[j].sortRow, k.d.ViewPreset.Sort)
++	})
++	att := work.Attribution{}
++	for _, cand := range cands {
++		att.Containers = append(att.Containers, cand.container)
++	}
++	return att, len(att.Containers) > 0
++}
++
+ // canonPath canonicalizes a directory for containment comparison, falling back to
+ // a cleaned absolute path when it cannot be resolved — a pane's directory may have
+ // been deleted under it, and the fallback still compares two strings the same way.
+diff --git a/tasks/setkind/setkind.go b/tasks/setkind/setkind.go
+index 2e08a948..7e56dfdb 100644
+--- a/tasks/setkind/setkind.go
++++ b/tasks/setkind/setkind.go
+@@ -94,12 +94,15 @@ type Kind struct {
+ 	// every set id it read, hidden rows included. It belongs to one Load and is
+ 	// replaced by the next (see attribute.go).
+ 	panes paneIndex
+-	// bound and live are the same pass's answer to the ladder's weakest rungs: the
++	// bound and live are the same pass's answer to the ladder's locality rungs: the
+ 	// sets with a Worktree binding, and the live Drains holding a checkout. Both
+ 	// are locality, so they are matched against the pane's directory rather than
+ 	// looked up by id.
+ 	bound []boundSet
+ 	live  []tasks.RunningDrain
++	// inRepo is every set the pass read, bound or not, with the repository it
++	// lives in: the ladder's repository pass matches it against the pane's.
++	inRepo []repoSet
+ }
+ 
+ // New returns the Task-set kind over d. A nil d resolves to DefaultDeps.
+@@ -165,7 +168,7 @@ func (k *Kind) Load() ([]work.Container, error) {
+ 	// groups did.
+ 	now := d.now().UTC()
+ 	var containers []work.Container
+-	k.panes, k.bound, k.live = nil, nil, snap.liveDrainList()
++	k.panes, k.bound, k.inRepo, k.live = nil, nil, nil, snap.liveDrainList()
+ 	for i, load := range loads {
+ 		k.recordPanes(load.group, refreshes[i], snap)
+ 		got, err := containersFromGroup(d, cfg, snap, delays, now, load.group, refreshes[i], load.prepared)
+diff --git a/ui/list.go b/ui/list.go
+index f6dc9c6d..9c594c40 100644
+--- a/ui/list.go
++++ b/ui/list.go
+@@ -19,7 +19,7 @@ const (
+ // RowState is passed to the Cell renderer for each visible row/sub-line.
+ type RowState struct {
+ 	Selected   bool
+-	Pinned     bool
++	Lifted     bool
+ 	QuickLabel string
+ 	Width      int
+ 	// LineIndex is the zero-based sub-line inside a multi-line item. It is 0
+@@ -35,11 +35,11 @@ type Opts[T any] struct {
+ 	Anchor       Anchor                   // Top | Bottom (fzf-style)
+ 	ScrollMargin int                      // lines kept above cursor (quick-access reserves ~9)
+ 	QuickLabel   func(dist int) string    // optional; nil = no quick-access column
+-	// Pinned marks a row the caller lifted to the top of the item slice, so the
++	// Lifted marks a row the caller lifted to the top of the item slice, so the
+ 	// list can say so in the prefix column's second cell. It is optional; nil
+ 	// leaves that cell blank. A list with a QuickLabel has no room for it — both
+ 	// want the same cell — so the two are not wired together.
+-	Pinned func(T) bool
++	Lifted func(T) bool
+ 	// LinesPerItem is the number of terminal lines each logical item occupies.
+ 	// Defaults to 1. Cursor movement still operates on logical items.
+ 	LinesPerItem int
+@@ -467,7 +467,7 @@ func (l *List[T]) regionLines(lay regionLayout, prefixWidth int) []string {
+ func (l *List[T]) itemLines(idx, prefixWidth int) []string {
+ 	item := l.items[idx]
+ 	selected := idx == l.cursor
+-	pinned := l.opts.Pinned != nil && l.opts.Pinned(item)
++	lifted := l.opts.Lifted != nil && l.opts.Lifted(item)
+ 
+ 	quickLabel := ""
+ 	if l.opts.QuickLabel != nil && !selected {
+@@ -484,25 +484,25 @@ func (l *List[T]) itemLines(idx, prefixWidth int) []string {
+ 		if l.opts.Cell != nil {
+ 			cell = l.opts.Cell(item, RowState{
+ 				Selected:   selected,
+-				Pinned:     pinned,
++				Lifted:     lifted,
+ 				QuickLabel: quickLabel,
+ 				Width:      l.width,
+ 				LineIndex:  sub,
+ 			})
+ 		}
+ 		isFirstLine := sub == 0
+-		out = append(out, l.renderPrefix(isFirstLine && selected, isFirstLine && pinned, quickLabel, prefixWidth)+cell)
++		out = append(out, l.renderPrefix(isFirstLine && selected, isFirstLine && lifted, quickLabel, prefixWidth)+cell)
+ 	}
+ 	return out
+ }
+ 
+ // renderPrefix draws the two cells every row carries: the cursor block in the
+-// first, the pin mark in the second. Both cells are always spent, whichever way
++// first, the lift mark in the second. Both cells are always spent, whichever way
+ // they are filled, so column offsets never shift between one row and the next —
+-// or between a render that pins and one that does not.
+-func (l *List[T]) renderPrefix(selected, pinned bool, quickLabel string, prefixWidth int) string {
++// or between a render that lifts and one that does not.
++func (l *List[T]) renderPrefix(selected, lifted bool, quickLabel string, prefixWidth int) string {
+ 	mark := " "
+-	if pinned {
++	if lifted {
+ 		mark = indicatorStyle().Render("▸")
+ 	}
+ 	if selected {
+diff --git a/ui/list_test.go b/ui/list_test.go
+index c88b23b4..0eff3d8f 100644
+--- a/ui/list_test.go
++++ b/ui/list_test.go
+@@ -563,16 +563,16 @@ func TestListSetScrollClampsToBoundsAndCursor(t *testing.T) {
+ 	}
+ }
+ 
+-// newPinnedTestList is the Work dashboard's shape: no quick-access column, so the
+-// prefix's second cell is free for the pin mark (ADR-0209 decision 4).
+-func newPinnedTestList(items []string, pinned ...string) *List[string] {
++// newLiftedTestList is the Work dashboard's shape: no quick-access column, so the
++// prefix's second cell is free for the lift mark (ADR-0209 decision 4).
++func newLiftedTestList(items []string, lifted ...string) *List[string] {
+ 	return NewList(items, Opts[string]{
+ 		Key:             func(s string) string { return s },
+ 		Cell:            func(s string, _ RowState) string { return s },
+ 		Anchor:          AnchorTop,
+ 		TopEdgeOnChrome: true,
+-		Pinned: func(s string) bool {
+-			for _, p := range pinned {
++		Lifted: func(s string) bool {
++			for _, p := range lifted {
+ 				if p == s {
+ 					return true
+ 				}
+@@ -583,10 +583,10 @@ func newPinnedTestList(items []string, pinned ...string) *List[string] {
+ }
+ 
+ // The mark rides the prefix column the cursor already uses: `▸` alone, `█▸` when
+-// the cursor happens to be on the pinned row. Both cells are spent either way, so
+-// the cell text starts at the same offset whether anything is pinned or not.
+-func TestListPinMarkSharesTheCursorPrefixColumn(t *testing.T) {
+-	l := newPinnedTestList(strItems(3), "item-1")
++// the cursor happens to be on the lifted row. Both cells are spent either way, so
++// the cell text starts at the same offset whether anything is lifted or not.
++func TestListLiftMarkSharesTheCursorPrefixColumn(t *testing.T) {
++	l := newLiftedTestList(strItems(3), "item-1")
+ 	l.Resize(3)
+ 
+ 	rows := l.VisibleRows()
+@@ -598,11 +598,11 @@ func TestListPinMarkSharesTheCursorPrefixColumn(t *testing.T) {
+ 
+ 	l.SetCursor(1)
+ 	if got := StripANSI(l.VisibleRows()[1]); got != "█▸item-1" {
+-		t.Fatalf("cursored pinned row = %q, want %q", got, "█▸item-1")
++		t.Fatalf("cursored lifted row = %q, want %q", got, "█▸item-1")
+ 	}
+ 
+-	// The same list with nothing pinned: the cell text starts in the same column,
+-	// so a launch that pins and one that does not line their columns up.
++	// The same list with nothing lifted: the cell text starts in the same column,
++	// so a launch that lifts and one that does not line their columns up.
+ 	plain := newTestList(strItems(3), AnchorTop, false, 0, nil)
+ 	plain.Resize(3)
+ 	for i, row := range append(plain.VisibleRows(), l.VisibleRows()...) {
+@@ -617,13 +617,13 @@ func TestListPinMarkSharesTheCursorPrefixColumn(t *testing.T) {
+ 	}
+ }
+ 
+-// A pin is a starting position, not a frame: scroll past the pinned block and it
++// A lift is a starting position, not a frame: scroll past the lifted block and it
+ // leaves the viewport with everything else (decision 6).
+-func TestListPinnedRowsScrollAwayLikeAnyOther(t *testing.T) {
+-	l := newPinnedTestList(strItems(5), "item-0", "item-1")
++func TestListLiftedRowsScrollAwayLikeAnyOther(t *testing.T) {
++	l := newLiftedTestList(strItems(5), "item-0", "item-1")
+ 	l.Resize(2)
+ 	if got := StripANSI(l.VisibleRows()[0]); !strings.Contains(got, "item-0") {
+-		t.Fatalf("first visible row = %q, want the pinned item-0", got)
++		t.Fatalf("first visible row = %q, want the lifted item-0", got)
+ 	}
+ 
+ 	for range 4 {
+@@ -632,7 +632,7 @@ func TestListPinnedRowsScrollAwayLikeAnyOther(t *testing.T) {
+ 
+ 	for _, row := range l.VisibleRows() {
+ 		if plain := StripANSI(row); strings.Contains(plain, "item-0") || strings.Contains(plain, "item-1") {
+-			t.Fatalf("pinned row still on screen after scrolling to the end: %q", plain)
++			t.Fatalf("lifted row still on screen after scrolling to the end: %q", plain)
+ 		}
+ 	}
+ }
+diff --git a/wayfinder/attribute.go b/wayfinder/attribute.go
+index 3acafd7a..a3551ee6 100644
+--- a/wayfinder/attribute.go
++++ b/wayfinder/attribute.go
+@@ -1,6 +1,8 @@
+ package wayfinder
+ 
+ import (
++	"sort"
++
+ 	"github.com/glebglazov/pop/repogroup"
+ 	"github.com/glebglazov/pop/work"
+ 	"github.com/glebglazov/pop/work/ref"
+@@ -9,7 +11,8 @@ import (
+ // The Map kind's answer to Pane work attribution (ADR-0201): two rungs, because a
+ // Map is the one kind that opens both tagged panes and a session of its own. A
+ // Grilling pane names the ticket it is deciding; the session those panes live in
+-// names the Map.
++// names the Map. Beneath both, the repository pass answers for a shell that merely
++// stands in the repository a Map is rooted at (ADR-0241).
+ 
+ // mapPaneIndex is what one load remembers for attribution: every Map it read,
+ // including the ones the view preset dropped, plus which Maps hold a ticket of a
+@@ -18,6 +21,17 @@ import (
+ type mapPaneIndex struct {
+ 	byMap    map[string]work.AttributedContainer
+ 	byTicket map[string][]string
++	// inRepo is every Map the load read, with the repository its Trunk belongs
++	// to: the ladder's repository pass matches it against the pane's.
++	inRepo []repoMap
++}
++
++// repoMap is one Map as the repository pass sees it: the answer it gives, the
++// repository it lives in, and the row the kind's own order ranks it by.
++type repoMap struct {
++	repoCommonDir string
++	container     work.AttributedContainer
++	sortRow       work.Container
+ }
+ 
+ // recordPanes indexes one Map for attribution, before the view preset has had a
+@@ -27,14 +41,22 @@ func (idx *mapPaneIndex) recordPanes(g repogroup.Group, m Map) {
+ 		idx.byMap = map[string]work.AttributedContainer{}
+ 		idx.byTicket = map[string][]string{}
+ 	}
+-	if _, seen := idx.byMap[m.ID]; seen {
+-		return
+-	}
+-	idx.byMap[m.ID] = work.AttributedContainer{
++	attributed := work.AttributedContainer{
+ 		Ref:       ref.WorkRef{Kind: ref.KindMap, ContainerID: m.ID},
+ 		CursorKey: mapCursorKey(g, m.ID),
+ 		Label:     "map " + m.ID,
+ 	}
++	// Every group's Maps enter the repository pass: the cursor key carries the
++	// group, so two repositories holding a Map of the same id do not collide there.
++	idx.inRepo = append(idx.inRepo, repoMap{
++		repoCommonDir: g.RepoCommonDir,
++		container:     attributed,
++		sortRow:       work.Container{Kind: ref.KindMap, ID: m.ID, Project: g.ProjectName},
++	})
++	if _, seen := idx.byMap[m.ID]; seen {
++		return
++	}
++	idx.byMap[m.ID] = attributed
+ 	for _, t := range m.Tickets {
+ 		idx.byTicket[t.ID] = append(idx.byTicket[t.ID], m.ID)
+ 	}
+@@ -96,6 +118,32 @@ func (k *MapKind) AttributePane(facts work.PaneFacts) (work.Attribution, bool) {
+ 	return work.Attribution{}, false
+ }
+ 
++// AttributePaneRepository answers the ladder's repository pass: every Map rooted
++// at the pane's repository, in the kind's own order. A Map is Trunk-rooted, so no
++// checkout is its own and the neighbourhood pass never reaches it; this pass is
++// how a shell standing anywhere in the repository finds its Maps (ADR-0241
++// decision 3). The group's common directory is the Trunk's repository, the same
++// identity the pane fact carries, so the match forks nothing.
++func (k *MapKind) AttributePaneRepository(facts work.PaneFacts) (work.Attribution, bool) {
++	if facts.RepoCommonDir == "" {
++		return work.Attribution{}, false
++	}
++	var cands []repoMap
++	for _, cand := range k.panes.inRepo {
++		if cand.repoCommonDir == facts.RepoCommonDir {
++			cands = append(cands, cand)
++		}
++	}
++	sort.SliceStable(cands, func(i, j int) bool {
++		return k.Less(cands[i].sortRow, cands[j].sortRow)
++	})
++	att := work.Attribution{}
++	for _, cand := range cands {
++		att.Containers = append(att.Containers, cand.container)
++	}
++	return att, len(att.Containers) > 0
++}
++
+ // mapCursorKey is a Map row's stable cursor identity. The literal "map" segment
+ // keeps it apart from a task set of the same name in the same project.
+ func mapCursorKey(g repogroup.Group, mapID string) string {
+diff --git a/wayfinder/attribute_test.go b/wayfinder/attribute_test.go
+index 683e43df..d350bcc9 100644
+--- a/wayfinder/attribute_test.go
++++ b/wayfinder/attribute_test.go
+@@ -2,6 +2,7 @@ package wayfinder
+ 
+ import (
+ 	"path/filepath"
++	"slices"
+ 	"testing"
+ 
+ 	"github.com/glebglazov/pop/config"
+@@ -20,7 +21,7 @@ import (
+ // attribution beside the containers it was resolved against.
+ func attributeMap(t *testing.T, k *MapKind, facts work.PaneFacts) (*work.Attribution, map[string]work.Container) {
+ 	t.Helper()
+-	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.BuildOptions{Ordering: work.OrderByKindPrecedence, PinPane: true})
++	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.BuildOptions{Ordering: work.OrderByKindPrecedence, Lift: true})
+ 	if err != nil {
+ 		t.Fatalf("BuildSnapshotForPane: %v", err)
+ 	}
+@@ -135,6 +136,48 @@ func TestHiddenMapIsStillAttributed(t *testing.T) {
+ 	}
+ }
+ 
++// The repository pass: a shell that merely stands in the repository a Map is
++// rooted at lifts that repository's live Maps. The abandoned, archived and broken
++// Maps are answered too, and stay hidden: the lift never widens the view.
++func TestRepositoryPaneLiftsTheRepositorysLiveMaps(t *testing.T) {
++	k, group := mapKindFixture(t)
++	_, rows := attributeMap(t, k, work.PaneFacts{
++		PaneID:        "%7",
++		Session:       "editor",
++		Directory:     "/repo/sibling",
++		RepoCommonDir: group.RepoCommonDir,
++	})
++	var lifted []string
++	for id, row := range rows {
++		if row.Lifted {
++			lifted = append(lifted, id)
++		}
++	}
++	slices.Sort(lifted)
++	if want := []string{"2026-07-01-active", "2026-07-02-arrived"}; !slices.Equal(lifted, want) {
++		t.Fatalf("lifted = %v of %d rows, want %v", lifted, len(rows), want)
++	}
++
++	att, _ := attributeMap(t, k, work.PaneFacts{PaneID: "%7", Session: "editor", RepoCommonDir: "/other/.git"})
++	if att != nil {
++		t.Fatalf("a pane in another repository attributed %+v, want nothing", att.Containers)
++	}
++}
++
++// The session stamp outranks the repository pass: a pane in a Map's own session is
++// in that Map's repository too, and still answers with that one Map alone.
++func TestMapSessionIsNotOvertakenByTheRepositoryPass(t *testing.T) {
++	k, group := mapKindFixture(t)
++	att, rows := attributeMap(t, k, work.PaneFacts{
++		PaneID:        "%5",
++		Session:       MapSessionName("2026-07-02-arrived"),
++		WorkKind:      string(ref.KindMap),
++		WorkID:        "2026-07-02-arrived",
++		RepoCommonDir: group.RepoCommonDir,
++	})
++	assertAttributes(t, att, rows, "2026-07-02-arrived")
++}
++
+ func TestPaneOutsideAnyMapAttributesNothing(t *testing.T) {
+ 	k, _ := mapKindFixture(t)
+ 	for _, facts := range []work.PaneFacts{
+diff --git a/work/attribute.go b/work/attribute.go
+index b8f60058..27fd423f 100644
+--- a/work/attribute.go
++++ b/work/attribute.go
+@@ -30,6 +30,11 @@ type PaneFacts struct {
+ 	// WorkKind and WorkID are the Work stamp on the pane's session: a kind's wire
+ 	// name and the container id it hosts. Only a Map stamps one today.
+ 	WorkKind, WorkID string
++	// RepoCommonDir is the canonical git common directory of the repository the
++	// pane's directory is in, empty outside one. It is git's answer, not tmux's,
++	// resolved once at launch so that no snapshot build has to fork for it
++	// (ADR-0241 decision 5).
++	RepoCommonDir string
+ }
+ 
+ // Empty reports facts read from no pane at all — the answer outside tmux, where
+@@ -39,7 +44,7 @@ func (f PaneFacts) Empty() bool { return f == PaneFacts{} }
+ // Attribution names the Work containers a pane belongs to.
+ //
+ // It is a list, not one container, because a pane standing in a checkout several
+-// Task sets are bound to belongs to all of them: the surface pins every one
++// Task sets are bound to belongs to all of them: the surface lifts every one
+ // rather than choosing (ADR-0209 decision 2). Nothing is chosen, so nothing is
+ // explained — an attribution carries no message.
+ type Attribution struct {
+@@ -106,16 +111,30 @@ type PaneNeighbourhoodAttributor interface {
+ 	AttributePaneNeighbourhood(PaneFacts) (Attribution, bool)
+ }
+ 
+-// AttributePane walks the wired kinds and returns the first attribution one of
+-// them makes, or nil when the pane belongs to nothing here.
++// PaneRepositoryAttributor is the weakest seam: a kind answers it with every
++// container of its own that lives in the pane's repository, whichever checkout
++// of it the pane is standing in. It is a third method rather than a branch inside
++// the neighbourhood pass so that a checkout answer from any kind still outranks a
++// repository answer from any kind (ADR-0241 decision 1).
+ //
+-// It walks them twice, which is the ladder (ADR-0201 decision 1). The first pass
+-// asks every kind what pane pop opened this is: a pane pop opened for a Task set
+-// is that set's whatever session it sits in, so the Task-set kind is asked before
+-// the kind that has only a session stamp to go on. Only once no kind recognises
+-// the pane as its own does the second pass ask where the pane is standing, in the
+-// same kind order. A kind not wired onto this page is asked in neither pass, which
+-// is how a Routine pane leaves a page-A cursor alone.
++// A kind answers in the active sort's order: the repository pass has no ranking
++// of its own.
++type PaneRepositoryAttributor interface {
++	AttributePaneRepository(PaneFacts) (Attribution, bool)
++}
++
++// AttributePane walks the wired kinds and returns the attribution they make, or
++// nil when the pane belongs to nothing here.
++//
++// It walks them up to three times, which is the ladder (ADR-0201 decision 1,
++// ADR-0241 decision 1). The first pass asks every kind what pane pop opened this
++// is: a pane pop opened for a Task set is that set's whatever session it sits in,
++// so the Task-set kind is asked before the kind that has only a session stamp to
++// go on. Only once no kind recognises the pane as its own does the second pass
++// ask where the pane is standing, in the same kind order. Only once no kind knows
++// the pane's neighbourhood does the third pass ask which repository the pane is
++// in. A kind not wired onto this page is asked in no pass, which is how a Routine
++// pane leaves a page-A cursor alone.
+ func AttributePane(kinds []Kind, facts PaneFacts) *Attribution {
+ 	if facts.Empty() {
+ 		return nil
+@@ -135,5 +154,21 @@ func AttributePane(kinds []Kind, facts PaneFacts) *Attribution {
+ 			}
+ 		}
+ 	}
++	// The one pass that is not first-hit: it concatenates every kind's answer in
++	// kind precedence order. Its question is plural — the work that lives here —
++	// where the passes above ask what this pane is, so stopping at the first kind
++	// would decide that a repository with a Task set holds nothing else
++	// (ADR-0241 decision 2).
++	var merged Attribution
++	for _, k := range ordered {
++		if attributor, ok := k.(PaneRepositoryAttributor); ok {
++			if att, hit := attributor.AttributePaneRepository(facts); hit {
++				merged.Containers = append(merged.Containers, att.Containers...)
++			}
++		}
++	}
++	if len(merged.Containers) > 0 {
++		return &merged
++	}
+ 	return nil
+ }
+diff --git a/work/attribute_test.go b/work/attribute_test.go
+new file mode 100644
+index 00000000..0fb4ce69
+--- /dev/null
++++ b/work/attribute_test.go
+@@ -0,0 +1,80 @@
++package work_test
++
++import (
++	"slices"
++	"testing"
++
++	"github.com/glebglazov/pop/work"
++	"github.com/glebglazov/pop/work/ref"
++)
++
++// locatedKind is a stub kind that answers the two locality passes from fixed
++// lists, so a test can decide which passes have anything to say.
++type locatedKind struct {
++	stubKind
++	neighbourhood, repository []string
++}
++
++func (k locatedKind) answer(ids []string) (work.Attribution, bool) {
++	att := work.Attribution{}
++	for _, id := range ids {
++		att.Containers = append(att.Containers, work.AttributedContainer{
++			Ref:       ref.WorkRef{Kind: k.id, ContainerID: id},
++			CursorKey: string(k.id) + ":" + id,
++		})
++	}
++	return att, len(att.Containers) > 0
++}
++
++func (k locatedKind) AttributePaneNeighbourhood(work.PaneFacts) (work.Attribution, bool) {
++	return k.answer(k.neighbourhood)
++}
++
++func (k locatedKind) AttributePaneRepository(work.PaneFacts) (work.Attribution, bool) {
++	return k.answer(k.repository)
++}
++
++func attributedKeys(att *work.Attribution) []string {
++	if att == nil {
++		return nil
++	}
++	var keys []string
++	for _, c := range att.Containers {
++		keys = append(keys, c.CursorKey)
++	}
++	return keys
++}
++
++var inRepo = work.PaneFacts{PaneID: "%1", Directory: "/src/app-feature", RepoCommonDir: "/src/app/.git"}
++
++// The repository pass alone concatenates: both kinds holding work in the
++// repository answer, in kind precedence order whatever order they are wired in.
++func TestTheRepositoryPassMergesEveryAnsweringKind(t *testing.T) {
++	maps := locatedKind{stubKind: stubKind{id: ref.KindMap}, repository: []string{"m1"}}
++	sets := locatedKind{stubKind: stubKind{id: ref.KindTaskSet}, repository: []string{"s2", "s1"}}
++
++	got := attributedKeys(work.AttributePane([]work.Kind{maps, sets}, inRepo))
++	want := []string{"task-set:s2", "task-set:s1", "map:m1"}
++	if !slices.Equal(got, want) {
++		t.Fatalf("attributed %v, want %v — every kind's repository answer, sets before maps", got, want)
++	}
++}
++
++// Any kind's neighbourhood answer outranks every kind's repository answer, and the
++// neighbourhood pass stays first-hit.
++func TestANeighbourhoodAnswerSilencesTheRepositoryPass(t *testing.T) {
++	maps := locatedKind{stubKind: stubKind{id: ref.KindMap}, neighbourhood: []string{"m1"}, repository: []string{"m1", "m2"}}
++	sets := locatedKind{stubKind: stubKind{id: ref.KindTaskSet}, repository: []string{"s1"}}
++
++	got := attributedKeys(work.AttributePane([]work.Kind{sets, maps}, inRepo))
++	if want := []string{"map:m1"}; !slices.Equal(got, want) {
++		t.Fatalf("attributed %v, want %v — a checkout beats a mere repository", got, want)
++	}
++}
++
++func TestNoRepositoryAnswerAttributesNothing(t *testing.T) {
++	sets := locatedKind{stubKind: stubKind{id: ref.KindTaskSet}}
++	if att := work.AttributePane([]work.Kind{sets}, inRepo); att != nil {
++		t.Fatalf("attributed %v, want nil", attributedKeys(att))
++	}
++}
+diff --git a/work/conformance_test.go b/work/conformance_test.go
+index 933eb4ed..56da70be 100644
+--- a/work/conformance_test.go
++++ b/work/conformance_test.go
+@@ -57,6 +57,9 @@ type conformanceCase struct {
+ 	// callerModal is a verb the kind hands back for the caller to dispatch, or
+ 	// empty when it has none.
+ 	callerModal work.Verb
++	// wantPasses is the attribution ladder passes the kind answers, in ladder
++	// order: which of "tags", "neighbourhood" and "repository" it implements.
++	wantPasses []string
+ }
+ 
+ func conformanceCases() []conformanceCase {
+@@ -106,6 +109,7 @@ func conformanceCases() []conformanceCase {
+ 			wantSummary:     []string{"1 task set", "1 ready"},
+ 			wantTypeWords:   []string{"task-set", "set", "tasks"},
+ 			callerModal:     setkind.VerbDrain,
++			wantPasses:      []string{"tags", "neighbourhood", "repository"},
+ 		},
+ 		{
+ 			name:        "map",
+@@ -133,6 +137,9 @@ func conformanceCases() []conformanceCase {
+ 			wantCopyActions: []work.Verb{work.VerbCopyName, wayfinder.VerbCopyMapPath},
+ 			wantSummary:     []string{"1 map"},
+ 			wantTypeWords:   []string{"map", "wayfinder", "wayfinding"},
++			// A Map is Trunk-rooted: no checkout is its own, so it has no
++			// neighbourhood to answer, only the repository its Trunk belongs to.
++			wantPasses: []string{"tags", "repository"},
+ 		},
+ 		{
+ 			name:      "routine",
+@@ -169,6 +176,9 @@ func conformanceCases() []conformanceCase {
+ 			wantCopyActions: []work.Verb{work.VerbCopyName},
+ 			wantSummary:     []string{"1 routine", "1 here"},
+ 			wantTypeWords:   []string{"routine"},
++			// A Routine names a schedule, not work in a repository, so it never
++			// answers by locality (ADR-0241 decision 7).
++			wantPasses: []string{"tags"},
+ 		},
+ 	}
+ }
+@@ -354,6 +364,33 @@ func TestKindConformance(t *testing.T) {
+ 					t.Fatalf("type word %q must be lower-case and unpadded", word)
+ 				}
+ 			}
++
++			var passes []string
++			if _, ok := k.(work.PaneAttributor); ok {
++				passes = append(passes, "tags")
++			}
++			if _, ok := k.(work.PaneNeighbourhoodAttributor); ok {
++				passes = append(passes, "neighbourhood")
++			}
++			repository, answersRepository := k.(work.PaneRepositoryAttributor)
++			if answersRepository {
++				passes = append(passes, "repository")
++			}
++			if !slices.Equal(passes, tc.wantPasses) {
++				t.Fatalf("attribution passes = %v, want %v", passes, tc.wantPasses)
++			}
++			// A kind answering the repository pass finds its container from a pane
++			// standing anywhere in the fixture's repository.
++			if answersRepository {
++				att, hit := repository.AttributePaneRepository(work.PaneFacts{
++					PaneID: "%9", Directory: "/repo/elsewhere", RepoCommonDir: f.group.RepoCommonDir,
++				})
++				if !hit || !slices.ContainsFunc(att.Containers, func(a work.AttributedContainer) bool {
++					return a.CursorKey == c.CursorKey
++				}) {
++					t.Fatalf("repository pass = %+v, want it to hold %q", att.Containers, c.CursorKey)
++				}
++			}
+ 		})
+ 	}
+ }
+@@ -421,18 +458,18 @@ func twoKindPage(f fixture) []work.Kind {
+ 	return []work.Kind{maps, sets}
+ }
+ 
+-// The pin is applied after the sort resolves, which is what lets it do something no
++// The lift is applied after the sort resolves, which is what lets it do something no
+ // comparator could: a Map row the launching pane is attributed to sits above the
+ // whole task-set block, while kind precedence and each kind's own order survive
+ // underneath it, unchanged (ADR-0209 decision 1).
+-func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
++func TestAnAttributedMapRowLiftsAboveTheWholeTaskSetBlock(t *testing.T) {
+ 	f := newFixture(t)
+ 
+ 	snap, err := work.BuildSnapshotForPane(twoKindPage(f), work.PaneFacts{
+ 		PaneID:   "%3",
+ 		WorkKind: string(ref.KindMap),
+ 		WorkID:   "2026-07-01-chart",
+-	}, work.BuildOptions{Ordering: work.OrderByKindPrecedence, PinPane: true})
++	}, work.BuildOptions{Ordering: work.OrderByKindPrecedence, Lift: true})
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -440,7 +477,7 @@ func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
+ 	var got []string
+ 	for _, c := range snap.Containers {
+ 		mark := " "
+-		if c.Pinned {
++		if c.Lifted {
+ 			mark = "▸"
+ 		}
+ 		got = append(got, mark+string(c.Kind)+":"+c.ID)
+@@ -455,6 +492,40 @@ func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
+ 	}
+ }
+ 
++// A pane standing in a repository that holds both a Task set and a Map lifts both:
++// the repository pass merges every kind's answer, Task sets ahead of Maps, where a
++// first-hit pass would have stopped at the Task sets (ADR-0241 decision 2).
++func TestARepositoryPaneLiftsItsTaskSetsAheadOfItsMaps(t *testing.T) {
++	f := newFixture(t)
++
++	snap, err := work.BuildSnapshotForPane(twoKindPage(f), work.PaneFacts{
++		PaneID:        "%3",
++		Directory:     "/repo/sibling",
++		RepoCommonDir: f.group.RepoCommonDir,
++	}, work.BuildOptions{Ordering: work.OrderByKindPrecedence, Lift: true})
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	var attributed []string
++	for _, c := range snap.Attribution.Containers {
++		attributed = append(attributed, c.Ref.String())
++	}
++	wantAttributed := []string{
++		"task-set:2026-07-02-later",
++		"task-set:2026-07-01-demo",
++		"map:2026-07-01-chart",
++	}
++	if !slices.Equal(attributed, wantAttributed) {
++		t.Fatalf("attribution = %v, want %v — every kind's work in the repository, Task sets first", attributed, wantAttributed)
++	}
++	for _, c := range snap.Containers {
++		if !c.Lifted {
++			t.Fatalf("%s:%s is not lifted, want every row of the repository lifted", c.Kind, c.ID)
++		}
++	}
++}
++
+ // wantCreatedAt turns a case's `YYYY-MM-DD` expectation into the instant the
+ // stamp must carry, and an empty one into the zero date.
+ func wantCreatedAt(t *testing.T, date string) time.Time {
+diff --git a/work/kind.go b/work/kind.go
+index 8f02ff21..5cd43f06 100644
+--- a/work/kind.go
++++ b/work/kind.go
+@@ -152,11 +152,11 @@ type Container struct {
+ 	// CursorKey is the stable per-container identity a TUI pins cursor memory to
+ 	// across rebuilds.
+ 	CursorKey string
+-	// Pinned marks a container the pane this build was launched from is
++	// Lifted marks a container the pane this build was launched from is
+ 	// attributed to. The builder stamps it while lifting the row to the top of
+ 	// the snapshot, so a surface that renders the mark reads one field instead of
+ 	// re-deriving the attribution its rows already went through (ADR-0209).
+-	Pinned bool
++	Lifted bool
+ 	// Broken marks a container whose definition could not be read at all, with
+ 	// BrokenReason carrying what went wrong. A broken container still renders —
+ 	// hiding a container because it is unreadable hides the thing that needs
+diff --git a/work/snapshot.go b/work/snapshot.go
+index 9ea41395..2c18a917 100644
+--- a/work/snapshot.go
++++ b/work/snapshot.go
+@@ -11,7 +11,7 @@ import (
+ type Snapshot struct {
+ 	// Containers are every loaded Work container in snapshot order — whatever the
+ 	// build's Ordering ranked them by, with the rows the launching pane is
+-	// attributed to lifted first when the build's preset granted the pin. There is
++	// attributed to lifted first when the build's preset granted the lift. There is
+ 	// no second list beside it: a dashboard row is one of these.
+ 	Containers []Container
+ 	// Summary is every kind's header phrases in kind order, already pluralised.
+@@ -25,7 +25,7 @@ type Snapshot struct {
+ 	// Attribution is the containers the pane this build was launched from belongs
+ 	// to, nil when it belongs to none of the kinds on this page. Only a build
+ 	// handed pane facts can carry one; the containers it names that this page
+-	// actually shows are the pinned rows at the head of Containers.
++	// actually shows are the lifted rows at the head of Containers.
+ 	Attribution *Attribution
+ 	// Pane is what the surface knows about its own pane, carried on the build it
+ 	// produced. A surface that rebuilds itself reads the facts once and passes
+@@ -85,16 +85,16 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
+ }
+ 
+ // BuildOptions is what the active Work view preset grants a build: how the page
+-// ranks its rows, and whether the Pane pin applies to it. Both are handed to the
++// ranks its rows, and whether the Work lift applies to it. Both are handed to the
+ // builder as `work`-owned values rather than read from a preset here, so this
+ // seam keeps knowing nothing about config (ADR-0210).
+ type BuildOptions struct {
+ 	// Ordering ranks the containers against each other.
+ 	Ordering Ordering
+-	// PinPane lifts the attributed rows above the ordered list and marks them.
+-	// Only a preset declaring `pin` grants it; attribution itself is computed
+-	// either way, so a build that does not pin still names the pane's containers.
+-	PinPane bool
++	// Lift moves the attributed rows above the ordered list and marks them.
++	// Only a preset declaring `lift` grants it; attribution itself is computed
++	// either way, so a build that does not lift still names the pane's containers.
++	Lift bool
+ }
+ 
+ // BuildSnapshotForPane is BuildSnapshot plus the facts of the pane the surface
+@@ -105,11 +105,11 @@ type BuildOptions struct {
+ // (ADR-0201 decision 3).
+ //
+ // Whether the answer also lifts those rows is the active preset's to grant: the
+-// build pins only when opts.PinPane says the preset declares it, and computes the
++// build lifts only when opts.Lift says the preset declares it, and computes the
+ // attribution regardless, because the cursor landing and the naming that read it
+ // are preset-independent.
+ //
+-// Every build asks again, not just the first. A pin is current: the containers
++// Every build asks again, not just the first. A lift is current: the containers
+ // change between builds — a drain goes live, a set becomes bound — so the answer
+ // derived from the same facts changes with them (ADR-0209 decision 5).
+ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, opts BuildOptions) (Snapshot, error) {
+@@ -142,17 +142,17 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, opts BuildOptions) (Sna
+ 		snap.ModelSkips = append(snap.ModelSkips, skips...)
+ 	}
+ 	snap.Containers = merge(ordered, loaded, opts.Ordering)
+-	// Attribution is asked for under every preset, pinning or not: the surfaces
++	// Attribution is asked for under every preset, lifting or not: the surfaces
+ 	// that name the pane's container and land their first cursor on it read it
+ 	// here, and only the lift below is the preset's to grant.
+ 	snap.Attribution = AttributePane(ordered, facts)
+-	if opts.PinPane {
+-		snap.Containers = pinAttributed(snap.Containers, snap.Attribution)
++	if opts.Lift {
++		snap.Containers = liftAttributed(snap.Containers, snap.Attribution)
+ 	}
+ 	return snap, nil
+ }
+ 
+-// pinAttributed lifts the attributed rows out of the ordered list and puts them
++// liftAttributed lifts the attributed rows out of the ordered list and puts them
+ // first, in the order attribution ranked them, marking each one. Everything else
+ // keeps the order it already had.
+ //
+@@ -163,13 +163,13 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, opts BuildOptions) (Sna
+ // than copied — one container, one row, or the list's cursor keys and its
+ // navigation counts would both lie.
+ //
+-// It runs only for a build whose preset declares `pin`. Under any other preset
++// It runs only for a build whose preset declares `lift`. Under any other preset
+ // the attributed rows keep their sorted position, unmarked.
+ //
+ // A container the attribution names but this build does not hold — one the
+-// active view preset dropped — pins nothing and is not mentioned: the preset is
++// active view preset dropped — lifts nothing and is not mentioned: the preset is
+ // absolute, and a launch does not widen it (decisions 7 and 8).
+-func pinAttributed(containers []Container, att *Attribution) []Container {
++func liftAttributed(containers []Container, att *Attribution) []Container {
+ 	if att == nil || len(att.Containers) == 0 {
+ 		return containers
+ 	}
+@@ -177,25 +177,25 @@ func pinAttributed(containers []Container, att *Attribution) []Container {
+ 	for i, c := range containers {
+ 		byKey[c.CursorKey] = i
+ 	}
+-	pinned := make([]Container, 0, len(att.Containers))
+-	lifted := make(map[int]bool, len(att.Containers))
++	lifted := make([]Container, 0, len(att.Containers))
++	liftedAt := make(map[int]bool, len(att.Containers))
+ 	for _, a := range att.Containers {
+ 		i, ok := byKey[a.CursorKey]
+-		if !ok || a.CursorKey == "" || lifted[i] {
++		if !ok || a.CursorKey == "" || liftedAt[i] {
+ 			continue
+ 		}
+-		lifted[i] = true
++		liftedAt[i] = true
+ 		c := containers[i]
+-		c.Pinned = true
+-		pinned = append(pinned, c)
++		c.Lifted = true
++		lifted = append(lifted, c)
+ 	}
+-	if len(pinned) == 0 {
++	if len(lifted) == 0 {
+ 		return containers
+ 	}
+ 	out := make([]Container, 0, len(containers))
+-	out = append(out, pinned...)
++	out = append(out, lifted...)
+ 	for i, c := range containers {
+-		if !lifted[i] {
++		if !liftedAt[i] {
+ 			out = append(out, c)
+ 		}
+ 	}

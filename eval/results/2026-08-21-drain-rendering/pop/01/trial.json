@@ -1,0 +1,386 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "086f06b6fce02798bfe2ac79f58d9fed4f18de802d3c5bb8a29d5b852c0d6566",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t91.275s\nok  \tgithub.com/glebglazov/pop/config\t1.570s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.308s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t96.159s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.890s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t0.912s\nok  \tgithub.com/glebglazov/pop/integrate\t73.276s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.608s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.532s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.934s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.186s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.252s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.012s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.886s\nok  \tgithub.com/glebglazov/pop/layout\t3.612s\nok  \tgithub.com/glebglazov/pop/monitor\t5.041s\nok  \tgithub.com/glebglazov/pop/project\t4.356s\nok  \tgithub.com/glebglazov/pop/release\t2.329s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.222s\nok  \tgithub.com/glebglazov/pop/routine\t16.707s\nok  \tgithub.com/glebglazov/pop/store\t6.235s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t26.103s\nok  \tgithub.com/glebglazov/pop/tasks\t141.901s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t36.779s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t3.151s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t55.142s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.822s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t1.000s\nok  \tgithub.com/glebglazov/pop/ui\t8.313s\nok  \tgithub.com/glebglazov/pop/wayfinder\t6.503s\nok  \tgithub.com/glebglazov/pop/work\t1.979s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.749s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t87.665s\nok  \tgithub.com/glebglazov/pop/config\t4.321s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t0.472s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t93.217s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.128s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.338s\nok  \tgithub.com/glebglazov/pop/integrate\t70.942s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.070s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.438s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.719s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t3.987s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.082s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.951s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.882s\nok  \tgithub.com/glebglazov/pop/layout\t1.995s\nok  \tgithub.com/glebglazov/pop/monitor\t4.062s\nok  \tgithub.com/glebglazov/pop/project\t3.535s\nok  \tgithub.com/glebglazov/pop/release\t1.974s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.250s\nok  \tgithub.com/glebglazov/pop/routine\t18.830s\nok  \tgithub.com/glebglazov/pop/store\t5.570s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t26.056s\nok  \tgithub.com/glebglazov/pop/tasks\t138.744s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t36.517s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t0.495s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t54.671s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.299s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t5.943s\nok  \tgithub.com/glebglazov/pop/ui\t7.615s\nok  \tgithub.com/glebglazov/pop/wayfinder\t8.178s\nok  \tgithub.com/glebglazov/pop/work\t2.137s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.103s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": false,
+          "reason": "The first line names only the Task set; the Runtime path and binding kind appear on later lines."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "The header prints for whole-set runs both inside and outside the bound checkout."
+        },
+        {
+          "item": 3,
+          "met": false,
+          "reason": "The comparison uses checkout roots, so an invocation from a subdirectory incorrectly omits the invoked-from line."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "A new Default binding adds the required announcement."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "The old conditional bound-checkout line is removed."
+        },
+        {
+          "item": 6,
+          "met": false,
+          "reason": "A single-task HITL target returns through its gate before the current-checkout line prints."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Successful task completion prints one green done line."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "The commit SHA or verified no-op detail prints beneath the done line."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "The old Completed task line is replaced without adding a second success result."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Exhausted task failures retain Failed state and print one red failed line."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Provider exhaustion prints one red out-of-agents result and leaves the task Open."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Quota pause prints the yellow result with the selected preset."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "An interrupted attempt prints the yellow interrupted result."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Blocked and Deferred remain set-level reports; executed tasks retain their own results."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Attempt failure, breakdown, and exhausted-walk output remain intact."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "The shared output formatter preserves complete lines without ANSI escapes when redirected."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "The shared formatter applies terminal color and respects NO_COLOR."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "The new output functions add no Work journal writes."
+        }
+      ],
+      "list_ratio": 0.8333333333333334,
+      "quality": 3,
+      "rationale": "Clear, small changes with useful tests, but header placement and directory edge cases remain; tests miss subdirectory and single-task HITL paths."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "5dfbca2b-52ac-4d6c-bcee-6f749066354e",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 383551,
+          "Output": 1231,
+          "CacheRead": 322304,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 8,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 67006,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 NOT_MET: The first line names only the Task set; the Runtime path and binding kind appear on later lines.\nITEM 2 MET: The header prints for whole-set runs both inside and outside the bound checkout.\nITEM 3 NOT_MET: The comparison uses checkout roots, so an invocation from a subdirectory incorrectly omits the invoked-from line.\nITEM 4 MET: A new Default binding adds the required announcement.\nITEM 5 MET: The old conditional bound-checkout line is removed.\nITEM 6 NOT_MET: A single-task HITL target returns through its gate before the current-checkout line prints.\nITEM 7 MET: Successful task completion prints one green done line.\nITEM 8 MET: The commit SHA or verified no-op detail prints beneath the done line.\nITEM 9 MET: The old Completed task line is replaced without adding a second success result.\nITEM 10 MET: Exhausted task failures retain Failed state and print one red failed line.\nITEM 11 MET: Provider exhaustion prints one red out-of-agents result and leaves the task Open.\nITEM 12 MET: Quota pause prints the yellow result with the selected preset.\nITEM 13 MET: An interrupted attempt prints the yellow interrupted result.\nITEM 14 MET: Blocked and Deferred remain set-level reports; executed tasks retain their own results.\nITEM 15 MET: Attempt failure, breakdown, and exhausted-walk output remain intact.\nITEM 16 MET: The shared output formatter preserves complete lines without ANSI escapes when redirected.\nITEM 17 MET: The shared formatter applies terminal color and respects NO_COLOR.\nITEM 18 MET: The new output functions add no Work journal writes.\nQUALITY 3: Clear, small changes with useful tests, but header placement and directory edge cases remain; tests miss subdirectory and single-task HITL paths.\n"
+  },
+  "case": "2026-08-21-drain-rendering",
+  "arm": "pop",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "started_at": "2026-09-23T17:26:55.357631Z",
+  "ended_at": "2026-09-23T17:58:35.017179Z",
+  "outcome": "completed",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-3388508405",
+  "set_status": "DONE",
+  "set_spend": {
+    "task_set_id": "2026-08-21-drain-rendering",
+    "completed_tasks": 2,
+    "tokens_per_completed_task": 1363068,
+    "implement_input_tokens": 102,
+    "implement_output_tokens": 37509,
+    "implement_cache_read_tokens": 2483848,
+    "implement_cache_write_tokens": 204678,
+    "implement_partial_cost_usd": 2.8847815999999997,
+    "implement_notional_cost_usd": 2.8847815999999997,
+    "implement_run_count": 3,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 14,
+    "verification_output_tokens": 3599,
+    "verification_cache_read_tokens": 208323,
+    "verification_cache_write_tokens": 36352,
+    "verification_partial_cost_usd": 0.4045166,
+    "verification_notional_cost_usd": 0.4045166,
+    "verification_run_count": 1,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 26,
+    "refine_output_tokens": 4220,
+    "refine_cache_read_tokens": 446114,
+    "refine_cache_write_tokens": 44524,
+    "refine_partial_cost_usd": 0.5299188,
+    "refine_notional_cost_usd": 0.5299188,
+    "refine_run_count": 1,
+    "refine_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "",
+        "title": "",
+        "input_tokens": 26,
+        "output_tokens": 7140,
+        "cache_read_tokens": 631388,
+        "cache_write_tokens": 75274,
+        "partial_cost_usd": 0.8713736000000001,
+        "notional_cost_usd": 0.8713736000000001,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 13,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 75276,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 26,
+            "output_tokens": 7140,
+            "cache_read_tokens": 631388,
+            "cache_write_tokens": 75274
+          }
+        }
+      },
+      {
+        "task_id": "01-drain-header",
+        "title": "Drain header",
+        "input_tokens": 36,
+        "output_tokens": 17076,
+        "cache_read_tokens": 955490,
+        "cache_write_tokens": 72249,
+        "partial_cost_usd": 1.1107539999999998,
+        "notional_cost_usd": 1.1107539999999998,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 18,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 79146,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 36,
+            "output_tokens": 17076,
+            "cache_read_tokens": 955490,
+            "cache_write_tokens": 72249
+          }
+        }
+      },
+      {
+        "task_id": "02-task-result-line",
+        "title": "Task result line",
+        "input_tokens": 40,
+        "output_tokens": 13293,
+        "cache_read_tokens": 896970,
+        "cache_write_tokens": 57155,
+        "partial_cost_usd": 0.902654,
+        "notional_cost_usd": 0.902654,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 20,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 64052,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 40,
+            "output_tokens": 13293,
+            "cache_read_tokens": 896970,
+            "cache_write_tokens": 57155
+          }
+        }
+      },
+      {
+        "task_id": "refine",
+        "title": "Refine",
+        "input_tokens": 26,
+        "output_tokens": 4220,
+        "cache_read_tokens": 446114,
+        "cache_write_tokens": 44524,
+        "partial_cost_usd": 0.5299188,
+        "notional_cost_usd": 0.5299188,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 13,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 51421,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 26,
+            "output_tokens": 4220,
+            "cache_read_tokens": 446114,
+            "cache_write_tokens": 44524
+          }
+        }
+      },
+      {
+        "task_id": "verify",
+        "title": "Verify",
+        "input_tokens": 14,
+        "output_tokens": 3599,
+        "cache_read_tokens": 208323,
+        "cache_write_tokens": 36352,
+        "partial_cost_usd": 0.4045166,
+        "notional_cost_usd": 0.4045166,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 7,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 43249,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 14,
+            "output_tokens": 3599,
+            "cache_read_tokens": 208323,
+            "cache_write_tokens": 36352
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}
