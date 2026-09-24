@@ -1,0 +1,17 @@
+{
+  "name": "2026-09-07-exploration-report",
+  "repository_url": "git@github.com:glebglazov/pop.git",
+  "parent_commit": "647143bb0a85ae9fcbfe009818a700f03cf0a05f",
+  "reference_range": "647143bb0a85ae9fcbfe009818a700f03cf0a05f..8c89251e1e5cfa8ff8bd1a248193b211f67c1ec6",
+  "gate_commands": [
+    "go build ./...",
+    "go vet ./...",
+    "go test ./..."
+  ],
+  "scope": [
+    "."
+  ],
+  "standard_documents": [
+    "AGENTS.md"
+  ]
+}
