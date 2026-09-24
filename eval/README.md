@@ -3,6 +3,63 @@
 Eval compares the cost and graded quality of multiple ways to complete the same
 work. Run it from the repository root with `go run ./eval`.
 
+## How the parts fit
+
+The Eval has two stages. Stage A prepares a Case once, and gives it an
+Acceptance list that the Reference was held to. Stage B runs and grades Trials,
+one for each Arm and repeat, against that list.
+
+```text
+Stage A (once for each Case)                    Stage B (for each Arm and repeat)
+────────────────────────────                    ─────────────────────────────────
+prepare ─► case.json, spec.md, tasks/           run ─► trial.json + diff.patch
+draft-acceptance ─► acceptance.md (draft)              │
+human edits the list, Status: approved                 │
+reference-check ─► grade(Reference diff)        grade ─► grade(Trial diff)
+        │  writes reference-check/result.json           writes the grade and the list
+        ▼                                               digest into trial.json
+each failed item: fix the item, or                      │
+accept it with a reason                                 ▼
+        │                                       rollup ─► counts a grade made with
+        └─► loop until clean ─► unlocks ─────►  an earlier list as stale
+                                run and grade
+```
+
+### One grade sequence
+
+The Reference check and `grade` use the same sequence. Only the diff is
+different. Each step can stop the grade:
+
+1. Clone the parent commit and apply the diff. When the diff does not apply,
+   the grade stops with `restore graded tree`.
+2. Record each changed file outside `scope`.
+3. Run the Baseline gates on a clean parent clone. A failure gives
+   `baseline_failed`: the Case is broken, not the diff.
+4. Run the Objective gates on the patched clone. A failure gives
+   `gate_failed` with zero scores, and the Grader does not run.
+5. Give the Grader the diff, the Acceptance list, the quoted standard
+   documents and the scope flag, in a separate parent clone. The Grader does
+   not see `spec.md`, the Arm, or the Reference. So each item must be correct
+   without the spec.
+6. Record one met or not-met decision with a reason for each item, and a
+   quality score.
+
+[Grade a Trial](#grade-a-trial) gives the details of each step.
+
+### What connects the parts
+
+| Link | Connects | A change to it |
+|---|---|---|
+| `parent_commit` | the start tree of every grade, for the Reference and for each Trial | The Reference diff must still apply to it. When a Case's parent is ported, port the Reference range too, and make the Reference's tests obey the parent's test rules. |
+| Acceptance digest | the list, the Reference check, and each Trial grade | The check becomes stale. The Rollup counts the earlier grades as stale. |
+| Grader agent | `eval/graders/<name>.toml` and the Reference check | The check becomes stale. |
+| `reference_range` | `case.json` and the Reference check | The check becomes stale. |
+| `accepted` reasons | the human's decisions and the lock on `run` and `grade` | A reason stays only while its item's behaviour text stays the same. |
+
+The lock: `run` and `grade` refuse a Case until its list is approved and its
+Reference check is current and clean. See
+[Check the Acceptance list against the Reference](#check-the-acceptance-list-against-the-reference).
+
 ## Case layout
 
 A Case is a portable directory under `eval/cases/<name>/`:
