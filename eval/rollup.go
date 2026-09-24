@@ -36,6 +36,9 @@ type evalRollupRow struct {
 	Invalid          int          `json:"invalid"`
 	Lost             int          `json:"lost"`
 	Ungraded         int          `json:"ungraded"`
+	// Stale counts graded Trials whose Grader read another version of the
+	// Case's Acceptance list than the one the Case holds now.
+	Stale int `json:"stale"`
 }
 
 type evalRollup struct {
@@ -81,14 +84,15 @@ func runRollupCommand(args []string) error {
 	flags := flag.NewFlagSet("rollup", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	results := flags.String("results", defaultResultsRoot, "Trial record directory root")
+	cases := flags.String("cases", defaultCasesRoot, "Case directory root")
 	jsonOutput := flags.Bool("json", false, "Emit the Rollup as JSON")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: go run ./eval rollup [--results <dir>] [--json]")
+		return errors.New("usage: go run ./eval rollup [--results <dir>] [--cases <dir>] [--json]")
 	}
-	rollup, err := loadEvalRollup(*results)
+	rollup, err := loadEvalRollup(*results, *cases)
 	if err != nil {
 		return err
 	}
@@ -105,8 +109,12 @@ func renderEvalRollupJSON(w io.Writer, rollup evalRollup) error {
 	return encoder.Encode(rollup)
 }
 
-func loadEvalRollup(root string) (evalRollup, error) {
+// loadEvalRollup groups every Trial record under root by Case and Arm. cases is
+// read only for each Case's current Acceptance list, so a grade made with an
+// older list is counted as stale.
+func loadEvalRollup(root, cases string) (evalRollup, error) {
 	groups := map[string]*rollupAccumulator{}
+	digests := map[string]string{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -130,6 +138,18 @@ func loadEvalRollup(root string) (evalRollup, error) {
 		if group == nil {
 			group = &rollupAccumulator{row: evalRollupRow{Case: record.Case, Arm: record.Arm}}
 			groups[key] = group
+		}
+		if record.Grade != nil && record.Grade.Status == "graded" {
+			digest, known := digests[record.Case]
+			if !known {
+				if data, err := os.ReadFile(filepath.Join(cases, record.Case, acceptanceName)); err == nil {
+					digest = acceptanceDigest(string(data))
+				}
+				digests[record.Case] = digest
+			}
+			if digest == "" || record.Grade.AcceptanceDigest != digest {
+				group.row.Stale++
+			}
 		}
 		return group.add(record)
 	})
@@ -329,13 +349,13 @@ func medianSorted(values []float64) float64 {
 }
 
 func renderEvalRollup(w io.Writer, rollup evalRollup) {
-	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %7s %4s %4s %4s %4s %4s %4s %s\n",
-		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "quality", "gate", "base", "time", "inv", "lost", "ungr", "blind tok/$/turn/peak/wall")
+	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %7s %4s %4s %4s %4s %4s %4s %5s %s\n",
+		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "quality", "gate", "base", "time", "inv", "lost", "ungr", "stale", "blind tok/$/turn/peak/wall")
 	for _, row := range rollup.Rows {
-		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %7s %4d %4d %4d %4d %4d %4d %d/%d/%d/%d/%d\n",
+		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %7s %4d %4d %4d %4d %4d %4d %5d %d/%d/%d/%d/%d\n",
 			row.Case, row.Arm, row.Trials,
 			formatMetric(row.TotalTokens, 0), formatMetric(row.NotionalCostUSD, 4), formatMetric(row.Turns, 1), formatMetric(row.PeakInputTokens, 0), formatMetric(row.WallClockSeconds, 1),
-			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded,
+			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale,
 			row.TotalTokens.Blind, row.NotionalCostUSD.Blind, row.Turns.Blind, row.PeakInputTokens.Blind, row.WallClockSeconds.Blind)
 	}
 }

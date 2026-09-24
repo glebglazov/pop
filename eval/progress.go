@@ -72,7 +72,7 @@ func (p evalProgress) wait(trial, phase string, ceiling time.Duration) func() {
 					return
 				default:
 				}
-				line := fmt.Sprintf("Trial %s waiting: phase=%s elapsed=%s", wait.trial, wait.phase, tick.Sub(started).Round(time.Second))
+				line := fmt.Sprintf("%s waiting: phase=%s elapsed=%s", wait.trial, wait.phase, tick.Sub(started).Round(time.Second))
 				if wait.ceiling > 0 {
 					line += " ceiling=" + wait.ceiling.String()
 				}
@@ -98,7 +98,13 @@ func boundedPhase(phase string) string {
 	return phase[:max-3] + "..."
 }
 
+// trialLabel names a Trial as the subject of a progress line. The shared
+// grading steps print their subject first, so a Reference check reads apart.
 func trialLabel(caseName, arm string, repeat int) string {
+	return "Trial " + trialIdentity(caseName, arm, repeat)
+}
+
+func trialIdentity(caseName, arm string, repeat int) string {
 	return fmt.Sprintf("Case=%s Arm=%s repeat=%d", caseName, arm, repeat)
 }
 

@@ -142,23 +142,32 @@ func TestRunMatrixGradesSavedPatchWithoutArmInvocation(t *testing.T) {
 
 func TestSelectCasesDefaultsToEveryApprovedCase(t *testing.T) {
 	root := t.TempDir()
+	_, _, grader := testGrader(t, t.TempDir())
 	for _, fixture := range []struct {
 		name, status string
-	}{{"approved-a", "approved"}, {"draft", "draft"}, {"approved-b", "approved"}} {
+		checked      bool
+	}{{"approved-a", "approved", true}, {"draft", "draft", false}, {"approved-b", "approved", true}, {"unchecked", "approved", false}} {
 		dir := filepath.Join(root, fixture.name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		manifest, _ := json.Marshal(caseManifest{Name: fixture.name, RepositoryURL: "https://example.test/repo.git", ParentCommit: "abc", ReferenceRange: "abc..def"})
 		writeFile(t, filepath.Join(dir, caseManifestName), string(manifest))
-		writeFile(t, filepath.Join(dir, acceptanceName), "Status: "+fixture.status+"\n")
+		list := "Status: " + fixture.status + "\n\n1. Work is done.\n"
+		if fixture.checked {
+			approveCase(t, dir, list, grader)
+		} else {
+			writeFile(t, filepath.Join(dir, acceptanceName), list)
+		}
 	}
-	selected, err := selectCases(root, nil)
+	selected, err := selectCases(root, nil, grader)
 	if err != nil || strings.Join(selected, ",") != "approved-a,approved-b" {
 		t.Fatalf("selected Cases = %v, %v", selected, err)
 	}
-	if _, err := selectCases(root, []string{"draft"}); err == nil {
-		t.Fatal("explicit draft Case was accepted")
+	for _, name := range []string{"draft", "unchecked"} {
+		if _, err := selectCases(root, []string{name}, grader); err == nil {
+			t.Fatalf("explicit %s Case was accepted", name)
+		}
 	}
 }
 
@@ -197,7 +206,21 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 		data, _ := json.Marshal(record)
 		writeFile(t, filepath.Join(dir, "trial.json"), string(data))
 	}
-	rollup, err := loadEvalRollup(root)
+	// Repeat 1 was graded with the Case's current list, the Lost repeat 5 with
+	// an earlier one, so only repeat 5 is stale.
+	cases := filepath.Join(t.TempDir(), "case-a")
+	if err := os.MkdirAll(cases, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	list := "Status: approved\n\n1. Work is done.\n"
+	writeFile(t, filepath.Join(cases, acceptanceName), list)
+	records[0].Grade.AcceptanceDigest = acceptanceDigest(list)
+	records[4].Grade.AcceptanceDigest = acceptanceDigest("1. Earlier work.\n")
+	for _, record := range records[:5:5] {
+		data, _ := json.Marshal(record)
+		writeFile(t, filepath.Join(root, record.Case, record.Arm, fmt.Sprintf("%02d", record.Repeat), "trial.json"), string(data))
+	}
+	rollup, err := loadEvalRollup(root, filepath.Dir(cases))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +237,10 @@ func TestEvalRollupFiguresCountsAndBlindValues(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 	blind := rollup.Rows[1]
-	if blind.TotalTokens.Median != nil || blind.TotalTokens.Blind != 2 || blind.Ungraded != 1 {
+	if row.Stale != 1 {
+		t.Fatalf("stale = %d, want 1", row.Stale)
+	}
+	if blind.TotalTokens.Median != nil || blind.TotalTokens.Blind != 2 || blind.Ungraded != 1 || blind.Stale != 0 {
 		t.Fatalf("blind row = %+v", blind)
 	}
 	// A Trial whose parent tree already fails a gate keeps its work-shape

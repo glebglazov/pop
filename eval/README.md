@@ -112,6 +112,44 @@ files cannot contain these overrides. Unknown top-level keys are refused.
 Keep the Agent preset and model equal across the Bare and Pop arms to compare
 Pop's effect. The shipped Bare arm uses `claude` with `opus`.
 
+## Check the Acceptance list against the Reference
+
+```sh
+go run ./eval reference-check <case>
+```
+
+The Grader grades the Case's Reference diff against `acceptance.md`, whatever
+its status, before a human approves the list. The Reference diff is read from
+`reference_range` and applied to the parent commit. Then the Baseline gates,
+the Objective gates and the Grader run on it exactly as for a Trial.
+
+The result is `reference-check/result.json` in the Case directory, with the
+Grader's captured runs under `reference-check/runs/`. It holds the digest of
+the list's numbered behaviours, the Grader agent and model, the Reference
+range, the grade, and `accepted`: the human's reasons for items that the
+Reference fails. The command prints each such item without an accepted reason
+as `unaccepted=[...]`.
+
+For each unaccepted item, compare it with the spec, not with the Reference:
+
+- If the item says more or less than the spec, fix the item and run the check
+  again.
+- If the item is correct and the Reference misses the behaviour, add an entry
+  to `accepted` with the item's number, its exact behaviour text, and the
+  reason.
+
+Accepted reasons stay in the check record, not in `acceptance.md`, because the
+Grader reads the list for every Trial. When the check runs again, a reason
+stays with its behaviour text, under the item's new number. A reason whose
+behaviour text changed is dropped.
+
+`run` and `grade` use a list only when it has `Status: approved` and its
+Reference check is current: the digest, the Grader and the Reference range
+agree with the Case, the grade is `graded`, and every failed item has an
+accepted reason. An edit to a behaviour makes the check stale. An edit to the
+status line or to a heading does not. `--cases`, `--arms`, `--graders`,
+`--config`, `--work`, and `--timeout` work as for `grade`.
+
 ## Run the Trial Matrix
 
 ```sh
@@ -127,7 +165,7 @@ go run ./eval run --case <first-case> --case <second-case> --arm bare --arm pop 
 
 With no selection flags, the command runs every approved Case against the Bare
 and Pop arms at repeat 1. A selected Acceptance list must have
-`Status: approved`. Before it creates a clone, the command checks approval,
+`Status: approved` and a current Reference check. Before it creates a clone, the command checks approval,
 that every selected Arm's agent binary is available, that the `pop` binary is
 available when a Pop arm is selected, and that the work and result roots are
 writable. A preflight failure aborts the Matrix without a Trial attempt or
@@ -351,3 +389,8 @@ spend and work-shape figures but no quality figures. An absent
 figure is `—`; the final column counts token-, rate-, turn-, peak-, and
 wall-clock-blind Trials. `--json` emits these same rows and uses `null` for
 absent medians and spreads. Use `--results` to read another Trial record root.
+
+The `stale` count is the graded Trials whose Grader read another version of the
+Case's Acceptance list than the one in `eval/cases` now, or a grade that names
+no list. Their scores still count in the medians. Grade them again before you
+compare them. `--cases` selects another Case root.

@@ -34,7 +34,11 @@ func TestPopTrialCommand(t *testing.T) {
 	raw, _ := json.Marshal(caseManifest{Name: "example", RepositoryURL: repo, ParentCommit: parent, ReferenceRange: parent + "..HEAD", GateCommands: []string{"test ! -e new.txt"}})
 	writeFile(t, filepath.Join(caseDir, caseManifestName), string(raw))
 	writeFile(t, filepath.Join(caseDir, "spec.md"), "Change the file.\n")
-	writeFile(t, filepath.Join(caseDir, acceptanceName), "Status: approved\n\n1. File changes.\n")
+	grader, err := loadGrader("config.toml", "graders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveCase(t, caseDir, "Status: approved\n\n1. File changes.\n", grader)
 	writeFile(t, filepath.Join(caseDir, "tasks", "index.json"), `{"tasks":[{"id":"change","file":"change.md","title":"Change","type":"AFK","status":"open","blocked_by":[]}]}`)
 	writeFile(t, filepath.Join(caseDir, "tasks", "change.md"), "## Acceptance criteria\n\n- [ ] File changes.\n")
 	human := filepath.Join(root, "human-data")
@@ -129,7 +133,7 @@ esac
 			}
 			var progress bytes.Buffer
 			waits, stopped := []evalWait{}, 0
-			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling, "--keep-work"}, evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)})
+			err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "pop", "--cases", cases, "--arms", "arms", "--graders", "graders", "--config", "config.toml", "--work", filepath.Join(root, "work"), "--results", results, "--pop", binary, "--repeat", fmt.Sprint(i + 1), "--ceiling", ceiling, "--keep-work"}, evalProgress{out: &progress, waiter: recordingWaiter(&waits, &stopped)})
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}

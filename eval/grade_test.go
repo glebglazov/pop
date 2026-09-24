@@ -43,7 +43,11 @@ func TestGradeTrialCommand(t *testing.T) {
 	writeFile(t, filepath.Join(graders, "grader.toml"), "kind = 'bare'\nagent = 'claude'\nmodel = 'claude-test'\n")
 	config := filepath.Join(root, "config.toml")
 	writeFile(t, config, "grader_arm = 'grader'\n")
-	writeFile(t, filepath.Join(caseDir, acceptanceName), "# Acceptance list\n\nStatus: approved\n\n1. The file changes.\n2. Compatibility is retained.\n")
+	acceptance := "# Acceptance list\n\nStatus: approved\n\n1. The file changes.\n2. Compatibility is retained.\n"
+	grader, err := loadGrader(config, graders)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bin := t.TempDir()
 	agent := `#!/bin/sh
 for argument in "$@"; do prompt="$argument"; done
@@ -80,6 +84,7 @@ cat "$FAKE_GRADE_REPLY"
 			}}
 			data, _ := json.Marshal(manifest)
 			writeFile(t, filepath.Join(caseDir, caseManifestName), string(data))
+			approveCase(t, caseDir, acceptance, grader)
 			results := filepath.Join(root, tc.name)
 			resultDir := filepath.Join(results, "example", "hidden-arm-name", "01")
 			if err := os.MkdirAll(resultDir, 0o755); err != nil {
@@ -114,7 +119,7 @@ cat "$FAKE_GRADE_REPLY"
 			var got trialRecord
 			decodeJSONFile(t, filepath.Join(resultDir, "trial.json"), &got)
 			g := got.Grade
-			if g == nil || g.Status != tc.status || len(g.BaselineGates) != 3 || g.BaselineGates[0].Output != "parent\n" || g.BaselineGates[2].Output != "last gate ran" {
+			if g == nil || g.Status != tc.status || g.AcceptanceDigest != acceptanceDigest(acceptance) || len(g.BaselineGates) != 3 || g.BaselineGates[0].Output != "parent\n" || g.BaselineGates[2].Output != "last gate ran" {
 				t.Fatalf("grade = %+v", g)
 			}
 			if got.Spend.Tokens.Input != 999 {

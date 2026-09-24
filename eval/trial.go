@@ -75,7 +75,11 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	if flags.NArg() != 0 || *ceiling <= 0 || *gradeTimeout <= 0 {
 		return errors.New("usage: go run ./eval run [--case <name>] [--arm <arm>] [--repeat N] [--ceiling 4h] [--keep-work] [--redo]")
 	}
-	selectedCases, err := selectCases(*cases, caseNames)
+	grader, err := loadGrader(*configPath, *graders)
+	if err != nil {
+		return err
+	}
+	selectedCases, err := selectCases(*cases, caseNames, grader)
 	if err != nil {
 		return err
 	}
@@ -106,7 +110,7 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 		return err
 	}
 	sort.Ints(repeats)
-	trialOpts := trialOptions{cases: *cases, arms: *arms, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
+	trialOpts := trialOptions{cases: *cases, arms: *arms, grader: grader, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
 	return runMatrix(selectedCases, armNames, repeats, *results, *redo, progress,
 		func(name, arm string, repeat int) (string, error) {
 			return runOneTrial(name, arm, repeat, trialOpts)
@@ -170,12 +174,12 @@ func runMatrix(cases, arms []string, repeats []int, results string, redo bool, p
 		for _, name := range cases {
 			for _, arm := range arms {
 				position++
-				label := trialLabel(name, arm, repeat)
+				label := trialIdentity(name, arm, repeat)
 				resultDir := filepath.Join(results, name, arm, fmt.Sprintf("%02d", repeat))
 				recordPath := filepath.Join(resultDir, "trial.json")
 				existing, exists, err := readTrialRecord(recordPath)
 				if err != nil {
-					return fmt.Errorf("Trial %s phase resume: %w", label, err)
+					return fmt.Errorf("%s phase resume: %w", label, err)
 				}
 				outcome := ""
 				if redo || !exists || (existing.Outcome == outcomeInvalid && existing.Attempts < 2) {
@@ -194,7 +198,7 @@ func runMatrix(cases, arms []string, repeats []int, results string, redo bool, p
 					if outcome == outcomeInvalid {
 						record, _, readErr := readTrialRecord(recordPath)
 						if readErr != nil {
-							return fmt.Errorf("Trial %s phase Invalid Trial retry: %w", label, readErr)
+							return fmt.Errorf("%s phase Invalid Trial retry: %w", label, readErr)
 						}
 						if record.Attempts < 2 {
 							progress.line("Trial %d/%d %s: Invalid Trial retry attempt=%d reason=%s", position, total, label, record.Attempts+1, record.Reason)
@@ -202,7 +206,7 @@ func runMatrix(cases, arms []string, repeats []int, results string, redo bool, p
 						}
 					}
 					if err != nil && outcome != outcomeInvalid && outcome != outcomeLost {
-						return fmt.Errorf("Trial %s: %w", label, err)
+						return fmt.Errorf("%s: %w", label, err)
 					}
 				} else if existing.Grade != nil {
 					progress.line("Trial %d/%d %s attempt=%d skipped: saved Trial already has grade=%s result=%s", position, total, label, existing.Attempts, existing.Grade.Status, resultDir)
@@ -211,11 +215,11 @@ func runMatrix(cases, arms []string, repeats []int, results string, redo bool, p
 					progress.line("Trial %d/%d %s attempt=%d resumed: saved patch will be graded without another Arm invocation", position, total, label, existing.Attempts)
 				}
 				if err := gradeOneTrial(name, arm, repeat); err != nil {
-					return fmt.Errorf("Trial %s phase grading: %w", label, err)
+					return fmt.Errorf("%s phase grading: %w", label, err)
 				}
 				record, _, err := readTrialRecord(recordPath)
 				if err != nil {
-					return fmt.Errorf("Trial %s phase completion: %w", label, err)
+					return fmt.Errorf("%s phase completion: %w", label, err)
 				}
 				progress.line("Trial %d/%d %s finished: outcome=%s %s result=%s", position, total, label, record.Outcome, gradeSummary(record), resultDir)
 			}
@@ -300,14 +304,14 @@ func uniqueSelections(kind string, values []string) error {
 	return nil
 }
 
-func selectCases(root string, selected []string) ([]string, error) {
+func selectCases(root string, selected []string, grader armFile) ([]string, error) {
 	if len(selected) > 0 {
 		for _, name := range selected {
 			caseDir, err := resolveCaseDir(name, root)
 			if err != nil {
 				return nil, err
 			}
-			if _, err := loadApprovedAcceptance(caseDir); err != nil {
+			if _, err := loadApprovedAcceptance(caseDir, grader); err != nil {
 				return nil, err
 			}
 		}
@@ -327,7 +331,7 @@ func selectCases(root string, selected []string) ([]string, error) {
 		if err != nil || manifest.Name != entry.Name() {
 			continue
 		}
-		if _, err := loadApprovedAcceptance(caseDir); err == nil {
+		if _, err := loadApprovedAcceptance(caseDir, grader); err == nil {
 			approved = append(approved, entry.Name())
 		}
 	}
@@ -339,6 +343,7 @@ func selectCases(root string, selected []string) ([]string, error) {
 
 type trialOptions struct {
 	cases, arms, work, results, pop string
+	grader                          armFile
 	ceiling                         time.Duration
 	keepWork                        bool
 	progress                        evalProgress
@@ -356,7 +361,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	if !namePattern.MatchString(manifest.Name) || manifest.Name != name {
 		return "", fmt.Errorf("invalid Case name %q", manifest.Name)
 	}
-	if _, err := loadApprovedAcceptance(caseDir); err != nil {
+	if _, err := loadApprovedAcceptance(caseDir, opts.grader); err != nil {
 		return "", err
 	}
 	selected, err := loadArm(opts.arms, armName)
@@ -391,14 +396,14 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	record := trialRecord{Case: manifest.Name, Arm: armName, Repeat: repeat, Attempts: attempts, Model: selected.Model, WorkDir: workDir, StartedAt: time.Now().UTC(), Outcome: outcomeInvalid}
 	label := trialLabel(manifest.Name, armName, repeat)
 	cloneDir := filepath.Join(workDir, "repository")
-	opts.progress.line("Trial %s attempt=%d preparation started", label, attempts)
+	opts.progress.line("%s attempt=%d preparation started", label, attempts)
 	stopWaiting := opts.progress.wait(label, "repository preparation", 0)
 	trialErr := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, cloneDir)
 	stopWaiting()
 	var patch []byte
 	if trialErr == nil {
-		opts.progress.line("Trial %s attempt=%d preparation finished", label, attempts)
-		opts.progress.line("Trial %s attempt=%d Arm execution started", label, attempts)
+		opts.progress.line("%s attempt=%d preparation finished", label, attempts)
+		opts.progress.line("%s attempt=%d Arm execution started", label, attempts)
 		armPhase := "Bare-agent invocation"
 		if selected.Kind == "pop" {
 			armPhase = "Pop drain"
@@ -413,14 +418,14 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 		}
 		stopWaiting()
 		if trialErr != nil {
-			opts.progress.line("Trial %s attempt=%d Arm execution finished: outcome=%s error=%v", label, attempts, record.Outcome, trialErr)
+			opts.progress.line("%s attempt=%d Arm execution finished: outcome=%s error=%v", label, attempts, record.Outcome, trialErr)
 		} else {
-			opts.progress.line("Trial %s attempt=%d Arm execution finished: outcome=%s", label, attempts, record.Outcome)
+			opts.progress.line("%s attempt=%d Arm execution finished: outcome=%s", label, attempts, record.Outcome)
 		}
 		if evidenceErr != nil {
-			opts.progress.line("Trial %s attempt=%d evidence saving failed: %v", label, attempts, evidenceErr)
+			opts.progress.line("%s attempt=%d evidence saving failed: %v", label, attempts, evidenceErr)
 		} else {
-			opts.progress.line("Trial %s attempt=%d evidence saving finished", label, attempts)
+			opts.progress.line("%s attempt=%d evidence saving finished", label, attempts)
 		}
 		var patchErr error
 		patch, patchErr = trialPatch(cloneDir, manifest.ParentCommit)
@@ -430,19 +435,19 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 			trialErr = errors.Join(trialErr, patchErr)
 		}
 	} else {
-		opts.progress.line("Trial %s attempt=%d preparation failed: %v", label, attempts, trialErr)
+		opts.progress.line("%s attempt=%d preparation failed: %v", label, attempts, trialErr)
 	}
 	record.EndedAt = time.Now().UTC()
 	if trialErr != nil && record.Outcome != outcomeLost {
 		record.Outcome, record.Reason = outcomeInvalid, trialErr.Error()
 	}
 	patchPath := filepath.Join(resultDir, "diff.patch")
-	opts.progress.line("Trial %s attempt=%d patch saving started", label, attempts)
+	opts.progress.line("%s attempt=%d patch saving started", label, attempts)
 	if err := tasks.WriteAtomic(patchPath, patch, 0o644); err != nil {
-		opts.progress.line("Trial %s attempt=%d patch saving failed: %v", label, attempts, err)
+		opts.progress.line("%s attempt=%d patch saving failed: %v", label, attempts, err)
 		return "", fmt.Errorf("phase patch saving: write Trial patch: %w", err)
 	}
-	opts.progress.line("Trial %s attempt=%d patch saving finished: path=%s", label, attempts, patchPath)
+	opts.progress.line("%s attempt=%d patch saving finished: path=%s", label, attempts, patchPath)
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return "", err
@@ -451,14 +456,14 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 		return "", fmt.Errorf("phase result saving: write Trial record: %w", err)
 	}
 	if opts.keepWork {
-		opts.progress.line("Trial %s attempt=%d work kept: path=%s", label, attempts, workDir)
+		opts.progress.line("%s attempt=%d work kept: path=%s", label, attempts, workDir)
 	} else {
-		opts.progress.line("Trial %s attempt=%d work cleanup started", label, attempts)
+		opts.progress.line("%s attempt=%d work cleanup started", label, attempts)
 		if err := os.RemoveAll(workDir); err != nil {
-			opts.progress.line("Trial %s attempt=%d work cleanup failed: %v", label, attempts, err)
+			opts.progress.line("%s attempt=%d work cleanup failed: %v", label, attempts, err)
 			return "", fmt.Errorf("phase work cleanup: remove Trial work directory: %w", err)
 		}
-		opts.progress.line("Trial %s attempt=%d work cleanup finished", label, attempts)
+		opts.progress.line("%s attempt=%d work cleanup finished", label, attempts)
 	}
 	fmt.Println(resultDir)
 	return record.Outcome, trialErr

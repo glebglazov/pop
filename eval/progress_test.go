@@ -43,7 +43,7 @@ func TestEvalProgressReportsWaitingAtThirtySecondIntervals(t *testing.T) {
 			return ticker
 		},
 	}
-	stop := progress.wait("Case=example Arm=bare repeat=2", "Bare-agent invocation", 4*time.Hour)
+	stop := progress.wait("Trial Case=example Arm=bare repeat=2", "Bare-agent invocation", 4*time.Hour)
 	for _, elapsed := range []time.Duration{30 * time.Second, 60 * time.Second} {
 		ticker.ticks <- started.Add(elapsed)
 		want := "Trial Case=example Arm=bare repeat=2 waiting: phase=Bare-agent invocation elapsed=" + elapsed.String() + " ceiling=4h0m0s"
@@ -80,7 +80,7 @@ func TestEvalWaitingLinesAreBoundedAndDoNotInventACeiling(t *testing.T) {
 		now:       func() time.Time { return started },
 		newTicker: func(time.Duration) evalProgressTicker { return ticker },
 	}
-	stop := progress.wait("Case=example Arm=pop repeat=1", "Objective gate\n"+strings.Repeat("long ", 40), 0)
+	stop := progress.wait("Trial Case=example Arm=pop repeat=1", "Objective gate\n"+strings.Repeat("long ", 40), 0)
 	ticker.ticks <- started.Add(30 * time.Second)
 	want := "Trial Case=example Arm=pop repeat=1 waiting: phase=Objective gate " + strings.Repeat("long ", 20) + "lo... elapsed=30s"
 	if got := <-lines; got != want {

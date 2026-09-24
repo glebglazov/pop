@@ -50,7 +50,8 @@ func TestBareTrialCommand(t *testing.T) {
 	writeFile(t, filepath.Join(caseDir, "spec.md"), spec)
 	writeFile(t, filepath.Join(caseDir, acceptanceName), "Status: draft\n")
 	writeFile(t, filepath.Join(arms, "anonymous-arm.toml"), "kind = 'bare'\nagent = 'claude'\nmodel = 'claude-test'\n")
-	args := []string{"run", "--case", "example", "--arm", "anonymous-arm", "--cases", cases, "--arms", arms, "--work", work, "--results", results}
+	graders, config, grader := testGrader(t, root)
+	args := []string{"run", "--case", "example", "--arm", "anonymous-arm", "--cases", cases, "--arms", arms, "--graders", graders, "--config", config, "--work", work, "--results", results}
 	if err := run(args); err == nil || !strings.Contains(err.Error(), "not approved") {
 		t.Fatalf("approval error = %v", err)
 	}
@@ -59,7 +60,7 @@ func TestBareTrialCommand(t *testing.T) {
 			t.Fatalf("unapproved Trial created %s", dir)
 		}
 	}
-	writeFile(t, filepath.Join(caseDir, acceptanceName), "Status: approved\n\n1. The file changes.\n")
+	approveCase(t, caseDir, "Status: approved\n\n1. The file changes.\n", grader)
 	bin := t.TempDir()
 	agent := `#!/bin/sh
 for argument in "$@"; do prompt="$argument"; done

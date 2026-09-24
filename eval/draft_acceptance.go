@@ -225,7 +225,10 @@ func writeDraftingRecord(path, agent string, attempt *tasks.CapturedAgentAttempt
 	return nil
 }
 
-func loadApprovedAcceptance(caseDir string) (string, error) {
+// loadApprovedAcceptance returns a Case's Acceptance list only when a human
+// approved it and its Reference check under grader is current and clean, so no
+// Trial is run or graded against a list that the Reference was not held to.
+func loadApprovedAcceptance(caseDir string, grader armFile) (string, error) {
 	path := filepath.Join(caseDir, acceptanceName)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -233,6 +236,9 @@ func loadApprovedAcceptance(caseDir string) (string, error) {
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.EqualFold(strings.TrimSpace(line), "Status: approved") {
+			if err := checkReferenceCheck(caseDir, string(data), grader); err != nil {
+				return "", err
+			}
 			return string(data), nil
 		}
 	}

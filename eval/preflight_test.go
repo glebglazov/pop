@@ -50,14 +50,15 @@ func TestMatrixPreflightStopsBeforeTrialCreation(t *testing.T) {
 	}
 	manifest, _ := json.Marshal(caseManifest{Name: "example", RepositoryURL: filepath.Join(root, "missing-repository"), ParentCommit: "abc", ReferenceRange: "abc..def"})
 	writeFile(t, filepath.Join(caseDir, caseManifestName), string(manifest))
-	writeFile(t, filepath.Join(caseDir, acceptanceName), "Status: approved\n\n1. Work is complete.\n")
+	graders, config, grader := testGrader(t, root)
+	approveCase(t, caseDir, "Status: approved\n\n1. Work is complete.\n", grader)
 	if err := os.MkdirAll(arms, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(arms, "missing.toml"), "kind = 'bare'\nagent = 'claude'\nmodel = 'test'\n")
 	t.Setenv("PATH", t.TempDir())
 	work, results := filepath.Join(root, "work"), filepath.Join(root, "results")
-	err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "missing", "--cases", cases, "--arms", arms, "--work", work, "--results", results}, evalProgress{})
+	err := runTrialCommandWithProgress([]string{"--case", "example", "--arm", "missing", "--cases", cases, "--arms", arms, "--graders", graders, "--config", config, "--work", work, "--results", results}, evalProgress{})
 	if err == nil || !strings.Contains(err.Error(), `Arm "missing"`) || !strings.Contains(err.Error(), `binary "claude"`) {
 		t.Fatalf("preflight error = %v", err)
 	}

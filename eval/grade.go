@@ -41,6 +41,9 @@ type gradeScores struct {
 type gradeRecord struct {
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
+	// AcceptanceDigest names the Acceptance list the Grader read, so a grade
+	// made before the list changed reads as stale in the Rollup.
+	AcceptanceDigest string `json:"acceptance_digest,omitempty"`
 	// BaselineGates are the Objective gates run on the untouched parent tree.
 	// Gates says whether the Trial tree passes only when every one of these
 	// passed: a gate the parent already fails cannot tell the Arm's work apart.
@@ -90,16 +93,15 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	if !namePattern.MatchString(manifest.Name) {
 		return errors.New("invalid Case name")
 	}
-	acceptance, err := loadApprovedAcceptance(caseDir)
+	grader, err := loadGrader(*configPath, *graders)
 	if err != nil {
 		return err
 	}
-	behaviourCount := 0
-	for _, line := range strings.Split(acceptance, "\n") {
-		if numberedBehaviour.MatchString(line) {
-			behaviourCount++
-		}
+	acceptance, err := loadApprovedAcceptance(caseDir, grader)
+	if err != nil {
+		return err
 	}
+	behaviourCount := len(acceptanceBehaviours(acceptance))
 	if behaviourCount == 0 {
 		return errors.New("Acceptance list has no numbered behaviours")
 	}
@@ -116,11 +118,11 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	if record.Case != manifest.Name || record.Arm != flags.Arg(1) || record.Repeat != repeat {
 		return errors.New("Trial record identity does not match requested Trial")
 	}
-	grade := &gradeRecord{Status: "ungraded", BaselineGates: []gateResult{}, Gates: []gateResult{}, OutsideScope: []string{}}
+	grade := &gradeRecord{Status: "ungraded", AcceptanceDigest: acceptanceDigest(acceptance), BaselineGates: []gateResult{}, Gates: []gateResult{}, OutsideScope: []string{}}
 	record.Grade = grade
 	label := trialLabel(record.Case, record.Arm, record.Repeat)
 	gradeErr := gradeOneTrial(manifest, acceptance, behaviourCount, &record, gradeOptions{
-		work: *work, configPath: *configPath, graders: *graders, arms: *arms,
+		work: *work, grader: grader, arms: *arms,
 		timeout: *timeout, resultDir: resultDir, progress: progress,
 	})
 	if gradeErr != nil {
@@ -137,17 +139,18 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	if !standalone {
 		return gradeErr
 	}
-	progress.line("Trial %s finished: outcome=%s %s result=%s", label, record.Outcome, gradeSummary(record), resultDir)
+	progress.line("%s finished: outcome=%s %s result=%s", label, record.Outcome, gradeSummary(record), resultDir)
 	if gradeErr != nil {
-		return fmt.Errorf("Trial %s phase grading: %w", label, gradeErr)
+		return fmt.Errorf("%s phase grading: %w", label, gradeErr)
 	}
 	return nil
 }
 
 type gradeOptions struct {
-	work, configPath, graders, arms, resultDir string
-	timeout                                    time.Duration
-	progress                                   evalProgress
+	work, arms, resultDir string
+	grader                armFile
+	timeout               time.Duration
+	progress              evalProgress
 }
 
 func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int, record *trialRecord, opts gradeOptions) error {
@@ -156,18 +159,18 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 
 	if record.Outcome == outcomeInvalid {
 		grade.Reason = "Invalid Trial is excluded"
-		opts.progress.line("Trial %s grading skipped: Invalid Trial is excluded", label)
+		opts.progress.line("%s grading skipped: Invalid Trial is excluded", label)
 		return nil
 	}
 	if record.Outcome == outcomeLost {
 		grade.Reason = "Lost Trial is excluded"
-		opts.progress.line("Trial %s grading skipped: Lost Trial is excluded", label)
+		opts.progress.line("%s grading skipped: Lost Trial is excluded", label)
 		return nil
 	}
 	if record.Outcome == outcomeTimedOut {
 		grade.Status = "timed_out"
 		grade.Scores = &gradeScores{}
-		opts.progress.line("Trial %s grading skipped: Trial ceiling reached; zero scores recorded", label)
+		opts.progress.line("%s grading skipped: Trial ceiling reached; zero scores recorded", label)
 		return nil
 	}
 	if record.Outcome != outcomeCompleted {
@@ -177,6 +180,19 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	if err != nil {
 		return err
 	}
+	if err := checkGraderModel(opts.grader, opts.arms, record.Model, record.ActualModel); err != nil {
+		return err
+	}
+	return gradeDiff(manifest, acceptance, behaviourCount, patch, grade, label, filepath.Join(opts.resultDir, "grading"), opts)
+}
+
+// gradeDiff scores one diff on the Case's parent tree: the Baseline gates, the
+// Objective gates on the patched tree, then the Grader, and fills grade with
+// what each step found. A Trial's final diff and a Reference check's Reference
+// diff take this same path, so the Reference is graded exactly as a Trial is.
+// label is the subject of every progress line; captureDir keeps the Grader run.
+func gradeDiff(manifest caseManifest, acceptance string, behaviourCount int, patch []byte, grade *gradeRecord, label, captureDir string, opts gradeOptions) error {
+	grader := opts.grader
 	if err := os.MkdirAll(opts.work, 0o755); err != nil {
 		return err
 	}
@@ -190,11 +206,11 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	}
 	defer os.RemoveAll(dir)
 	clone := filepath.Join(dir, "repository")
-	opts.progress.line("Trial %s grading preparation started", label)
+	opts.progress.line("%s grading preparation started", label)
 	stopWaiting := opts.progress.wait(label, "grading repository preparation", 0)
 	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, clone); err != nil {
 		stopWaiting()
-		opts.progress.line("Trial %s grading preparation failed: %v", label, err)
+		opts.progress.line("%s grading preparation failed: %v", label, err)
 		return err
 	}
 	if len(patch) > 0 {
@@ -202,7 +218,7 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 		cmd.Stdin = strings.NewReader(string(patch))
 		if output, err := cmd.CombinedOutput(); err != nil {
 			stopWaiting()
-			return fmt.Errorf("restore Trial tree: %w: %s", err, output)
+			return fmt.Errorf("restore graded tree: %w: %s", err, output)
 		}
 	}
 	changed, err := exec.Command("git", "-C", clone, "diff", "--cached", "--name-only", "--no-renames", "-z").Output()
@@ -218,17 +234,17 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	baselineTree := filepath.Join(dir, "baseline")
 	if err := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, baselineTree); err != nil {
 		stopWaiting()
-		opts.progress.line("Trial %s grading preparation failed: %v", label, err)
+		opts.progress.line("%s grading preparation failed: %v", label, err)
 		return err
 	}
 	stopWaiting()
-	opts.progress.line("Trial %s grading preparation finished", label)
+	opts.progress.line("%s grading preparation finished", label)
 	var baselinePassed bool
 	grade.BaselineGates, baselinePassed = runGatesWithProgress(baselineTree, manifest.GateCommands, "Baseline gate", label, opts.progress)
 	if !baselinePassed {
 		grade.Status = "baseline_failed"
 		grade.Reason = "an Objective gate fails on the untouched parent tree"
-		opts.progress.line("Trial %s Objective gates and Grader execution skipped: an Objective gate fails on the parent tree", label)
+		opts.progress.line("%s Objective gates and Grader execution skipped: an Objective gate fails on the parent tree", label)
 		return nil
 	}
 	var passed bool
@@ -236,42 +252,8 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 	if !passed {
 		grade.Status = "gate_failed"
 		grade.Scores = &gradeScores{}
-		opts.progress.line("Trial %s Grader execution skipped: one or more Objective gates failed", label)
+		opts.progress.line("%s Grader execution skipped: one or more Objective gates failed", label)
 		return nil
-	}
-	var cfg struct {
-		GraderArm string `toml:"grader_arm"`
-	}
-	metadata, err := toml.DecodeFile(opts.configPath, &cfg)
-	if err != nil {
-		return fmt.Errorf("read harness config: %w", err)
-	}
-	if len(metadata.Undecoded()) != 0 {
-		return errors.New("unknown harness config field")
-	}
-	grader, err := loadArm(opts.graders, cfg.GraderArm)
-	if err != nil {
-		return err
-	}
-	if grader.Kind != "bare" {
-		return errors.New("Grader must use a Bare arm")
-	}
-	entries, err := filepath.Glob(filepath.Join(opts.arms, "*.toml"))
-	if err != nil {
-		return err
-	}
-	models := []string{record.Model, record.ActualModel}
-	for _, entry := range entries {
-		arm, err := loadArm(opts.arms, strings.TrimSuffix(filepath.Base(entry), ".toml"))
-		if err != nil {
-			return err
-		}
-		models = append(models, arm.Model)
-	}
-	for _, model := range models {
-		if model == grader.Model {
-			return errors.New("Grader model must differ from every Arm model")
-		}
 	}
 	// Gates may change files or HEAD. Give the Grader a separate parent tree.
 	parentTree := filepath.Join(dir, "parent")
@@ -299,11 +281,11 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 			fmt.Fprintf(&quoted, "> %s\n", line)
 		}
 	}
-	opts.progress.line("Trial %s Grader execution started", label)
+	opts.progress.line("%s Grader execution started", label)
 	stopWaiting = opts.progress.wait(label, "Grader invocation", opts.timeout)
 	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
 		AgentSpec: grader.agentSpec(), Prompt: graderPrompt(string(patch), acceptance, quoted.String(), grade.OutsideScope),
-		RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: filepath.Join(opts.resultDir, "grading"),
+		RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: captureDir,
 	})
 	stopWaiting()
 	if attempt != nil {
@@ -311,22 +293,67 @@ func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int,
 		grade.Grader = &capturedRunRecord{Agent: grader.agentSpec(), RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}
 	}
 	if captureErr != nil {
-		opts.progress.line("Trial %s Grader execution failed: %v", label, captureErr)
+		opts.progress.line("%s Grader execution failed: %v", label, captureErr)
 		return captureErr
 	}
 	if attempt.Outcome != "completed" {
 		grade.Reason = "Grader outcome: " + attempt.Outcome
-		opts.progress.line("Trial %s Grader execution finished: outcome=%s grade=ungraded", label, attempt.Outcome)
+		opts.progress.line("%s Grader execution finished: outcome=%s grade=ungraded", label, attempt.Outcome)
 		return nil
 	}
 	scores, err := parseGraderReply(attempt.Output, behaviourCount)
 	if err != nil {
 		grade.Reason = err.Error()
-		opts.progress.line("Trial %s Grader execution finished: outcome=completed grade=ungraded reason=%s", label, err)
+		opts.progress.line("%s Grader execution finished: outcome=completed grade=ungraded reason=%s", label, err)
 		return nil
 	}
 	grade.Status, grade.Scores = "graded", scores
-	opts.progress.line("Trial %s Grader execution finished: outcome=completed grade=graded", label)
+	opts.progress.line("%s Grader execution finished: outcome=completed grade=graded", label)
+	return nil
+}
+
+// loadGrader reads the harness config's Grader arm. The Grader grades every
+// Trial and every Reference check, so it must be a Bare arm.
+func loadGrader(configPath, graders string) (armFile, error) {
+	var cfg struct {
+		GraderArm string `toml:"grader_arm"`
+	}
+	metadata, err := toml.DecodeFile(configPath, &cfg)
+	if err != nil {
+		return armFile{}, fmt.Errorf("read harness config: %w", err)
+	}
+	if len(metadata.Undecoded()) != 0 {
+		return armFile{}, errors.New("unknown harness config field")
+	}
+	grader, err := loadArm(graders, cfg.GraderArm)
+	if err != nil {
+		return armFile{}, err
+	}
+	if grader.Kind != "bare" {
+		return armFile{}, errors.New("Grader must use a Bare arm")
+	}
+	return grader, nil
+}
+
+// checkGraderModel refuses a Grader that shares a model with any Arm under
+// arms or with the extra models named, so no Arm grades its own kind of work.
+func checkGraderModel(grader armFile, arms string, models ...string) error {
+	entries, err := filepath.Glob(filepath.Join(arms, "*.toml"))
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		arm, err := loadArm(arms, strings.TrimSuffix(filepath.Base(entry), ".toml"))
+		if err != nil {
+			return err
+		}
+		models = append(models, arm.Model)
+	}
+	for _, model := range models {
+		if model == grader.Model {
+			return errors.New("Grader model must differ from every Arm model")
+		}
+	}
 	return nil
 }
 
@@ -337,16 +364,16 @@ func runGatesWithProgress(dir string, commands []string, phase, label string, pr
 	results := make([]gateResult, 0, len(commands))
 	passed := true
 	for i, command := range commands {
-		progress.line("Trial %s %s started: %s", label, phase, command)
+		progress.line("%s %s started: %s", label, phase, command)
 		stopWaiting := progress.wait(label, fmt.Sprintf("%s %d/%d", phase, i+1, len(commands)), 0)
 		gate := runGate(dir, command)
 		stopWaiting()
 		results = append(results, gate)
 		if gate.Error != "" {
 			passed = false
-			progress.line("Trial %s %s finished: failed exit=%d command=%s", label, phase, gate.ExitCode, command)
+			progress.line("%s %s finished: failed exit=%d command=%s", label, phase, gate.ExitCode, command)
 		} else {
-			progress.line("Trial %s %s finished: passed exit=%d command=%s", label, phase, gate.ExitCode, command)
+			progress.line("%s %s finished: passed exit=%d command=%s", label, phase, gate.ExitCode, command)
 		}
 	}
 	return results, passed
