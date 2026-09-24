@@ -3,7 +3,7 @@
 Status: approved
 
 1. A Verifier invocation writes a Verify report document under the set's own directory, with the instant it was written stamped into the filename.
-2. Each Verifier invocation leaves its own report, so a verify-remediate-verify lap leaves one document per invocation rather than one rewritten answer.
+2. Each Verifier verdict leaves its own report, so a verify-remediate-verify lap leaves one document per verification rather than one rewritten answer. An agent fallback inside one verification that ends in one verdict leaves one report.
 3. The Verifier's reply keeps the machine-read verdict line first, and the prose after that line becomes the report body.
 4. A malformed or absent Verifier reply yields the same verdict it yields today, and the raw reply text is still preserved rather than lost.
 5. A report is written on a PASS verdict as well as on FIXABLE and NEEDS-HUMAN.

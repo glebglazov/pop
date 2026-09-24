@@ -1,0 +1,222 @@
+{
+  "acceptance_digest": "b25cb7b613088419b6384a9de289a47ca9264a24298f3900a0fc3f1864eed9ef",
+  "grader": "codex --model \"gpt-6-astra\"",
+  "reference_range": "7a4062da156d8c6ab0503a37f00642e39b1769b5..31cea805b467611730ba06e42a209ee4d1b3acef",
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "b25cb7b613088419b6384a9de289a47ca9264a24298f3900a0fc3f1864eed9ef",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t155.213s\nok  \tgithub.com/glebglazov/pop/config\t3.118s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.320s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t158.406s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.432s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.377s\nok  \tgithub.com/glebglazov/pop/integrate\t161.481s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t14.261s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.406s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.699s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t3.942s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.003s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t20.249s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t7.183s\nok  \tgithub.com/glebglazov/pop/layout\t6.651s\nok  \tgithub.com/glebglazov/pop/monitor\t8.647s\nok  \tgithub.com/glebglazov/pop/project\t8.406s\nok  \tgithub.com/glebglazov/pop/release\t6.848s\nok  \tgithub.com/glebglazov/pop/repogroup\t6.720s\nok  \tgithub.com/glebglazov/pop/routine\t25.558s\nok  \tgithub.com/glebglazov/pop/store\t15.484s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t64.571s\nok  \tgithub.com/glebglazov/pop/tasks\t221.896s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t77.643s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t0.557s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t99.618s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t10.102s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t2.984s\nok  \tgithub.com/glebglazov/pop/ui\t10.061s\nok  \tgithub.com/glebglazov/pop/wayfinder\t10.897s\nok  \tgithub.com/glebglazov/pop/work\t4.069s\nok  \tgithub.com/glebglazov/pop/work/ref\t3.182s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t155.556s\nok  \tgithub.com/glebglazov/pop/config\t12.827s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.821s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t167.515s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.045s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.056s\nok  \tgithub.com/glebglazov/pop/integrate\t163.672s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t5.221s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t2.692s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.669s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t2.966s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t3.890s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t6.491s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t1.524s\nok  \tgithub.com/glebglazov/pop/layout\t1.217s\nok  \tgithub.com/glebglazov/pop/monitor\t4.379s\nok  \tgithub.com/glebglazov/pop/project\t8.635s\nok  \tgithub.com/glebglazov/pop/release\t0.836s\nok  \tgithub.com/glebglazov/pop/repogroup\t0.881s\nok  \tgithub.com/glebglazov/pop/routine\t17.149s\nok  \tgithub.com/glebglazov/pop/store\t16.990s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t76.395s\nok  \tgithub.com/glebglazov/pop/tasks\t204.751s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t65.638s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t0.910s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t89.182s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.440s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t7.909s\nok  \tgithub.com/glebglazov/pop/ui\t8.809s\nok  \tgithub.com/glebglazov/pop/wayfinder\t10.859s\nok  \tgithub.com/glebglazov/pop/work\t2.258s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.689s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Verifier replies produce timestamped documents under the set's verify directory."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Each completed verification writes one report; fallback attempts share that report."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "The contract keeps the verdict first; the report receives the following prose."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Verdict parsing stays unchanged, and malformed replies remain in the report."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "PASS, FIXABLE, and NEEDS-HUMAN replies all produce reports."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "PASS findings must name the evidence and explain each acceptance criterion."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Cache reads bypass report creation."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Invalidation deletes cached verdicts without deleting reports."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "Previous reports stay outside Verifier prompts; human notes retain their existing path."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Human acceptance writes a report without invoking an agent."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "The human report includes the rationale and the overridden non-PASS verdict."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "The Accepted by header identifies human authorship."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Human reports use the same directory, filename format, facts, and latest-report reader."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "The gate shows the latest report path and commit facts without its prose."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "The paging entry opens the report and returns to the gate."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "The set detail view includes the Verify report pointer."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Verify artifacts rank above Refine artifacts."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Agent prompt views gain no pointer; only Verifier response-contract goldens change."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Missing reports produce no preamble, paging entry, detail pointer, or artifact."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Badge and status derivation remain independent of report age."
+        },
+        {
+          "item": 21,
+          "met": false,
+          "reason": "Status rows retain truncated findings but gain no adjacent report pointer."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "Both passes share rendering, filing, latest selection, and document-header reading."
+        },
+        {
+          "item": 23,
+          "met": false,
+          "reason": "The Refine paging error changes from “Could not read the refine report” to “Could not read the report.”"
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "Refine prompt golden files are unchanged."
+        }
+      ],
+      "list_ratio": 0.9166666666666666,
+      "quality": 4,
+      "rationale": "The shared design and focused tests are good, but status-row pointers are missing and one Refine message changes."
+    },
+    "grader": {
+      "agent": "codex --model \"gpt-6-astra\"",
+      "run_id": "92b073ac-9c47-4a28-9749-77aff54712e9",
+      "outcome": "completed",
+      "spend": {
+        "Tokens": {
+          "Input": 538556,
+          "Output": 1594,
+          "CacheRead": 467200,
+          "CacheWrite": 0,
+          "HasInput": true,
+          "HasOutput": true,
+          "HasCacheRead": true,
+          "HasCacheWrite": false
+        },
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "Turns": {
+          "Count": 10,
+          "HasTurn": true
+        },
+        "PeakInput": {
+          "Tokens": 81828,
+          "HasPeak": true
+        }
+      },
+      "notional": {
+        "Cost": {
+          "Dollars": 0,
+          "HasCost": false
+        },
+        "RateSource": "",
+        "ModelKey": "",
+        "ModelKeySource": ""
+      }
+    },
+    "reply": "ITEM 1 MET: Verifier replies produce timestamped documents under the set's verify directory.\nITEM 2 MET: Each completed verification writes one report; fallback attempts share that report.\nITEM 3 MET: The contract keeps the verdict first; the report receives the following prose.\nITEM 4 MET: Verdict parsing stays unchanged, and malformed replies remain in the report.\nITEM 5 MET: PASS, FIXABLE, and NEEDS-HUMAN replies all produce reports.\nITEM 6 MET: PASS findings must name the evidence and explain each acceptance criterion.\nITEM 7 MET: Cache reads bypass report creation.\nITEM 8 MET: Invalidation deletes cached verdicts without deleting reports.\nITEM 9 MET: Previous reports stay outside Verifier prompts; human notes retain their existing path.\nITEM 10 MET: Human acceptance writes a report without invoking an agent.\nITEM 11 MET: The human report includes the rationale and the overridden non-PASS verdict.\nITEM 12 MET: The Accepted by header identifies human authorship.\nITEM 13 MET: Human reports use the same directory, filename format, facts, and latest-report reader.\nITEM 14 MET: The gate shows the latest report path and commit facts without its prose.\nITEM 15 MET: The paging entry opens the report and returns to the gate.\nITEM 16 MET: The set detail view includes the Verify report pointer.\nITEM 17 MET: Verify artifacts rank above Refine artifacts.\nITEM 18 MET: Agent prompt views gain no pointer; only Verifier response-contract goldens change.\nITEM 19 MET: Missing reports produce no preamble, paging entry, detail pointer, or artifact.\nITEM 20 MET: Badge and status derivation remain independent of report age.\nITEM 21 NOT_MET: Status rows retain truncated findings but gain no adjacent report pointer.\nITEM 22 MET: Both passes share rendering, filing, latest selection, and document-header reading.\nITEM 23 NOT_MET: The Refine paging error changes from “Could not read the refine report” to “Could not read the report.”\nITEM 24 MET: Refine prompt golden files are unchanged.\nQUALITY 4: The shared design and focused tests are good, but status-row pointers are missing and one Refine message changes.\n"
+  },
+  "accepted": [
+    {
+      "item": 21,
+      "behaviour": "The one-line truncation of verification reasons stays where a status row has room for only one line, with the pointer to the full document beside it.",
+      "reason": "The spec (spec.md:218-220) puts the report pointer beside the one-line findings in a status row. The Reference keeps the one-line findings but puts no pointer beside them. The spec wins; the Reference misses this behaviour."
+    },
+    {
+      "item": 23,
+      "behaviour": "Refine's observable behaviour is unchanged: the same directory, the same filename stamps, the same header, and every surface it renders on looks exactly as before.",
+      "reason": "The spec (spec.md:20-23, 56-57) says no Refine behaviour that a user can see changes. The Reference changes the Refine paging error from \"Could not read the refine report\" to \"Could not read the report\". The spec wins; the Reference misses this behaviour."
+    }
+  ]
+}
