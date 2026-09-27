@@ -10,10 +10,18 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+// What a Bare arm is given to implement. A Ticket arm gets the request as the
+// human first wrote it, so its gap to the Bare arm is what planning added.
+const (
+	armInputSpec   = "spec"
+	armInputTicket = "ticket"
+)
+
 type armFile struct {
 	Kind     string         `toml:"kind"`
 	Agent    string         `toml:"agent"`
 	Model    string         `toml:"model"`
+	Input    string         `toml:"input"`
 	Config   map[string]any `toml:"config"`
 	Manifest map[string]any `toml:"manifest"`
 }
@@ -40,6 +48,15 @@ func loadArm(root, name string) (armFile, error) {
 	}
 	if arm.Kind == "bare" && (len(arm.Config) != 0 || len(arm.Manifest) != 0) {
 		return arm, fmt.Errorf("Bare arm cannot have Pop overrides")
+	}
+	if arm.Input == "" {
+		arm.Input = armInputSpec
+	}
+	if arm.Input != armInputSpec && arm.Input != armInputTicket {
+		return arm, fmt.Errorf("Arm input must be spec or ticket")
+	}
+	if arm.Kind == "pop" && arm.Input == armInputTicket {
+		return arm, fmt.Errorf("Pop arm cannot take the ticket: it drains the Case's Task split")
 	}
 	invocation, err := tasks.ResolveAgentInvocation(arm.agentSpec(), "", "", ".")
 	if err != nil {

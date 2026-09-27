@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +53,30 @@ func acceptanceBehaviours(acceptance string) []string {
 		}
 	}
 	return behaviours
+}
+
+// nameOnlyItems reads the list header line "Name-only items: 3, 17": the items
+// that pass only on a name the planning chose, such as a status or a config
+// key. No request written before planning could ask for those names, so the
+// Rollup also scores each Trial without them. Items are numbered in list order,
+// as the Grader numbers them.
+func nameOnlyItems(acceptance string) (map[int]bool, error) {
+	count := len(acceptanceBehaviours(acceptance))
+	items := map[int]bool{}
+	for _, line := range strings.Split(acceptance, "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(line), ":")
+		if !found || !strings.EqualFold(key, "Name-only items") {
+			continue
+		}
+		for _, field := range strings.Split(value, ",") {
+			item, err := strconv.Atoi(strings.TrimSpace(field))
+			if err != nil || item < 1 || item > count {
+				return nil, fmt.Errorf("name-only item %q is not an item number from 1 to %d", strings.TrimSpace(field), count)
+			}
+			items[item] = true
+		}
+	}
+	return items, nil
 }
 
 // acceptanceDigest identifies the behaviours a Grader reads. A status or

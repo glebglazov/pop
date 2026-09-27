@@ -1,0 +1,4 @@
+kind = "bare"
+agent = "claude"
+model = "opus"
+input = "ticket"

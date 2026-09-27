@@ -66,7 +66,8 @@ A Case is a portable directory under `eval/cases/<name>/`:
 
 ```text
 case.json       repository URL, parent SHA, reference range, gates, scope, standards
-spec.md         identical source words given to both arms
+spec.md         identical source words given to the Bare and Pop arms
+ticket.md       optional: the request before planning, for the Ticket arm
 acceptance.md   Acceptance list, initially not approved
 drafting/       Captured drafting run and its spend record
 tasks/
@@ -162,12 +163,48 @@ This comparison has a planning asymmetry: the Pop arm receives the same words
 already split into tasks, while the Bare arm receives them as one spec. Case
 preparation is not part of either arm's measured spend.
 
+The Ticket arm is a Bare arm that receives the Case's ticket in place of its
+spec: the request as the human first wrote it, before the planning. Its gap to
+the Bare arm is what the planning added. The Grader grades it against the same
+Acceptance list.
+
+`ticket.md` has a header, a line `---`, and the body. Only the body reaches
+the Arm:
+
+```text
+# Ticket
+
+Status: approved
+Source: Claude Code session <id>, first message, <timestamp>
+Planning spend: <tokens and notional cost of the planning session>
+
+---
+
+<the request>
+```
+
+Take the body from the first message of the session that planned the source
+Task set. Change it only to remove what the Trial cannot use, for example a
+skill wrapper or a local path. Do not add words from the spec: the ticket then
+holds planning decisions, and the gap looks smaller than it is. A Case that
+has no record of its first request gets no ticket, because a ticket written
+now is written with the spec in mind. Approve the ticket as you approve an
+Acceptance list. `run` refuses the Matrix before any Trial when a Ticket arm
+meets a Case with no approved ticket.
+
+Some Acceptance items pass only on a name that the planning chose, for example
+a status or a config key. No request can ask for those names. List them in
+the Acceptance list header as `Name-only items: 3, 17`, by position in the
+list. The Grader still grades them, and the Rollup shows the ratio without
+them in its own column. The header line does not change the list digest.
+
 Each Arm is a TOML file at `eval/arms/<name>.toml`:
 
 ```toml
 kind = "bare" # bare or pop
 agent = "claude" # Agent preset spec, with optional arguments
 model = "opus" # required; do not also set a model in agent
+input = "spec" # Bare arm only: spec (default) or ticket
 ```
 
 Pop arm files can also contain `[config]` and `[manifest]` tables. Their keys
@@ -446,7 +483,8 @@ The Rollup reads every `trial.json` below `eval/results` and prints one row per
 Case and Arm. Each spend and work-shape cell is `median/spread`; spread is the
 maximum minus the minimum. The cells cover total tokens, notional cost, turns,
 peak input, and wall-clock seconds. The row also shows median Acceptance-list
-ratio and quality score, plus gate-failure, baseline-failure (`base`),
+ratio (`accept`), the same ratio without the Case's name-only items
+(`accept-nn`), and quality score, plus gate-failure, baseline-failure (`base`),
 Trial-ceiling, Invalid, Lost, and ungraded counts. Invalid Trials do not
 contribute figures. Lost Trials and baseline-failed Trials contribute their
 spend and work-shape figures but no quality figures. An absent

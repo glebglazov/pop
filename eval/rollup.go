@@ -29,13 +29,16 @@ type evalRollupRow struct {
 	PeakInputTokens  metricRollup `json:"peak_input_tokens"`
 	WallClockSeconds metricRollup `json:"wall_clock_seconds"`
 	AcceptanceRatio  *float64     `json:"acceptance_ratio"`
-	QualityScore     *float64     `json:"quality_score"`
-	GateFailures     int          `json:"gate_failures"`
-	BaselineFailures int          `json:"baseline_failures"`
-	Timeouts         int          `json:"timeouts"`
-	Invalid          int          `json:"invalid"`
-	Lost             int          `json:"lost"`
-	Ungraded         int          `json:"ungraded"`
+	// NameFreeAcceptanceRatio leaves out the Case's name-only items, so an Arm
+	// that never saw the planned names is not scored on them.
+	NameFreeAcceptanceRatio *float64 `json:"name_free_acceptance_ratio"`
+	QualityScore            *float64 `json:"quality_score"`
+	GateFailures            int      `json:"gate_failures"`
+	BaselineFailures        int      `json:"baseline_failures"`
+	Timeouts                int      `json:"timeouts"`
+	Invalid                 int      `json:"invalid"`
+	Lost                    int      `json:"lost"`
+	Ungraded                int      `json:"ungraded"`
 	// Stale counts graded Trials whose Grader read another version of the
 	// Case's Acceptance list than the one the Case holds now.
 	Stale int `json:"stale"`
@@ -46,8 +49,14 @@ type evalRollup struct {
 }
 
 type rollupAccumulator struct {
-	row                                             evalRollupRow
-	tokens, cost, turns, peak, wall, ratio, quality []float64
+	row                                                       evalRollupRow
+	tokens, cost, turns, peak, wall, ratio, nameFree, quality []float64
+}
+
+// caseList is what the Rollup needs from a Case's current Acceptance list.
+type caseList struct {
+	digest   string
+	nameOnly map[int]bool
 }
 
 type popSpendJSON struct {
@@ -114,7 +123,7 @@ func renderEvalRollupJSON(w io.Writer, rollup evalRollup) error {
 // older list is counted as stale.
 func loadEvalRollup(root, cases string) (evalRollup, error) {
 	groups := map[string]*rollupAccumulator{}
-	digests := map[string]string{}
+	lists := map[string]caseList{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -139,19 +148,22 @@ func loadEvalRollup(root, cases string) (evalRollup, error) {
 			group = &rollupAccumulator{row: evalRollupRow{Case: record.Case, Arm: record.Arm}}
 			groups[key] = group
 		}
-		if record.Grade != nil && record.Grade.Status == "graded" {
-			digest, known := digests[record.Case]
-			if !known {
-				if data, err := os.ReadFile(filepath.Join(cases, record.Case, acceptanceName)); err == nil {
-					digest = acceptanceDigest(string(data))
+		list, known := lists[record.Case]
+		if !known {
+			if data, err := os.ReadFile(filepath.Join(cases, record.Case, acceptanceName)); err == nil {
+				list.digest = acceptanceDigest(string(data))
+				if list.nameOnly, err = nameOnlyItems(string(data)); err != nil {
+					return fmt.Errorf("read Acceptance list of Case %s: %w", record.Case, err)
 				}
-				digests[record.Case] = digest
 			}
-			if digest == "" || record.Grade.AcceptanceDigest != digest {
+			lists[record.Case] = list
+		}
+		if record.Grade != nil && record.Grade.Status == "graded" {
+			if list.digest == "" || record.Grade.AcceptanceDigest != list.digest {
 				group.row.Stale++
 			}
 		}
-		return group.add(record)
+		return group.add(record, list.nameOnly)
 	})
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -173,7 +185,7 @@ func loadEvalRollup(root, cases string) (evalRollup, error) {
 	return result, nil
 }
 
-func (a *rollupAccumulator) add(record trialRecord) error {
+func (a *rollupAccumulator) add(record trialRecord, nameOnly map[int]bool) error {
 	a.row.Trials++
 	if record.Outcome == outcomeInvalid {
 		a.row.Invalid++
@@ -213,9 +225,29 @@ func (a *rollupAccumulator) add(record trialRecord) error {
 	}
 	if record.Outcome != outcomeLost && record.Grade != nil && record.Grade.Scores != nil {
 		a.ratio = append(a.ratio, record.Grade.Scores.ListRatio)
+		a.nameFree = append(a.nameFree, nameFreeRatio(*record.Grade.Scores, nameOnly))
 		a.quality = append(a.quality, float64(record.Grade.Scores.Quality))
 	}
 	return nil
+}
+
+// nameFreeRatio is the list ratio over the items that are not name-only. A
+// grade with no items, such as a failed gate, keeps its list ratio of zero.
+func nameFreeRatio(scores gradeScores, nameOnly map[int]bool) float64 {
+	counted, met := 0, 0
+	for _, item := range scores.Items {
+		if nameOnly[item.Item] {
+			continue
+		}
+		counted++
+		if item.Met {
+			met++
+		}
+	}
+	if counted == 0 {
+		return scores.ListRatio
+	}
+	return float64(met) / float64(counted)
 }
 
 type optionalFigures struct {
@@ -317,6 +349,7 @@ func (a *rollupAccumulator) finish() {
 	a.row.PeakInputTokens = summarize(a.peak, a.row.PeakInputTokens.Blind)
 	a.row.WallClockSeconds = summarize(a.wall, a.row.WallClockSeconds.Blind)
 	a.row.AcceptanceRatio = median(a.ratio)
+	a.row.NameFreeAcceptanceRatio = median(a.nameFree)
 	a.row.QualityScore = median(a.quality)
 }
 
@@ -349,13 +382,13 @@ func medianSorted(values []float64) float64 {
 }
 
 func renderEvalRollup(w io.Writer, rollup evalRollup) {
-	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %7s %4s %4s %4s %4s %4s %4s %5s %s\n",
-		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "quality", "gate", "base", "time", "inv", "lost", "ungr", "stale", "blind tok/$/turn/peak/wall")
+	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %9s %7s %4s %4s %4s %4s %4s %4s %5s %s\n",
+		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "accept-nn", "quality", "gate", "base", "time", "inv", "lost", "ungr", "stale", "blind tok/$/turn/peak/wall")
 	for _, row := range rollup.Rows {
-		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %7s %4d %4d %4d %4d %4d %4d %5d %d/%d/%d/%d/%d\n",
+		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %9s %7s %4d %4d %4d %4d %4d %4d %5d %d/%d/%d/%d/%d\n",
 			row.Case, row.Arm, row.Trials,
 			formatMetric(row.TotalTokens, 0), formatMetric(row.NotionalCostUSD, 4), formatMetric(row.Turns, 1), formatMetric(row.PeakInputTokens, 0), formatMetric(row.WallClockSeconds, 1),
-			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale,
+			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.NameFreeAcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale,
 			row.TotalTokens.Blind, row.NotionalCostUSD.Blind, row.Turns.Blind, row.PeakInputTokens.Blind, row.WallClockSeconds.Blind)
 	}
 }

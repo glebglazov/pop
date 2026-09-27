@@ -106,6 +106,9 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 		}
 		loadedArms[arm] = loaded
 	}
+	if err := checkTicketInputs(*cases, []string(selectedCases), []string(armNames), loadedArms); err != nil {
+		return err
+	}
 	if err := preflightMatrix(armNames, loadedArms, *pop, *work, *results); err != nil {
 		return err
 	}
@@ -368,9 +371,11 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	if err != nil {
 		return "", err
 	}
-	spec, err := os.ReadFile(filepath.Join(caseDir, tasks.SpecFileName))
-	if err != nil {
-		return "", fmt.Errorf("read Case spec: %w", err)
+	var prompt string
+	if selected.Kind == "bare" {
+		if prompt, err = bareArmPrompt(caseDir, manifest, selected); err != nil {
+			return "", err
+		}
 	}
 	resultDir := filepath.Join(opts.results, manifest.Name, armName, fmt.Sprintf("%02d", repeat))
 	if err := os.MkdirAll(resultDir, 0o755); err != nil {
@@ -414,7 +419,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 			trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.ceiling, &record)
 			evidenceErr = savePopTrialReports(cloneDir, resultDir, &record)
 		} else {
-			trialErr, evidenceErr = runBareTrial(cloneDir, resultDir, selected, manifest, string(spec), opts.ceiling, &record)
+			trialErr, evidenceErr = runBareTrial(cloneDir, resultDir, selected, prompt, opts.ceiling, &record)
 		}
 		stopWaiting()
 		if trialErr != nil {
@@ -469,7 +474,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	return record.Outcome, trialErr
 }
 
-// runBareTrial gives the Case spec to one captured invocation and reads the
+// runBareTrial gives the Arm's prompt to one captured invocation and reads the
 // Trial outcome out of it. Only an agent that finished or hit the ceiling has
 // produced a Trial worth grading; a crash or a quota pause leaves the record
 // Invalid. The capture seam spells those two outcomes the way a Trial does,
@@ -478,9 +483,9 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 // The two failures answer apart: once the seam returns an attempt, the agent
 // has run and been paid for, so a capture it could not write or price is a hole
 // in the Trial's evidence rather than a reason to void the Trial.
-func runBareTrial(clone, resultDir string, arm armFile, manifest caseManifest, spec string, ceiling time.Duration, record *trialRecord) (trialErr, evidenceErr error) {
+func runBareTrial(clone, resultDir string, arm armFile, prompt string, ceiling time.Duration, record *trialRecord) (trialErr, evidenceErr error) {
 	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
-		AgentSpec: arm.agentSpec(), Prompt: barePrompt(manifest, spec), RuntimePath: clone,
+		AgentSpec: arm.agentSpec(), Prompt: prompt, RuntimePath: clone,
 		Timeout: ceiling, DestinationDir: filepath.Join(resultDir, "capture"),
 	})
 	if attempt == nil {
@@ -493,6 +498,23 @@ func runBareTrial(clone, resultDir string, arm armFile, manifest caseManifest, s
 		record.Outcome = attempt.Outcome
 	}
 	return nil, captureErr
+}
+
+// bareArmPrompt reads the Case input the Arm names and wraps it in the prompt
+// for that input.
+func bareArmPrompt(caseDir string, manifest caseManifest, arm armFile) (string, error) {
+	if arm.Input == armInputTicket {
+		ticket, err := loadApprovedTicket(caseDir)
+		if err != nil {
+			return "", err
+		}
+		return ticketPrompt(manifest, ticket), nil
+	}
+	spec, err := os.ReadFile(filepath.Join(caseDir, tasks.SpecFileName))
+	if err != nil {
+		return "", fmt.Errorf("read Case spec: %w", err)
+	}
+	return barePrompt(manifest, string(spec)), nil
 }
 
 func barePrompt(manifest caseManifest, spec string) string {
