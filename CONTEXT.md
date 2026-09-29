@@ -147,7 +147,7 @@ A skill already present at an embedded skill's resolved install name (see **Skil
 _Avoid_: Stale integration, collision overwrite
 
 **Pane skill**:
-The embedded skills that teach an agent to drive `pop pane` — driving panes (`tmux-pane`) and spawning another agent CLI into one (`spawn-agent`). Installed together via the **Integration component id** `pane-skills`, each resolved under the **Skills prefix**. Still selected in config via the **Integration skill alias** `pane`. An opt-in **Integration component**; pane monitoring works without it.
+The embedded skill that teaches an agent to drive `pop pane` (`tmux-pane`). Installed via the **Integration component id** `pane-skills`, resolved under the **Skills prefix**. Still selected in config via the **Integration skill alias** `pane`. An opt-in **Integration component**; pane monitoring works without it.
 _Avoid_: Agent integration, hooks
 
 **Task planning skills**:

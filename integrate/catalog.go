@@ -20,8 +20,8 @@ const (
 	// changing how the agent behaves. See ADR 0010.
 	ComponentStatusWiring ComponentID = "status-wiring"
 
-	// ComponentPaneSkill is the opt-in pane skills that let the agent drive
-	// tmux panes and spawn another agent CLI into one. Behavior injection,
+	// ComponentPaneSkill is the opt-in pane skill that lets the agent drive
+	// tmux panes. Behavior injection,
 	// never installed by the bare integrate path; it returns behind an explicit
 	// opt-in in a later slice.
 	ComponentPaneSkill ComponentID = "pane-skills"
@@ -86,7 +86,6 @@ var catalog = []Component{
 		supports: allRegisteredAgents(),
 		sources: []string{
 			"skills/pop/tmux-pane.md",
-			"skills/pop/spawn-agent.md",
 		},
 	},
 	{

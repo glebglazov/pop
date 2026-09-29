@@ -124,7 +124,6 @@ func TestCatalog_PaneSkillsSources(t *testing.T) {
 	}
 	want := []string{
 		"skills/pop/tmux-pane.md",
-		"skills/pop/spawn-agent.md",
 	}
 	if len(comp.sources) != len(want) {
 		t.Fatalf("sources len = %d, want %d: %v", len(comp.sources), len(want), comp.sources)

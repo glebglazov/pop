@@ -275,12 +275,8 @@ func TestInstallFileComponentBarePrefixConflict(t *testing.T) {
 	if string(fs.files[userFile]) != "hand-written skill" {
 		t.Fatalf("user skill at resolved name was modified: %q", fs.files[userFile])
 	}
-	if len(fs.symlinks) != 1 {
-		t.Fatalf("conflict must only install spawn-agent, got %v", fs.symlinks)
-	}
-	spawnLink := filepath.Join(installerHome, ".claude", "skills", "spawn-agent")
-	if fs.symlinks[spawnLink] == "" {
-		t.Fatalf("expected spawn-agent symlink, got %v", fs.symlinks)
+	if len(fs.symlinks) != 0 {
+		t.Fatalf("conflict must install nothing, got %v", fs.symlinks)
 	}
 	// The report names the conflicting resolved path.
 	if report := out.String(); !strings.Contains(report, bareDest) || !strings.Contains(report, "not owned by pop") {
