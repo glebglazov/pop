@@ -61,6 +61,13 @@ from pop's shipped answer (nobody wrote one above it)
 ## This repository's commit convention
 tasks(<set-slug>): <task-id> — imperative, lower case, no trailing period.
 
+## Check every clause of every criterion
+A criterion is met only when each of its clauses is met. Split each acceptance criterion into its clauses: each condition, each path, each state, and each case it names — two keys that collide, the other entry point, the other state.
+
+For each clause, run a check in this checkout, in this attempt: a test, a command, or a probe of that path, state or key. Reading the diff is not a check of a behavioural clause. A clause with no executed check is unmet, not met. Leave the checkout as you found it: delete any probe you wrote before you reply.
+
+A clause whose check fails is unmet like any other. A clause you cannot check here at all — it needs a human's eye, a credential or a service you do not have — is an unrunnable gate: NEEDS-HUMAN, never PASS.
+
 ## Respond in exactly this format
 On the first line, one of:
 VERDICT: PASS
@@ -69,8 +76,8 @@ VERDICT: NEEDS-HUMAN
 Then, on the following lines:
 SUMMARY: <in one line, what needs fixing — optional; omit for PASS>
 COMMIT-SUBJECT: <one line — the commit subject the fix should be committed under>
-FINDINGS: <what you checked, and why each acceptance criterion is met or unmet>
+FINDINGS: <one line per clause: the criterion, the clause, the command you ran, and its result — met or unmet>
 
 PASS = every acceptance criterion is met. FIXABLE = criteria are unmet but an agent could resolve the findings. NEEDS-HUMAN = the findings need a human decision. SUMMARY names, in one line, what needs fixing when remediation is warranted — it is optional and must not affect the verdict.
-FINDINGS is written on every verdict, PASS included: name the evidence you actually read and say why each acceptance criterion is met or unmet. Everything after the verdict line is published as a Verify report for a human who later asks why this set was judged as it was — a PASS recording nothing leaves that reader nothing. Write the verdict line first anyway: commit to it, then justify it.
+FINDINGS is written on every verdict, PASS included, with one line for each clause of each criterion: name the command you actually ran and the result it gave. Everything after the verdict line is published as a Verify report for a human who later asks why this set was judged as it was — a PASS recording nothing leaves that reader nothing. Write the verdict line first anyway: commit to it, then justify it.
 COMMIT-SUBJECT is the final, literal subject line the fix work will be committed under, written in the convention above — a real message describing the fix, not a template or a placeholder. Write it only when remediation is warranted; it is optional, must not affect the verdict, and must be a single line with no surrounding quotes or backticks.

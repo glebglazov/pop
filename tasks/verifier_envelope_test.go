@@ -15,6 +15,7 @@ var verifierFrameHalves = []string{
 	"You are an independent Verifier",
 	`The checkboxes under each task's "## Acceptance criteria" heading are authoritative`,
 	"do not treat their absence as a failure",
+	"A clause with no executed check is unmet, not met.",
 	"## Respond in exactly this format",
 	"VERDICT: PASS",
 	"VERDICT: FIXABLE",
