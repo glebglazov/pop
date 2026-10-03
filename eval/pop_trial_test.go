@@ -63,6 +63,7 @@ func TestPopTrialCommand(t *testing.T) {
 	t.Setenv("EVAL_COMMAND_LOG", log)
 	binary := filepath.Join(root, "pop")
 	writeFile(t, binary, `#!/bin/sh
+if [ "$*" = --version ]; then echo 'pop version 9.9.9-test'; exit 0; fi
 [ "$#" -ge 3 ] || exit 9
 [ "$1" = tasks ] || exit 10
 [ "$3" = example ] || exit 11
@@ -167,6 +168,9 @@ esac
 			}
 			if record.Outcome != wantOutcome || record.SetStatus != wantStatus {
 				t.Fatalf("record: %+v", record)
+			}
+			if record.ParentCommit != parent || record.PopVersion != "pop version 9.9.9-test" {
+				t.Fatalf("provenance = parent %q pop %q", record.ParentCommit, record.PopVersion)
 			}
 			var spend map[string]any
 			if err := json.Unmarshal(record.SetSpend, &spend); err != nil {

@@ -165,6 +165,9 @@ esac
 				t.Fatalf("clone is not fresh and neutral: %s", record.WorkDir)
 			}
 			previousWork = record.WorkDir
+			if record.ParentCommit != parent || record.PopVersion != "" {
+				t.Fatalf("provenance = parent %q pop %q, want parent %q and no Pop version for a Bare-kind Arm", record.ParentCommit, record.PopVersion, parent)
+			}
 			if _, err := os.Stat(record.WorkDir); !os.IsNotExist(err) {
 				t.Fatalf("Trial work directory remains after saved outputs: %v", err)
 			}

@@ -307,3 +307,53 @@ func TestPopTrialFiguresUseSpendLensTotalsAndRows(t *testing.T) {
 		t.Fatalf("blind Pop figures = %+v, %v", figures, err)
 	}
 }
+
+// TestEvalRollupProvenance: a Trial run from an older Case parent is stale
+// whatever its grade says, a Trial that names no parent is unknown rather than
+// stale, and Trials from two Pop revisions never share a row's medians.
+func TestEvalRollupProvenance(t *testing.T) {
+	root, cases := t.TempDir(), t.TempDir()
+	list := "Status: approved\n\n1. Work is done.\n"
+	caseDir := filepath.Join(cases, "case-a")
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := json.Marshal(caseManifest{Name: "case-a", RepositoryURL: "https://example.test/repo.git", ParentCommit: "current", ReferenceRange: "current..def"})
+	writeFile(t, filepath.Join(caseDir, caseManifestName), string(manifest))
+	writeFile(t, filepath.Join(caseDir, acceptanceName), list)
+	current := &gradeRecord{Status: "graded", AcceptanceDigest: acceptanceDigest(list), Scores: &gradeScores{ListRatio: 1, Quality: 5}}
+	for _, record := range []trialRecord{
+		{Case: "case-a", Arm: "pop", Repeat: 1, Outcome: "completed", ParentCommit: "current", PopVersion: "pop version 1.0", Grade: current},
+		{Case: "case-a", Arm: "pop", Repeat: 2, Outcome: "completed", ParentCommit: "earlier", PopVersion: "pop version 1.0", Grade: current},
+		{Case: "case-a", Arm: "pop", Repeat: 3, Outcome: "completed", ParentCommit: "current", PopVersion: "pop version 2.0-dirty", Grade: current},
+		{Case: "case-a", Arm: "pop", Repeat: 4, Outcome: "completed", Grade: current},
+	} {
+		dir := filepath.Join(root, record.Case, record.Arm, fmt.Sprintf("%02d", record.Repeat))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := json.Marshal(record)
+		writeFile(t, filepath.Join(dir, "trial.json"), string(data))
+	}
+	rollup, err := loadEvalRollup(root, cases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type counts struct {
+		pop                          string
+		trials, stale, parentUnknown int
+	}
+	var got []counts
+	for _, row := range rollup.Rows {
+		got = append(got, counts{row.PopVersion, row.Trials, row.Stale, row.ParentUnknown})
+	}
+	want := []counts{{"", 1, 0, 1}, {"pop version 1.0", 2, 1, 0}, {"pop version 2.0-dirty", 1, 0, 0}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("rows = %+v, want %+v", got, want)
+	}
+	var human strings.Builder
+	renderEvalRollup(&human, rollup)
+	if !strings.Contains(human.String(), "pop version 2.0-dirty") || !strings.Contains(human.String(), "unkn") {
+		t.Fatalf("human Rollup:\n%s", human.String())
+	}
+}

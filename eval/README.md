@@ -50,7 +50,7 @@ different. Each step can stop the grade:
 
 | Link | Connects | A change to it |
 |---|---|---|
-| `parent_commit` | the start tree of every grade, for the Reference and for each Trial | The Reference diff must still apply to it. When a Case's parent is ported, port the Reference range too, and make the Reference's tests obey the parent's test rules. |
+| `parent_commit` | the start tree of every grade, for the Reference and for each Trial | The Reference diff must still apply to it. When a Case's parent is ported, port the Reference range too, and make the Reference's tests obey the parent's test rules. The Rollup counts Trials run from an earlier parent as stale. |
 | Acceptance digest | the list, the Reference check, and each Trial grade | The check becomes stale. The Rollup counts the earlier grades as stale. |
 | Grader agent | `eval/graders/<name>.toml` and the Reference check | The check becomes stale. |
 | `reference_range` | `case.json` and the Reference check | The check becomes stale. |
@@ -380,6 +380,15 @@ Verify reports and Refine reports under `reports/verify/` and
 The record holds the Case, Arm, repeat, attempt count, requested and actual model,
 start and end times, outcome, Captured run ID, spend, notional cost, and work
 directory. Unknown spend figures retain the capture seam's presence flags.
+Two fields record where the Trial came from:
+
+- `parent_commit` is the full SHA of the commit the Trial's clone started
+  from. It is empty only when the clone failed.
+- `pop_version` is what `<pop> --version` printed just before the Trial ran
+  the binary that `--pop` names. A binary built from an uncommitted tree
+  reports `-dirty`. A Bare-kind Arm, the Ticket arm included, runs no Pop
+  binary, so its record has no `pop_version`. The harness code that the Arm
+  runs through is not recorded.
 The patch compares the final tree with the parent, includes new files and
 binary data, and has no Trial path or Arm label added by the harness.
 
@@ -480,7 +489,10 @@ go run ./eval rollup --json
 ```
 
 The Rollup reads every `trial.json` below `eval/results` and prints one row per
-Case and Arm. Each spend and work-shape cell is `median/spread`; spread is the
+Case, Arm, and Pop revision. Trials of one Pop-kind Arm that ran different Pop
+revisions are in different rows, so their figures are never in the same
+median. The last column (`pop`) is the row's `pop_version`. It is `—` for a
+Bare-kind Arm and for a Trial recorded before Trials named their Pop revision. Each spend and work-shape cell is `median/spread`; spread is the
 maximum minus the minimum. The cells cover total tokens, notional cost, turns,
 peak input, and wall-clock seconds. The row also shows median Acceptance-list
 ratio (`accept`), the same ratio without the Case's name-only items
@@ -492,7 +504,12 @@ figure is `—`; the final column counts token-, rate-, turn-, peak-, and
 wall-clock-blind Trials. `--json` emits these same rows and uses `null` for
 absent medians and spreads. Use `--results` to read another Trial record root.
 
-The `stale` count is the graded Trials whose Grader read another version of the
-Case's Acceptance list than the one in `eval/cases` now, or a grade that names
-no list. Their scores still count in the medians. Grade them again before you
-compare them. `--cases` selects another Case root.
+The `stale` count is the Trials that ran from another `parent_commit` than the
+Case's `case.json` holds now, and the graded Trials whose Grader read another
+version of the Case's Acceptance list than the one in `eval/cases` now, or a
+grade that names no list. A Trial counts once. Their figures still count in
+the medians. Run a Trial from an earlier parent again, and grade a Trial with
+an earlier list again, before you compare them. The `unkn` count is the Trials
+recorded before Trials named their parent commit. Nothing shows which parent
+they ran from, so they are not counted as stale. Treat them as not proven
+current. `--cases` selects another Case root.

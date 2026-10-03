@@ -26,12 +26,18 @@ const (
 )
 
 type trialRecord struct {
-	Grade        *gradeRecord      `json:"grade,omitempty"`
-	Case         string            `json:"case"`
-	Arm          string            `json:"arm"`
-	Repeat       int               `json:"repeat"`
-	Attempts     int               `json:"attempts"`
-	Model        string            `json:"model"`
+	Grade    *gradeRecord `json:"grade,omitempty"`
+	Case     string       `json:"case"`
+	Arm      string       `json:"arm"`
+	Repeat   int          `json:"repeat"`
+	Attempts int          `json:"attempts"`
+	Model    string       `json:"model"`
+	// ParentCommit is the commit the Trial's clone started from, resolved to a
+	// full SHA, so the Rollup can tell a Trial run from an earlier Case parent.
+	ParentCommit string `json:"parent_commit,omitempty"`
+	// PopVersion is what the Pop binary's --version printed for this Trial. A
+	// Bare-kind Arm runs no Pop binary, so it records none.
+	PopVersion   string            `json:"pop_version,omitempty"`
 	ActualModel  string            `json:"actual_model,omitempty"`
 	StartedAt    time.Time         `json:"started_at"`
 	EndedAt      time.Time         `json:"ended_at"`
@@ -404,6 +410,9 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	opts.progress.line("%s attempt=%d preparation started", label, attempts)
 	stopWaiting := opts.progress.wait(label, "repository preparation", 0)
 	trialErr := cloneAtCommit(manifest.RepositoryURL, manifest.ParentCommit, cloneDir)
+	if trialErr == nil {
+		record.ParentCommit, trialErr = git(cloneDir, "rev-parse", "HEAD")
+	}
 	stopWaiting()
 	var patch []byte
 	if trialErr == nil {
@@ -416,7 +425,9 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 		stopWaiting = opts.progress.wait(label, armPhase, opts.ceiling)
 		var evidenceErr error
 		if selected.Kind == "pop" {
-			trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.ceiling, &record)
+			if record.PopVersion, trialErr = popVersion(opts.pop); trialErr == nil {
+				trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.ceiling, &record)
+			}
 			evidenceErr = savePopTrialReports(cloneDir, resultDir, &record)
 		} else {
 			trialErr, evidenceErr = runBareTrial(cloneDir, resultDir, selected, prompt, opts.ceiling, &record)
@@ -472,6 +483,16 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	}
 	fmt.Println(resultDir)
 	return record.Outcome, trialErr
+}
+
+// popVersion asks the Pop binary for its revision just before the Trial runs it,
+// so a binary rebuilt during a long Matrix is recorded as the one each Trial ran.
+func popVersion(binary string) (string, error) {
+	output, err := exec.Command(binary, "--version").Output()
+	if err != nil {
+		return "", fmt.Errorf("read Pop version from %s: %w", binary, err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 // runBareTrial gives the Arm's prompt to one captured invocation and reads the

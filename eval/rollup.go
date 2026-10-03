@@ -19,8 +19,12 @@ type metricRollup struct {
 }
 
 type evalRollupRow struct {
-	Case             string       `json:"case"`
-	Arm              string       `json:"arm"`
+	Case string `json:"case"`
+	Arm  string `json:"arm"`
+	// PopVersion splits a Pop-kind Arm's Trials by the Pop revision they ran,
+	// so medians never mix two revisions. Empty for Bare-kind Arms and for
+	// Trials recorded before the field existed.
+	PopVersion       string       `json:"pop_version"`
 	Trials           int          `json:"trials"`
 	Counted          int          `json:"counted"`
 	TotalTokens      metricRollup `json:"total_tokens"`
@@ -39,9 +43,13 @@ type evalRollupRow struct {
 	Invalid                 int      `json:"invalid"`
 	Lost                    int      `json:"lost"`
 	Ungraded                int      `json:"ungraded"`
-	// Stale counts graded Trials whose Grader read another version of the
+	// Stale counts Trials that ran from another parent commit than the Case
+	// holds now, and graded Trials whose Grader read another version of the
 	// Case's Acceptance list than the one the Case holds now.
 	Stale int `json:"stale"`
+	// ParentUnknown counts Trials recorded before Trials named their parent
+	// commit, so nothing says whether they ran from the Case's parent now.
+	ParentUnknown int `json:"parent_unknown"`
 }
 
 type evalRollup struct {
@@ -53,8 +61,10 @@ type rollupAccumulator struct {
 	tokens, cost, turns, peak, wall, ratio, nameFree, quality []float64
 }
 
-// caseList is what the Rollup needs from a Case's current Acceptance list.
-type caseList struct {
+// currentCase is what the Rollup needs from a Case as it is now: its parent
+// commit and its Acceptance list.
+type currentCase struct {
+	parent   string
 	digest   string
 	nameOnly map[int]bool
 }
@@ -118,12 +128,13 @@ func renderEvalRollupJSON(w io.Writer, rollup evalRollup) error {
 	return encoder.Encode(rollup)
 }
 
-// loadEvalRollup groups every Trial record under root by Case and Arm. cases is
-// read only for each Case's current Acceptance list, so a grade made with an
-// older list is counted as stale.
+// loadEvalRollup groups every Trial record under root by Case, Arm and Pop
+// revision. cases is read only for each Case's current parent commit and
+// Acceptance list, so a Trial run from an older parent, or a grade made with
+// an older list, is counted as stale.
 func loadEvalRollup(root, cases string) (evalRollup, error) {
 	groups := map[string]*rollupAccumulator{}
-	lists := map[string]caseList{}
+	currentCases := map[string]currentCase{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -142,28 +153,36 @@ func loadEvalRollup(root, cases string) (evalRollup, error) {
 		if record.Case == "" || record.Arm == "" || record.Repeat < 1 {
 			return fmt.Errorf("read Trial record %s: incomplete identity", path)
 		}
-		key := record.Case + "\x00" + record.Arm
+		key := record.Case + "\x00" + record.Arm + "\x00" + record.PopVersion
 		group := groups[key]
 		if group == nil {
-			group = &rollupAccumulator{row: evalRollupRow{Case: record.Case, Arm: record.Arm}}
+			group = &rollupAccumulator{row: evalRollupRow{Case: record.Case, Arm: record.Arm, PopVersion: record.PopVersion}}
 			groups[key] = group
 		}
-		list, known := lists[record.Case]
+		current, known := currentCases[record.Case]
 		if !known {
-			if data, err := os.ReadFile(filepath.Join(cases, record.Case, acceptanceName)); err == nil {
-				list.digest = acceptanceDigest(string(data))
-				if list.nameOnly, err = nameOnlyItems(string(data)); err != nil {
+			caseDir := filepath.Join(cases, record.Case)
+			if manifest, err := readCaseManifest(caseDir); err == nil {
+				current.parent = manifest.ParentCommit
+			}
+			if data, err := os.ReadFile(filepath.Join(caseDir, acceptanceName)); err == nil {
+				current.digest = acceptanceDigest(string(data))
+				if current.nameOnly, err = nameOnlyItems(string(data)); err != nil {
 					return fmt.Errorf("read Acceptance list of Case %s: %w", record.Case, err)
 				}
 			}
-			lists[record.Case] = list
+			currentCases[record.Case] = current
 		}
-		if record.Grade != nil && record.Grade.Status == "graded" {
-			if list.digest == "" || record.Grade.AcceptanceDigest != list.digest {
-				group.row.Stale++
-			}
+		if record.ParentCommit == "" {
+			group.row.ParentUnknown++
 		}
-		return group.add(record, list.nameOnly)
+		staleParent := record.ParentCommit != "" && record.ParentCommit != current.parent
+		staleGrade := record.Grade != nil && record.Grade.Status == "graded" &&
+			(current.digest == "" || record.Grade.AcceptanceDigest != current.digest)
+		if staleParent || staleGrade {
+			group.row.Stale++
+		}
+		return group.add(record, current.nameOnly)
 	})
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -382,15 +401,23 @@ func medianSorted(values []float64) float64 {
 }
 
 func renderEvalRollup(w io.Writer, rollup evalRollup) {
-	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %9s %7s %4s %4s %4s %4s %4s %4s %5s %s\n",
-		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "accept-nn", "quality", "gate", "base", "time", "inv", "lost", "ungr", "stale", "blind tok/$/turn/peak/wall")
+	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %9s %7s %4s %4s %4s %4s %4s %4s %5s %4s %-26s %s\n",
+		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "accept-nn", "quality", "gate", "base", "time", "inv", "lost", "ungr", "stale", "unkn", "blind tok/$/turn/peak/wall", "pop")
 	for _, row := range rollup.Rows {
-		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %9s %7s %4d %4d %4d %4d %4d %4d %5d %d/%d/%d/%d/%d\n",
+		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %9s %7s %4d %4d %4d %4d %4d %4d %5d %4d %-26s %s\n",
 			row.Case, row.Arm, row.Trials,
 			formatMetric(row.TotalTokens, 0), formatMetric(row.NotionalCostUSD, 4), formatMetric(row.Turns, 1), formatMetric(row.PeakInputTokens, 0), formatMetric(row.WallClockSeconds, 1),
-			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.NameFreeAcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale,
-			row.TotalTokens.Blind, row.NotionalCostUSD.Blind, row.Turns.Blind, row.PeakInputTokens.Blind, row.WallClockSeconds.Blind)
+			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.NameFreeAcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale, row.ParentUnknown,
+			fmt.Sprintf("%d/%d/%d/%d/%d", row.TotalTokens.Blind, row.NotionalCostUSD.Blind, row.Turns.Blind, row.PeakInputTokens.Blind, row.WallClockSeconds.Blind),
+			formatPopVersion(row.PopVersion))
 	}
+}
+
+func formatPopVersion(version string) string {
+	if version == "" {
+		return "—"
+	}
+	return version
 }
 
 func formatMetric(metric metricRollup, precision int) string {
