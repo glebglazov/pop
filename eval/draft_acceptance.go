@@ -28,6 +28,7 @@ type draftAcceptanceOptions struct {
 	workRoot  string
 	agentSpec string
 	timeout   time.Duration
+	home      agentHome
 }
 
 // capturedRunRecord is what one captured Agent invocation left behind: which
@@ -84,7 +85,7 @@ func draftAcceptance(opts draftAcceptanceOptions) (string, error) {
 
 	prompt := draftingPrompt(string(spec), lifted, referenceDiff)
 	runsDir := filepath.Join(caseDir, draftingDirName, "runs")
-	attempt, err := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
+	attempt, err := opts.home.capture(tasks.CapturedAgentOptions{
 		AgentSpec: opts.agentSpec, Prompt: prompt, RuntimePath: cloneDir,
 		Timeout: opts.timeout, DestinationDir: runsDir,
 	})

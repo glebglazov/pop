@@ -71,6 +71,7 @@ func TestTicketArmTrialGetsOnlyTheTicketBody(t *testing.T) {
 	approveCase(t, caseDir, "Status: approved\n\n1. The file changes.\n", grader)
 	bin := t.TempDir()
 	writeFile(t, filepath.Join(bin, "claude"), `#!/bin/sh
+if [ "$1 $2" = "auth status" ]; then [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || exit 1; echo '{"loggedIn":true}'; exit 0; fi
 for argument in "$@"; do prompt="$argument"; done
 case "$prompt" in
  "Read the file "*) prompt_file=${prompt#Read the file }; prompt_file=${prompt_file%% in full:*}; cp "$prompt_file" "$FAKE_TRIAL_PROMPT" ;;

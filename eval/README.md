@@ -54,6 +54,7 @@ different. Each step can stop the grade:
 | Acceptance digest | the list, the Reference check, and each Trial grade | The check becomes stale. The Rollup counts the earlier grades as stale. |
 | Grader agent | `eval/graders/<name>.toml` and the Reference check | The check becomes stale. |
 | `reference_range` | `case.json` and the Reference check | The check becomes stale. |
+| Agent home digest | the files in `eval/agent-home/`, each Trial, each grade, and the Reference check | The Rollup counts Trials run and grades made in another agent home as stale. The check becomes stale. See [The agent home](#the-agent-home). |
 | `accepted` reasons | the human's decisions and the lock on `run` and `grade` | A reason stays only while its item's behaviour text stays the same. |
 
 The lock: `run` and `grade` refuse a Case until its list is approved and its
@@ -246,10 +247,92 @@ behaviour text changed is dropped.
 
 `run` and `grade` use a list only when it has `Status: approved` and its
 Reference check is current: the digest, the Grader and the Reference range
-agree with the Case, the grade is `graded`, and every failed item has an
-accepted reason. An edit to a behaviour makes the check stale. An edit to the
+agree with the Case, the Grader ran in the current agent home, the grade is
+`graded`, and every failed item has an accepted reason. An edit to a behaviour makes the check stale. An edit to the
 status line or to a heading does not. `--cases`, `--arms`, `--graders`,
-`--config`, `--work`, and `--timeout` work as for `grade`.
+`--config`, `--work`, `--agent-home`, and `--timeout` work as for `grade`.
+
+## The agent home
+
+Every agent that the harness starts runs in one pinned agent home, not in your
+own `~/.claude` and `~/.codex`. This applies to the Arm agent of a Bare arm,
+to every agent that Pop starts for a Pop arm, to the Grader, and to the
+Acceptance-list drafting agent. Your own global instructions, plugins, hooks,
+MCP servers and memory therefore cannot change a Trial or a grade. The
+repository's own `AGENTS.md` and `CLAUDE.md` are in the clone, so the agent
+still reads them.
+
+The agent home defaults to `$XDG_STATE_HOME/pop/eval/agent-home`, or
+`~/.local/state/pop/eval/agent-home` when `XDG_STATE_HOME` is not set. It has
+one directory for each agent CLI that it isolates:
+
+| Directory | Variable | Login, once |
+|---|---|---|
+| `claude/` | `CLAUDE_CONFIG_DIR` | `CLAUDE_CONFIG_DIR=<dir> claude auth login` |
+| `codex/` | `CODEX_HOME` | `CODEX_HOME=<dir> codex login` |
+
+`--agent-home <dir>` selects another root for `run`, `grade`,
+`reference-check`, `draft-acceptance` and `agent-home`. Only claude and codex
+have a directory. The Matrix refuses an Arm or a Grader with another agent,
+because that agent would run with your own configuration.
+
+Before each agent session, the harness clears each directory and installs the
+checked-in files from `eval/agent-home/`: a Claude `settings.json` with auto
+memory off, and a Codex `config.toml` that keeps the Codex login in
+`auth.json`. The files add no plugins, hooks or MCP servers. The clear removes
+transcripts, todos, memory, history and every other entry, except these
+protected names: `.credentials.json` and `.claude.json` (the Claude login and
+its account state) and `auth.json` (the Codex login). The harness never reads,
+writes or copies a login. On macOS, Claude Code can keep its login in the
+Keychain, keyed to the config directory. The clear removes only files, so it
+cannot remove a Keychain entry. The harness clears only a directory that it
+made: a directory that has other files and no `.pop-eval-agent-home` marker is
+refused.
+
+Run one Eval command at a time on one agent home, because each session clears
+the home. To run two at the same time, give the second one another
+`--agent-home` and log in there.
+
+### Log in to the agent home
+
+```sh
+go run ./eval agent-home
+```
+
+The command makes the agent home, installs the checked-in files, and asks each
+CLI for its login status. `claude auth status` and `codex login status` read
+only local state, so the check spends no model tokens. When a CLI is not logged
+in, the command prints the exact login command with the directory. Run that
+command once. Run `agent-home` first, so that the Codex login goes to
+`auth.json` as the installed `config.toml` tells it.
+
+For Claude, you can give a token instead of a login: set
+`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in the environment of the
+Eval command, for example with `op-cache run`. The harness passes its
+environment to every agent. `codex login status` does not count an
+`OPENAI_API_KEY` in the environment, so the preflight needs a Codex login in
+the agent home.
+
+### What the agent home does not need
+
+`pop integrate` installs nothing that a headless Pop drain needs. Its status
+wiring reports pane status to the tmux Monitor, and a Pop-arm Trial runs with
+no tmux. Its skills are for planning and pane work, and no Implement, Verify,
+Refine or Explore prompt names a skill. So the agent home gets none of them.
+
+### Which records name the agent home
+
+`trial.json` records `agent_home_digest`, the digest of the files in
+`eval/agent-home/`. A grade records the same digest for the Grader's run.
+
+- A Grader that runs with other settings can read the same diff in a
+  different way. So the Rollup counts a grade with another digest as stale,
+  and a Reference check graded with another digest is stale and must run
+  again.
+- The Acceptance-list drafting agent also runs in the agent home, but its
+  record has no digest. A human edits and approves the draft, and the
+  Reference check then grades the approved list. So a later home change does
+  not make a list stale.
 
 ## Run the Trial Matrix
 
@@ -268,9 +351,10 @@ With no selection flags, the command runs every approved Case against the Bare
 and Pop arms at repeat 1. A selected Acceptance list must have
 `Status: approved` and a current Reference check. Before it creates a clone, the command checks approval,
 that every selected Arm's agent binary is available, that the `pop` binary is
-available when a Pop arm is selected, and that the work and result roots are
-writable. A preflight failure aborts the Matrix without a Trial attempt or
-record.
+available when a Pop arm is selected, that the work and result roots are
+writable, and that the agent of every selected Arm and of the Grader is logged
+in to the agent home. A preflight failure aborts the Matrix without a Trial
+attempt or record. A login failure names the login command.
 Trials run in repeat-major order: every selected Case and Arm runs for one
 repeat before the next repeat starts. An existing `trial.json` is skipped, so
 the same command resumes a stopped Matrix. An Invalid Trial runs one more time
@@ -341,7 +425,8 @@ identity, signing configuration, or signing key.
 Use another `--repeat` flag to select another repeat number.
 `--ceiling 4h` sets the agent's Trial ceiling (four hours by default). `--redo`
 re-runs every selected saved Trial and replaces its record.
-`--cases`, `--arms`, `--work`, and `--results` change the directory roots.
+`--cases`, `--arms`, `--work`, `--results`, and `--agent-home` change the
+directory roots.
 By default, the harness deletes a Trial's work directory after it saves the
 record, patch, Captured runs, and reports, before grading starts. This cleanup
 also applies to Invalid Trials. Use `--keep-work` to retain each work directory
@@ -380,7 +465,7 @@ Verify reports and Refine reports under `reports/verify/` and
 The record holds the Case, Arm, repeat, attempt count, requested and actual model,
 start and end times, outcome, Captured run ID, spend, notional cost, and work
 directory. Unknown spend figures retain the capture seam's presence flags.
-Two fields record where the Trial came from:
+Three fields record where the Trial came from:
 
 - `parent_commit` is the full SHA of the commit the Trial's clone started
   from. It is empty only when the clone failed.
@@ -389,6 +474,8 @@ Two fields record where the Trial came from:
   reports `-dirty`. A Bare-kind Arm, the Ticket arm included, runs no Pop
   binary, so its record has no `pop_version`. The harness code that the Arm
   runs through is not recorded.
+- `agent_home_digest` names the checked-in agent home files that the Trial's
+  agents ran with. See [The agent home](#the-agent-home).
 The patch compares the final tree with the parent, includes new files and
 binary data, and has no Trial path or Arm label added by the harness.
 
@@ -474,11 +561,12 @@ the whole reply in all cases. Successful grading writes `grade.scores`, includin
 the per-item decisions, list ratio, quality, and rationale.
 
 `grade.grader` stores the Grader's Captured run ID, outcome, actual model, spend,
-and notional cost separately from Arm spend. Captured runs are stored in the
+and notional cost separately from Arm spend. `grade.agent_home_digest` names
+the agent home the Grader ran in. Captured runs are stored in the
 Trial result directory under `grading/`. Regrading replaces the grade fields;
 it does not run the Arm again or change its spend. Previous capture files stay.
-`--config`, `--graders`, `--cases`, `--arms`, `--work`, and `--results` select other
-paths. `--timeout` sets the Grader ceiling (one hour by default). Flags precede
+`--config`, `--graders`, `--cases`, `--arms`, `--work`, `--results`, and
+`--agent-home` select other paths. `--timeout` sets the Grader ceiling (one hour by default). Flags precede
 the three positional arguments.
 
 ## Read the Rollup
@@ -504,12 +592,19 @@ figure is `—`; the final column counts token-, rate-, turn-, peak-, and
 wall-clock-blind Trials. `--json` emits these same rows and uses `null` for
 absent medians and spreads. Use `--results` to read another Trial record root.
 
-The `stale` count is the Trials that ran from another `parent_commit` than the
-Case's `case.json` holds now, and the graded Trials whose Grader read another
-version of the Case's Acceptance list than the one in `eval/cases` now, or a
-grade that names no list. A Trial counts once. Their figures still count in
-the medians. Run a Trial from an earlier parent again, and grade a Trial with
-an earlier list again, before you compare them. The `unkn` count is the Trials
-recorded before Trials named their parent commit. Nothing shows which parent
-they ran from, so they are not counted as stale. Treat them as not proven
-current. `--cases` selects another Case root.
+One rule compares each recorded origin with its current value: the Trial's
+`parent_commit` with the Case's `case.json`, the Trial's `agent_home_digest`
+with the files in `eval/agent-home/`, and a graded Trial's
+`grade.agent_home_digest` with the same files. Another value is stale. No
+value is unknown: the record is from before the field existed.
+
+The `stale` count is the Trials with a stale origin, and the graded Trials
+whose Grader read another version of the Case's Acceptance list than the one
+in `eval/cases` now, or a grade that names no list. A Trial counts once. Their
+figures still count in the medians. Run a Trial from an earlier parent or
+agent home again, and grade a Trial with an earlier list or Grader home again,
+before you compare them. The `unkn` count (`unknown` in `--json`) is the Trials
+with an unknown origin. They are not counted as stale. Treat them as not
+proven current. Trials run before the agent home existed ran in your own
+`~/.claude` and `~/.codex`, and they are all in this count. `--cases` selects
+another Case root.

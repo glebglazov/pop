@@ -37,19 +37,22 @@ type trialRecord struct {
 	ParentCommit string `json:"parent_commit,omitempty"`
 	// PopVersion is what the Pop binary's --version printed for this Trial. A
 	// Bare-kind Arm runs no Pop binary, so it records none.
-	PopVersion   string            `json:"pop_version,omitempty"`
-	ActualModel  string            `json:"actual_model,omitempty"`
-	StartedAt    time.Time         `json:"started_at"`
-	EndedAt      time.Time         `json:"ended_at"`
-	Outcome      string            `json:"outcome"`
-	Reason       string            `json:"reason,omitempty"`
-	AgentOutcome string            `json:"agent_outcome,omitempty"`
-	RunID        string            `json:"run_id,omitempty"`
-	WorkDir      string            `json:"work_dir"`
-	SetStatus    string            `json:"set_status,omitempty"`
-	SetSpend     json.RawMessage   `json:"set_spend,omitempty"`
-	Spend        tasks.RunSpend    `json:"spend"`
-	Notional     tasks.PricedSpend `json:"notional"`
+	PopVersion string `json:"pop_version,omitempty"`
+	// AgentHomeDigest names the checked-in agent home the Trial's agents ran
+	// in, so the Rollup can tell a Trial run with other agent settings.
+	AgentHomeDigest string            `json:"agent_home_digest,omitempty"`
+	ActualModel     string            `json:"actual_model,omitempty"`
+	StartedAt       time.Time         `json:"started_at"`
+	EndedAt         time.Time         `json:"ended_at"`
+	Outcome         string            `json:"outcome"`
+	Reason          string            `json:"reason,omitempty"`
+	AgentOutcome    string            `json:"agent_outcome,omitempty"`
+	RunID           string            `json:"run_id,omitempty"`
+	WorkDir         string            `json:"work_dir"`
+	SetStatus       string            `json:"set_status,omitempty"`
+	SetSpend        json.RawMessage   `json:"set_spend,omitempty"`
+	Spend           tasks.RunSpend    `json:"spend"`
+	Notional        tasks.PricedSpend `json:"notional"`
 }
 
 func runTrialCommand(args []string) error {
@@ -75,6 +78,7 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	gradeTimeout := flags.Duration("grade-timeout", time.Hour, "Grader ceiling")
 	keepWork := flags.Bool("keep-work", false, "Keep each Trial work directory")
 	redo := flags.Bool("redo", false, "Run selected saved Trials again")
+	homeRoot := agentHomeFlag(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -115,23 +119,28 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	if err := checkTicketInputs(*cases, []string(selectedCases), []string(armNames), loadedArms); err != nil {
 		return err
 	}
-	if err := preflightMatrix(armNames, loadedArms, *pop, *work, *results); err != nil {
+	home, err := newAgentHome(*homeRoot)
+	if err != nil {
+		return err
+	}
+	if err := preflightMatrix(armNames, loadedArms, grader, home, *pop, *work, *results); err != nil {
 		return err
 	}
 	sort.Ints(repeats)
-	trialOpts := trialOptions{cases: *cases, arms: *arms, grader: grader, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
+	trialOpts := trialOptions{cases: *cases, arms: *arms, grader: grader, home: home, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
 	return runMatrix(selectedCases, armNames, repeats, *results, *redo, progress,
 		func(name, arm string, repeat int) (string, error) {
 			return runOneTrial(name, arm, repeat, trialOpts)
 		},
 		func(name, arm string, repeat int) error {
-			gradeArgs := []string{"--cases", *cases, "--arms", *arms, "--graders", *graders, "--config", *configPath, "--work", *work, "--results", *results, "--timeout", gradeTimeout.String(), name, arm, strconv.Itoa(repeat)}
+			gradeArgs := []string{"--cases", *cases, "--arms", *arms, "--graders", *graders, "--config", *configPath, "--work", *work, "--results", *results, "--agent-home", home.root, "--timeout", gradeTimeout.String(), name, arm, strconv.Itoa(repeat)}
 			return runGradeCommandWithProgress(gradeArgs, progress, false)
 		})
 }
 
-func preflightMatrix(armNames []string, loadedArms map[string]armFile, pop, workRoot, resultsRoot string) error {
+func preflightMatrix(armNames []string, loadedArms map[string]armFile, grader armFile, home agentHome, pop, workRoot, resultsRoot string) error {
 	popSelected := false
+	presets := []string{}
 	for _, name := range armNames {
 		arm := loadedArms[name]
 		invocation, err := tasks.ResolveAgentInvocation(arm.agentSpec(), "", "", ".")
@@ -142,7 +151,13 @@ func preflightMatrix(armNames []string, loadedArms map[string]armFile, pop, work
 			return fmt.Errorf("preflight Arm %q: agent binary %q not found: %w", name, invocation.Name, err)
 		}
 		popSelected = popSelected || arm.Kind == "pop"
+		presets = append(presets, invocation.AgentPreset())
 	}
+	graderInvocation, err := tasks.ResolveAgentInvocation(grader.agentSpec(), "", "", ".")
+	if err != nil {
+		return fmt.Errorf("preflight Grader: resolve agent binary: %w", err)
+	}
+	presets = append(presets, graderInvocation.AgentPreset())
 	if popSelected {
 		if _, err := exec.LookPath(pop); err != nil {
 			return fmt.Errorf("preflight Pop binary %q not found: %w", pop, err)
@@ -156,7 +171,7 @@ func preflightMatrix(armNames []string, loadedArms map[string]armFile, pop, work
 			return fmt.Errorf("preflight %s root %s is not writable: %w", root.name, root.path, err)
 		}
 	}
-	return nil
+	return home.preflight(presets)
 }
 
 func probeEvalRoot(root string) error {
@@ -353,6 +368,7 @@ func selectCases(root string, selected []string, grader armFile) ([]string, erro
 type trialOptions struct {
 	cases, arms, work, results, pop string
 	grader                          armFile
+	home                            agentHome
 	ceiling                         time.Duration
 	keepWork                        bool
 	progress                        evalProgress
@@ -404,7 +420,7 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 	} else if exists {
 		attempts = previous.Attempts + 1
 	}
-	record := trialRecord{Case: manifest.Name, Arm: armName, Repeat: repeat, Attempts: attempts, Model: selected.Model, WorkDir: workDir, StartedAt: time.Now().UTC(), Outcome: outcomeInvalid}
+	record := trialRecord{Case: manifest.Name, Arm: armName, Repeat: repeat, Attempts: attempts, Model: selected.Model, AgentHomeDigest: agentHomeDigest(), WorkDir: workDir, StartedAt: time.Now().UTC(), Outcome: outcomeInvalid}
 	label := trialLabel(manifest.Name, armName, repeat)
 	cloneDir := filepath.Join(workDir, "repository")
 	opts.progress.line("%s attempt=%d preparation started", label, attempts)
@@ -426,11 +442,11 @@ func runOneTrial(name, armName string, repeat int, opts trialOptions) (string, e
 		var evidenceErr error
 		if selected.Kind == "pop" {
 			if record.PopVersion, trialErr = popVersion(opts.pop); trialErr == nil {
-				trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.ceiling, &record)
+				trialErr = runPopTrial(opts.pop, caseDir, cloneDir, selected, opts.home, opts.ceiling, &record)
 			}
 			evidenceErr = savePopTrialReports(cloneDir, resultDir, &record)
 		} else {
-			trialErr, evidenceErr = runBareTrial(cloneDir, resultDir, selected, prompt, opts.ceiling, &record)
+			trialErr, evidenceErr = runBareTrial(cloneDir, resultDir, selected, opts.home, prompt, opts.ceiling, &record)
 		}
 		stopWaiting()
 		if trialErr != nil {
@@ -504,8 +520,8 @@ func popVersion(binary string) (string, error) {
 // The two failures answer apart: once the seam returns an attempt, the agent
 // has run and been paid for, so a capture it could not write or price is a hole
 // in the Trial's evidence rather than a reason to void the Trial.
-func runBareTrial(clone, resultDir string, arm armFile, prompt string, ceiling time.Duration, record *trialRecord) (trialErr, evidenceErr error) {
-	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
+func runBareTrial(clone, resultDir string, arm armFile, home agentHome, prompt string, ceiling time.Duration, record *trialRecord) (trialErr, evidenceErr error) {
+	attempt, captureErr := home.capture(tasks.CapturedAgentOptions{
 		AgentSpec: arm.agentSpec(), Prompt: prompt, RuntimePath: clone,
 		Timeout: ceiling, DestinationDir: filepath.Join(resultDir, "capture"),
 	})

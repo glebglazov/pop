@@ -63,6 +63,8 @@ func TestBareTrialCommand(t *testing.T) {
 	approveCase(t, caseDir, "Status: approved\n\n1. The file changes.\n", grader)
 	bin := t.TempDir()
 	agent := `#!/bin/sh
+if [ "$1 $2" = "auth status" ]; then [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || exit 1; echo '{"loggedIn":true}'; exit 0; fi
+[ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || exit 6
 for argument in "$@"; do prompt="$argument"; done
 case "$prompt" in
  "Read the file "*) prompt_file=${prompt#Read the file }; prompt_file=${prompt_file%% in full:*}; cp "$prompt_file" "$FAKE_TRIAL_PROMPT" ;;
@@ -165,8 +167,8 @@ esac
 				t.Fatalf("clone is not fresh and neutral: %s", record.WorkDir)
 			}
 			previousWork = record.WorkDir
-			if record.ParentCommit != parent || record.PopVersion != "" {
-				t.Fatalf("provenance = parent %q pop %q, want parent %q and no Pop version for a Bare-kind Arm", record.ParentCommit, record.PopVersion, parent)
+			if record.ParentCommit != parent || record.PopVersion != "" || record.AgentHomeDigest != agentHomeDigest() {
+				t.Fatalf("provenance = parent %q pop %q home %q, want parent %q, no Pop version for a Bare-kind Arm, and the checked-in agent home", record.ParentCommit, record.PopVersion, record.AgentHomeDigest, parent)
 			}
 			if _, err := os.Stat(record.WorkDir); !os.IsNotExist(err) {
 				t.Fatalf("Trial work directory remains after saved outputs: %v", err)

@@ -13,23 +13,10 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
 
-type trialFS struct {
-	deps.FileSystem
-	data string
-}
-
-func (f trialFS) Getenv(key string) string {
-	if key == "XDG_DATA_HOME" {
-		return f.data
-	}
-	return f.FileSystem.Getenv(key)
-}
-
-func runPopTrial(binary, caseDir, clone string, arm armFile, ceiling time.Duration, record *trialRecord) error {
+func runPopTrial(binary, caseDir, clone string, arm armFile, home agentHome, ceiling time.Duration, record *trialRecord) error {
 	if strings.ContainsRune(binary, filepath.Separator) {
 		var err error
 		binary, err = filepath.Abs(binary)
@@ -40,7 +27,7 @@ func runPopTrial(binary, caseDir, clone string, arm armFile, ceiling time.Durati
 	dataDir := filepath.Join(record.WorkDir, "data")
 	configDir := filepath.Join(record.WorkDir, "config")
 	d := *tasks.DefaultDeps()
-	d.FS = trialFS{FileSystem: d.FS, data: dataDir}
+	d.FS = envFS{FileSystem: d.FS, values: map[string]string{"XDG_DATA_HOME": dataDir}}
 	identity, err := tasks.ResolveRepositoryIdentity(&d, clone)
 	if err != nil {
 		return err
@@ -74,7 +61,12 @@ func runPopTrial(binary, caseDir, clone string, arm armFile, ceiling time.Durati
 	if err := tasks.WriteAtomic(manifestPath, append(raw, '\n'), 0o644); err != nil {
 		return err
 	}
-	env := []string{"XDG_DATA_HOME=" + dataDir, "XDG_CONFIG_HOME=" + configDir, "NO_COLOR=1", "TERM=dumb", "TMUX=", "TMUX_PANE="}
+	// Pop passes its own environment to every agent it starts, so the agent
+	// home's variables reach each Implement, Verify, Refine and Explore session.
+	if err := home.prepare(); err != nil {
+		return fmt.Errorf("prepare agent home: %w", err)
+	}
+	env := append([]string{"XDG_DATA_HOME=" + dataDir, "XDG_CONFIG_HOME=" + configDir, "NO_COLOR=1", "TERM=dumb", "TMUX=", "TMUX_PANE="}, home.env()...)
 	ctx, cancel := context.WithTimeout(context.Background(), ceiling)
 	defer cancel()
 	if _, err := popTrialCommand(ctx, binary, clone, env, "register", record.Case); err != nil {
@@ -128,7 +120,7 @@ func runPopTrial(binary, caseDir, clone string, arm armFile, ceiling time.Durati
 func savePopTrialReports(clone, resultDir string, record *trialRecord) error {
 	dataDir := filepath.Join(record.WorkDir, "data")
 	d := *tasks.DefaultDeps()
-	d.FS = trialFS{FileSystem: d.FS, data: dataDir}
+	d.FS = envFS{FileSystem: d.FS, values: map[string]string{"XDG_DATA_HOME": dataDir}}
 	identity, err := tasks.ResolveRepositoryIdentity(&d, clone)
 	if err != nil {
 		return fmt.Errorf("resolve Pop Trial reports: %w", err)

@@ -44,6 +44,9 @@ type gradeRecord struct {
 	// AcceptanceDigest names the Acceptance list the Grader read, so a grade
 	// made before the list changed reads as stale in the Rollup.
 	AcceptanceDigest string `json:"acceptance_digest,omitempty"`
+	// AgentHomeDigest names the checked-in agent home the Grader ran in, so a
+	// grade made with other Grader settings reads as stale.
+	AgentHomeDigest string `json:"agent_home_digest,omitempty"`
 	// BaselineGates are the Objective gates run on the untouched parent tree.
 	// Gates says whether the Trial tree passes only when every one of these
 	// passed: a gate the parent already fails cannot tell the Arm's work apart.
@@ -72,7 +75,12 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	work := flags.String("work", defaultWorkRoot, "Eval work directory")
 	results := flags.String("results", defaultResultsRoot, "Trial record directory root")
 	timeout := flags.Duration("timeout", time.Hour, "Grader ceiling")
+	homeRoot := agentHomeFlag(flags)
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	home, err := newAgentHome(*homeRoot)
+	if err != nil {
 		return err
 	}
 	if flags.NArg() != 3 || !namePattern.MatchString(flags.Arg(1)) || *timeout <= 0 {
@@ -122,7 +130,7 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	record.Grade = grade
 	label := trialLabel(record.Case, record.Arm, record.Repeat)
 	gradeErr := gradeOneTrial(manifest, acceptance, behaviourCount, &record, gradeOptions{
-		work: *work, grader: grader, arms: *arms,
+		work: *work, grader: grader, home: home, arms: *arms,
 		timeout: *timeout, resultDir: resultDir, progress: progress,
 	})
 	if gradeErr != nil {
@@ -149,6 +157,7 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 type gradeOptions struct {
 	work, arms, resultDir string
 	grader                armFile
+	home                  agentHome
 	timeout               time.Duration
 	progress              evalProgress
 }
@@ -283,7 +292,8 @@ func gradeDiff(manifest caseManifest, acceptance string, behaviourCount int, pat
 	}
 	opts.progress.line("%s Grader execution started", label)
 	stopWaiting = opts.progress.wait(label, "Grader invocation", opts.timeout)
-	attempt, captureErr := tasks.RunCapturedAgentInvocation(tasks.DefaultDeps(), tasks.CapturedAgentOptions{
+	grade.AgentHomeDigest = agentHomeDigest()
+	attempt, captureErr := opts.home.capture(tasks.CapturedAgentOptions{
 		AgentSpec: grader.agentSpec(), Prompt: graderPrompt(string(patch), acceptance, quoted.String(), grade.OutsideScope),
 		RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: captureDir,
 	})

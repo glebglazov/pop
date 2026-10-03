@@ -328,7 +328,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"1. The command rep
 
 	path, err := draftAcceptance(draftAcceptanceOptions{
 		casePath: caseDir, casesRoot: t.TempDir(), workRoot: filepath.Join(t.TempDir(), "work"),
-		agentSpec: "claude --model claude-test", timeout: time.Minute,
+		agentSpec: "claude --model claude-test", timeout: time.Minute, home: testAgentHome(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -412,6 +412,17 @@ func TestLoadApprovedAcceptanceHoldsTheListToItsReferenceCheck(t *testing.T) {
 	if _, err := loadApprovedAcceptance(caseDir, other); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("Grader change error = %v", err)
 	}
+	for _, graderHome := range []string{"other", ""} {
+		changed := check
+		changedGrade := *check.Grade
+		changedGrade.AgentHomeDigest = graderHome
+		changed.Grade = &changedGrade
+		data, _ := json.Marshal(changed)
+		writeFile(t, checkPath, string(data))
+		if _, err := loadApprovedAcceptance(caseDir, grader); err == nil || !strings.Contains(err.Error(), "agent home") {
+			t.Fatalf("Grader home %q error = %v", graderHome, err)
+		}
+	}
 
 	check.Grade.Scores.Items[1] = itemGrade{Item: 2, Met: false, Reason: "The Reference prints it only in a drain."}
 	data, _ := json.Marshal(check)
@@ -487,7 +498,7 @@ func approveCase(t *testing.T, caseDir, acceptance string, grader armFile) {
 		scores.Items = append(scores.Items, itemGrade{Item: i + 1, Met: true, Reason: "Reference meets it."})
 	}
 	check := referenceCheck{AcceptanceDigest: acceptanceDigest(acceptance), Grader: grader.agentSpec(), ReferenceRange: manifest.ReferenceRange,
-		Grade: &gradeRecord{Status: "graded", Scores: scores}, Accepted: []acceptedFailure{}}
+		Grade: &gradeRecord{Status: "graded", AgentHomeDigest: agentHomeDigest(), Scores: scores}, Accepted: []acceptedFailure{}}
 	data, _ := json.Marshal(check)
 	if err := os.MkdirAll(filepath.Join(caseDir, referenceCheckDirName), 0o755); err != nil {
 		t.Fatal(err)

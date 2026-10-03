@@ -87,6 +87,8 @@ case "$2" in
   fi
   ;;
  implement)
+  [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || exit 23
+  [ -f "$CODEX_HOME/config.toml" ] || exit 24
   printf 'changed\n' > feature.txt
   printf 'new\n' > new.txt
   git add feature.txt new.txt || exit 21
@@ -108,9 +110,18 @@ esac
 	if err := os.Chmod(binary, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "claude"), "#!/bin/sh\n")
-	if err := os.Chmod(filepath.Join(root, "claude"), 0o755); err != nil {
-		t.Fatal(err)
+	writeFile(t, filepath.Join(root, "claude"), `#!/bin/sh
+if [ "$1 $2" = "auth status" ]; then [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || exit 1; echo '{"loggedIn":true}'; exit 0; fi
+exit 9
+`)
+	writeFile(t, filepath.Join(root, "codex"), `#!/bin/sh
+[ "$1 $2" = "login status" ] && [ -f "$CODEX_HOME/config.toml" ] && exit 0
+exit 9
+`)
+	for _, name := range []string{"claude", "codex"} {
+		if err := os.Chmod(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for i, status := range []string{"DONE", "FAILED", "VERIFY-FAILED", "TIMEOUT", "CRASH"} {

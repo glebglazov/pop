@@ -99,11 +99,16 @@ func runReferenceCheckCommandWithProgress(args []string, progress evalProgress) 
 	configPath := flags.String("config", defaultConfigPath, "Harness config")
 	work := flags.String("work", defaultWorkRoot, "Eval work directory")
 	timeout := flags.Duration("timeout", time.Hour, "Grader ceiling")
+	homeRoot := agentHomeFlag(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 || *timeout <= 0 {
 		return errors.New("usage: go run ./eval reference-check [flags] <case>")
+	}
+	home, err := newAgentHome(*homeRoot)
+	if err != nil {
+		return err
 	}
 	caseDir, err := resolveCaseDir(flags.Arg(0), *cases)
 	if err != nil {
@@ -137,7 +142,7 @@ func runReferenceCheckCommandWithProgress(args []string, progress evalProgress) 
 	checkDir := filepath.Join(caseDir, referenceCheckDirName)
 	grade := &gradeRecord{Status: "ungraded", AcceptanceDigest: acceptanceDigest(acceptance), BaselineGates: []gateResult{}, Gates: []gateResult{}, OutsideScope: []string{}}
 	gradeErr := gradeDiff(manifest, acceptance, len(behaviours), patch, grade, label, filepath.Join(checkDir, "runs"),
-		gradeOptions{work: *work, grader: grader, timeout: *timeout, progress: progress})
+		gradeOptions{work: *work, grader: grader, home: home, timeout: *timeout, progress: progress})
 	if gradeErr != nil {
 		grade.Reason = gradeErr.Error()
 	}
@@ -269,8 +274,9 @@ func checkReferenceCheck(caseDir, acceptance string, grader armFile) error {
 	if !exists {
 		return fmt.Errorf("Case has no Reference check at %s; %s", path, rerun)
 	}
-	if check.AcceptanceDigest != acceptanceDigest(acceptance) || check.Grader != grader.agentSpec() || check.ReferenceRange != manifest.ReferenceRange {
-		return fmt.Errorf("Reference check at %s is stale: the Acceptance list, the Grader or the Reference range changed; %s", path, rerun)
+	graderHomeChanged := check.Grade != nil && check.Grade.Status == "graded" && check.Grade.AgentHomeDigest != agentHomeDigest()
+	if check.AcceptanceDigest != acceptanceDigest(acceptance) || check.Grader != grader.agentSpec() || check.ReferenceRange != manifest.ReferenceRange || graderHomeChanged {
+		return fmt.Errorf("Reference check at %s is stale: the Acceptance list, the Grader, the Grader's agent home or the Reference range changed; %s", path, rerun)
 	}
 	if check.Grade == nil || check.Grade.Status != "graded" || check.Grade.Scores == nil {
 		status, reason := "missing", ""

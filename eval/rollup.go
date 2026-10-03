@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 )
 
@@ -43,13 +44,13 @@ type evalRollupRow struct {
 	Invalid                 int      `json:"invalid"`
 	Lost                    int      `json:"lost"`
 	Ungraded                int      `json:"ungraded"`
-	// Stale counts Trials that ran from another parent commit than the Case
-	// holds now, and graded Trials whose Grader read another version of the
+	// Stale counts Trials whose recorded origin differs from the Case and the
+	// harness now, and graded Trials whose Grader read another version of the
 	// Case's Acceptance list than the one the Case holds now.
 	Stale int `json:"stale"`
-	// ParentUnknown counts Trials recorded before Trials named their parent
-	// commit, so nothing says whether they ran from the Case's parent now.
-	ParentUnknown int `json:"parent_unknown"`
+	// Unknown counts Trials recorded before Trials named an origin, so nothing
+	// says whether that origin is current.
+	Unknown int `json:"unknown"`
 }
 
 type evalRollup struct {
@@ -130,11 +131,13 @@ func renderEvalRollupJSON(w io.Writer, rollup evalRollup) error {
 
 // loadEvalRollup groups every Trial record under root by Case, Arm and Pop
 // revision. cases is read only for each Case's current parent commit and
-// Acceptance list, so a Trial run from an older parent, or a grade made with
-// an older list, is counted as stale.
+// Acceptance list, so a Trial run from an older parent or another agent home,
+// or a grade made with an older list or another Grader home, is counted as
+// stale.
 func loadEvalRollup(root, cases string) (evalRollup, error) {
 	groups := map[string]*rollupAccumulator{}
 	currentCases := map[string]currentCase{}
+	homeDigest := agentHomeDigest()
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -173,14 +176,20 @@ func loadEvalRollup(root, cases string) (evalRollup, error) {
 			}
 			currentCases[record.Case] = current
 		}
-		if record.ParentCommit == "" {
-			group.row.ParentUnknown++
+		origins := []origin{
+			compareOrigin(record.ParentCommit, current.parent),
+			compareOrigin(record.AgentHomeDigest, homeDigest),
 		}
-		staleParent := record.ParentCommit != "" && record.ParentCommit != current.parent
-		staleGrade := record.Grade != nil && record.Grade.Status == "graded" &&
-			(current.digest == "" || record.Grade.AcceptanceDigest != current.digest)
-		if staleParent || staleGrade {
+		graded := record.Grade != nil && record.Grade.Status == "graded"
+		if graded {
+			origins = append(origins, compareOrigin(record.Grade.AgentHomeDigest, homeDigest))
+		}
+		staleList := graded && (current.digest == "" || record.Grade.AcceptanceDigest != current.digest)
+		if slices.Contains(origins, originStale) || staleList {
 			group.row.Stale++
+		}
+		if slices.Contains(origins, originUnknown) {
+			group.row.Unknown++
 		}
 		return group.add(record, current.nameOnly)
 	})
@@ -202,6 +211,30 @@ func loadEvalRollup(root, cases string) (evalRollup, error) {
 		result.Rows = append(result.Rows, group.row)
 	}
 	return result, nil
+}
+
+// origin is how one thing a Trial recorded about where it ran from compares
+// with the Case and the harness now: its parent commit, its agent home, and
+// its Grader's agent home.
+type origin int
+
+const (
+	originCurrent origin = iota
+	originStale
+	originUnknown
+)
+
+// compareOrigin is the one rule for each recorded origin. A record from before
+// the field existed says nothing, so it is unknown rather than stale.
+func compareOrigin(recorded, current string) origin {
+	switch {
+	case recorded == "":
+		return originUnknown
+	case recorded != current:
+		return originStale
+	default:
+		return originCurrent
+	}
 }
 
 func (a *rollupAccumulator) add(record trialRecord, nameOnly map[int]bool) error {
@@ -407,7 +440,7 @@ func renderEvalRollup(w io.Writer, rollup evalRollup) {
 		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %9s %7s %4d %4d %4d %4d %4d %4d %5d %4d %-26s %s\n",
 			row.Case, row.Arm, row.Trials,
 			formatMetric(row.TotalTokens, 0), formatMetric(row.NotionalCostUSD, 4), formatMetric(row.Turns, 1), formatMetric(row.PeakInputTokens, 0), formatMetric(row.WallClockSeconds, 1),
-			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.NameFreeAcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale, row.ParentUnknown,
+			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.NameFreeAcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale, row.Unknown,
 			fmt.Sprintf("%d/%d/%d/%d/%d", row.TotalTokens.Blind, row.NotionalCostUSD.Blind, row.Turns.Blind, row.PeakInputTokens.Blind, row.WallClockSeconds.Blind),
 			formatPopVersion(row.PopVersion))
 	}

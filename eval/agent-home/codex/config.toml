@@ -1,0 +1,4 @@
+# The Codex config of the pinned agent home. It has no MCP servers, no notify
+# command and no profiles. The login stays in auth.json in this home, so the
+# harness can keep it when it clears the home before each Trial.
+cli_auth_credentials_store = "file"

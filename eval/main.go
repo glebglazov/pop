@@ -29,6 +29,9 @@ var (
 	defaultConfigPath  = filepath.Join("eval", "config.toml")
 	defaultWorkRoot    = evalWorkRootWith(os.Getenv, os.UserHomeDir)
 	defaultResultsRoot = filepath.Join("eval", "results")
+	// The agent home sits beside the work root, in state outside the
+	// repository, so a login made into it outlives any one Trial.
+	defaultAgentHomeRoot = filepath.Join(filepath.Dir(defaultWorkRoot), "agent-home")
 )
 
 func evalWorkRootWith(getenv func(string) string, userHomeDir func() (string, error)) string {
@@ -87,11 +90,13 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("expected a command (available: prepare, draft-acceptance, reference-check, run, grade, rollup, clean)")
+		return errors.New("expected a command (available: prepare, draft-acceptance, reference-check, agent-home, run, grade, rollup, clean)")
 	}
 	switch args[0] {
 	case "clean":
 		return runCleanCommand(args[1:])
+	case "agent-home":
+		return runAgentHomeCommand(args[1:])
 	case "grade":
 		return runGradeCommand(args[1:])
 	case "run":
@@ -105,7 +110,7 @@ func run(args []string) error {
 	case "reference-check":
 		return runReferenceCheckCommand(args[1:])
 	default:
-		return fmt.Errorf("unknown command %q (available: prepare, draft-acceptance, reference-check, run, grade, rollup, clean)", args[0])
+		return fmt.Errorf("unknown command %q (available: prepare, draft-acceptance, reference-check, agent-home, run, grade, rollup, clean)", args[0])
 	}
 }
 
@@ -116,13 +121,18 @@ func runDraftAcceptanceCommand(args []string) error {
 	casesRoot := flags.String("cases", defaultCasesRoot, "Case directory root")
 	workRoot := flags.String("work", defaultWorkRoot, "Temporary Eval work directory")
 	timeout := flags.Duration("timeout", time.Hour, "Drafting Agent ceiling")
+	homeRoot := agentHomeFlag(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
 		return errors.New("usage: go run ./eval draft-acceptance [flags] <case>")
 	}
-	path, err := draftAcceptance(draftAcceptanceOptions{casePath: flags.Arg(0), casesRoot: *casesRoot, workRoot: *workRoot, agentSpec: *agent, timeout: *timeout})
+	home, err := newAgentHome(*homeRoot)
+	if err != nil {
+		return err
+	}
+	path, err := draftAcceptance(draftAcceptanceOptions{casePath: flags.Arg(0), casesRoot: *casesRoot, workRoot: *workRoot, agentSpec: *agent, timeout: *timeout, home: home})
 	if err != nil {
 		return err
 	}

@@ -50,6 +50,7 @@ func TestGradeTrialCommand(t *testing.T) {
 	}
 	bin := t.TempDir()
 	agent := `#!/bin/sh
+[ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || exit 6
 for argument in "$@"; do prompt="$argument"; done
 case "$prompt" in
  "Read the file "*) prompt_file=${prompt#Read the file }; prompt_file=${prompt_file%% in full:*}; cp "$prompt_file" "$FAKE_GRADE_PROMPT" ;;
@@ -137,6 +138,9 @@ cat "$FAKE_GRADE_REPLY"
 			}
 			if len(g.Gates) != 3 || g.Gates[0].Output != "changed\nrestored\n" || g.Gates[2].Output != "last gate ran" {
 				t.Fatalf("Trial-tree gates = %+v", g.Gates)
+			}
+			if tc.status == "graded" && g.AgentHomeDigest != agentHomeDigest() {
+				t.Fatalf("grade agent home = %q, want the checked-in home", g.AgentHomeDigest)
 			}
 			if tc.status == "gate_failed" {
 				assertProgressOrder(t, progress.String(), "grading preparation started", "grading preparation finished", "Objective gate started:", "Objective gate finished:", "Grader execution skipped:", "finished: outcome=completed grade=gate_failed acceptance=0 quality=0/5")

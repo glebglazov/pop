@@ -77,7 +77,8 @@ func TestMatrixPreflightChecksPopAndWritableRoots(t *testing.T) {
 	}
 	t.Setenv("PATH", bin)
 	arms := map[string]armFile{"pop-arm": {Kind: "pop", Agent: "claude", Model: "test"}}
-	err := preflightMatrix([]string{"pop-arm"}, arms, "missing-pop", filepath.Join(t.TempDir(), "work"), filepath.Join(t.TempDir(), "results"))
+	grader := armFile{Kind: "bare", Agent: "claude", Model: "grader-test"}
+	err := preflightMatrix([]string{"pop-arm"}, arms, grader, testAgentHome(t), "missing-pop", filepath.Join(t.TempDir(), "work"), filepath.Join(t.TempDir(), "results"))
 	if err == nil || !strings.Contains(err.Error(), `Pop binary "missing-pop"`) {
 		t.Fatalf("Pop preflight error = %v", err)
 	}
@@ -91,7 +92,7 @@ func TestMatrixPreflightChecksPopAndWritableRoots(t *testing.T) {
 				blocked = results
 			}
 			writeFile(t, blocked, "not a directory")
-			err := preflightMatrix([]string{"bare"}, map[string]armFile{"bare": {Kind: "bare", Agent: "claude", Model: "test"}}, "pop", work, results)
+			err := preflightMatrix([]string{"bare"}, map[string]armFile{"bare": {Kind: "bare", Agent: "claude", Model: "test"}}, grader, testAgentHome(t), "pop", work, results)
 			if err == nil || !strings.Contains(err.Error(), "preflight "+failing+" root") || !strings.Contains(err.Error(), "not writable") {
 				t.Fatalf("%s preflight error = %v", failing, err)
 			}
