@@ -5,6 +5,7 @@
   "grade": {
     "status": "graded",
     "acceptance_digest": "c9bd5361c3ca3ccaadb913452746f795d09035b641ec46176f9e967e3b109cb1",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
     "baseline_gates": [
       {
         "command": "go build ./...",
@@ -19,7 +20,7 @@
       {
         "command": "go test ./...",
         "exit_code": 0,
-        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t94.160s\nok  \tgithub.com/glebglazov/pop/config\t2.092s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t4.454s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t113.286s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.115s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.659s\nok  \tgithub.com/glebglazov/pop/integrate\t83.587s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.833s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.694s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.012s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.244s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.369s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.831s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.055s\nok  \tgithub.com/glebglazov/pop/layout\t3.385s\nok  \tgithub.com/glebglazov/pop/monitor\t4.238s\nok  \tgithub.com/glebglazov/pop/project\t3.461s\nok  \tgithub.com/glebglazov/pop/release\t2.031s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.358s\nok  \tgithub.com/glebglazov/pop/routine\t16.743s\nok  \tgithub.com/glebglazov/pop/store\t6.059s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t50.516s\nok  \tgithub.com/glebglazov/pop/tasks\t162.272s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t42.465s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.061s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t62.956s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.272s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.479s\nok  \tgithub.com/glebglazov/pop/ui\t11.679s\nok  \tgithub.com/glebglazov/pop/wayfinder\t6.858s\nok  \tgithub.com/glebglazov/pop/work\t2.679s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.237s\n"
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t95.534s\nok  \tgithub.com/glebglazov/pop/config\t5.409s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.041s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t112.990s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.555s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.975s\nok  \tgithub.com/glebglazov/pop/integrate\t74.819s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t6.956s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.439s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.904s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.119s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.215s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.492s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.310s\nok  \tgithub.com/glebglazov/pop/layout\t2.515s\nok  \tgithub.com/glebglazov/pop/monitor\t4.458s\nok  \tgithub.com/glebglazov/pop/project\t3.948s\nok  \tgithub.com/glebglazov/pop/release\t1.875s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.210s\nok  \tgithub.com/glebglazov/pop/routine\t17.949s\nok  \tgithub.com/glebglazov/pop/store\t5.278s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t40.824s\nok  \tgithub.com/glebglazov/pop/tasks\t157.982s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t42.167s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.429s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t56.061s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.544s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.208s\nok  \tgithub.com/glebglazov/pop/ui\t7.060s\nok  \tgithub.com/glebglazov/pop/wayfinder\t3.784s\nok  \tgithub.com/glebglazov/pop/work\t0.944s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.106s\n"
       }
     ],
     "gates": [
@@ -36,7 +37,7 @@
       {
         "command": "go test ./...",
         "exit_code": 0,
-        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t95.238s\nok  \tgithub.com/glebglazov/pop/config\t2.245s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.130s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t114.517s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.724s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.590s\nok  \tgithub.com/glebglazov/pop/integrate\t85.965s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.226s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t2.478s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.757s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t3.904s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.012s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.241s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.092s\nok  \tgithub.com/glebglazov/pop/layout\t2.629s\nok  \tgithub.com/glebglazov/pop/monitor\t4.935s\nok  \tgithub.com/glebglazov/pop/project\t3.659s\nok  \tgithub.com/glebglazov/pop/release\t2.281s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.057s\nok  \tgithub.com/glebglazov/pop/routine\t14.393s\nok  \tgithub.com/glebglazov/pop/store\t6.623s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t49.711s\nok  \tgithub.com/glebglazov/pop/tasks\t164.331s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t42.740s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t3.015s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t62.126s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.754s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.711s\nok  \tgithub.com/glebglazov/pop/ui\t6.502s\nok  \tgithub.com/glebglazov/pop/wayfinder\t8.020s\nok  \tgithub.com/glebglazov/pop/work\t1.789s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.148s\n"
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t94.100s\nok  \tgithub.com/glebglazov/pop/config\t1.283s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t5.044s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t111.893s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.142s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t2.110s\nok  \tgithub.com/glebglazov/pop/integrate\t71.440s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.209s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t0.641s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.702s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t3.968s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.067s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.495s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.700s\nok  \tgithub.com/glebglazov/pop/layout\t3.549s\nok  \tgithub.com/glebglazov/pop/monitor\t5.543s\nok  \tgithub.com/glebglazov/pop/project\t3.427s\nok  \tgithub.com/glebglazov/pop/release\t1.808s\nok  \tgithub.com/glebglazov/pop/repogroup\t1.709s\nok  \tgithub.com/glebglazov/pop/routine\t17.579s\nok  \tgithub.com/glebglazov/pop/store\t4.747s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t42.941s\nok  \tgithub.com/glebglazov/pop/tasks\t159.759s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t41.835s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.899s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t54.268s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.245s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t2.032s\nok  \tgithub.com/glebglazov/pop/ui\t7.462s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.985s\nok  \tgithub.com/glebglazov/pop/work\t1.651s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.802s\n"
       }
     ],
     "outside_scope": [],
@@ -45,27 +46,27 @@
         {
           "item": 1,
           "met": true,
-          "reason": "Artifact listing places exploration.md after the spec and before progress."
+          "reason": "Artifact ordering places exploration after spec and before progress."
         },
         {
           "item": 2,
           "met": true,
-          "reason": "Dashboard artifacts use the same type and ordering."
+          "reason": "Dashboard artifacts consume the same ordered artifact list."
         },
         {
           "item": 3,
           "met": true,
-          "reason": "The orphan check exempts exploration.md."
+          "reason": "The orphan-markdown exemption includes exploration.md."
         },
         {
           "item": 4,
           "met": true,
-          "reason": "Other registration checks remain; unlisted task markdown still fails."
+          "reason": "Other validation remains intact, including rejection of unlisted markdown."
         },
         {
           "item": 5,
           "met": true,
-          "reason": "ExploreRequested reads the set-level explore flag."
+          "reason": "ExploreRequested reads the set-level explore boolean."
         },
         {
           "item": 6,
@@ -75,232 +76,232 @@
         {
           "item": 7,
           "met": true,
-          "reason": "ExplorerOverride uses the shared AgentDirective shape."
+          "reason": "ExplorerOverride uses the shared agents-and-effort directive shape."
         },
         {
           "item": 8,
           "met": true,
-          "reason": "The guide states the keys and their opposite participation defaults."
+          "reason": "The guide names both keys and explicitly distinguishes opt-in from opt-out."
         },
         {
           "item": 9,
           "met": true,
-          "reason": "The guide states the shared-seam dependency rule."
+          "reason": "The guide states the shared-seam and dependent-later-task rule."
         },
         {
           "item": 10,
           "met": true,
-          "reason": "Shared constants supply the guide and manifest readers, with drift tests."
+          "reason": "Shared constants feed the guide and manifest readers, with anti-drift tests."
         },
         {
           "item": 11,
           "met": true,
-          "reason": "The command starts a fresh agent with the task listing, bodies, and available spec."
+          "reason": "The new command invokes a fresh Explorer with task listings, bodies, and optional spec."
         },
         {
           "item": 12,
           "met": true,
-          "reason": "The prompt requests all five required descriptions of the code."
+          "reason": "The prompt requests all five required aspects of the existing code."
         },
         {
           "item": 13,
           "met": true,
-          "reason": "The prompt requires path or symbol evidence, page length, and observed-tree context."
+          "reason": "The prompt requires path-or-symbol evidence, roughly one page, and observed-tree framing."
         },
         {
           "item": 14,
           "met": true,
-          "reason": "The prompt excludes prior-art research and requests no such report section."
+          "reason": "The prompt excludes a prior-art catalogue and requests no prior-art section."
         },
         {
           "item": 15,
           "met": true,
-          "reason": "Successful passes replace the single flat exploration.md file."
+          "reason": "Successful passes overwrite one flat exploration.md file."
         },
         {
           "item": 16,
           "met": true,
-          "reason": "Captured runs and spent retry caps use the explore phase."
+          "reason": "Captured runs and spent retry caps use a distinct explore phase."
         },
         {
           "item": 17,
           "met": true,
-          "reason": "Manual exploration ignores the declaration and automatic-exploration switch."
+          "reason": "Manual exploration bypasses both participation and automatic-exploration gates."
         },
         {
           "item": 18,
           "met": true,
-          "reason": "Failed, timed-out, and interrupted attempts return before report writing."
+          "reason": "Failed, timed-out, and interrupted agent passes return before report writing."
         },
         {
           "item": 19,
           "met": false,
-          "reason": "Tests drive exploreResolvedSet, but none joins the command entry point to agent execution, report writing, and captured runs."
+          "reason": "Integration tests start at exploreResolvedSet; none exercises the command through report and captured-run creation."
         },
         {
           "item": 20,
           "met": true,
-          "reason": "Implement prompts conditionally include the report path and description."
+          "reason": "Implement prompts conditionally describe the report and provide its path."
         },
         {
           "item": 21,
           "met": true,
-          "reason": "Implement prompts contain the path, without report content."
+          "reason": "The implement template receives only the report pointer, never its body."
         },
         {
           "item": 22,
           "met": true,
-          "reason": "The prompt limits corrections to lines made false by the attempt."
+          "reason": "The prompt limits edits to lines falsified by the current attempt."
         },
         {
           "item": 23,
           "met": true,
-          "reason": "The edit boundary explicitly allows the exploration report."
+          "reason": "The edit boundary explicitly permits the report beside the task file."
         },
         {
           "item": 24,
           "met": true,
-          "reason": "The prior-art block remains unchanged."
+          "reason": "The existing prior-art block is unchanged."
         },
         {
           "item": 25,
           "met": true,
-          "reason": "Assist prompts include the report pointer beside refinement and progress."
+          "reason": "Assist prompts place the exploration pointer beside refinement and recent progress."
         },
         {
           "item": 26,
           "met": true,
-          "reason": "Implement and assist goldens cover report presence and absence."
+          "reason": "Implement and assist goldens cover report-present and report-absent cases."
         },
         {
           "item": 27,
           "met": true,
-          "reason": "Exploration runs before the drain selects its first task."
+          "reason": "The drain invokes exploration before entering task selection."
         },
         {
           "item": 28,
           "met": true,
-          "reason": "An existing report skips the exploration pass."
+          "reason": "An existing report bypasses exploration without invoking an agent."
         },
         {
           "item": 29,
           "met": true,
-          "reason": "Undeclared sets skip automatic exploration."
+          "reason": "Undeclared sets bypass the exploration phase."
         },
         {
           "item": 30,
           "met": true,
-          "reason": "work.explore.enabled defaults to true when its group or key is absent."
+          "reason": "The independent work.explore.enabled gate defaults on, including absent configuration."
         },
         {
           "item": 31,
           "met": true,
-          "reason": "The config switch disables automatic passes without disabling manual exploration."
+          "reason": "Disabling automatic exploration prevents its invocation while preserving manual exploration."
         },
         {
           "item": 32,
           "met": false,
-          "reason": "Agent and CLI precedence exist, but no configured exploration effort is read; effort falls back to heavy."
+          "reason": "Agent and manifest/CLI precedence exists, but no configured exploration effort is supported; effort falls directly to heavy."
         },
         {
           "item": 33,
           "met": true,
-          "reason": "Automatic exploration skips human-completed sets."
+          "reason": "HumanCompleted explicitly bypasses automatic exploration."
         },
         {
           "item": 34,
           "met": true,
-          "reason": "Report reuse does not compare its recorded tree with the checkout."
+          "reason": "Report reuse depends on availability, without comparing its recorded SHA to the checkout."
         },
         {
           "item": 35,
           "met": true,
-          "reason": "Whole-drain tests cover missing and existing reports and assert whether exploration ran."
+          "reason": "Whole-drain tests cover absent and existing reports and assert Explorer invocation behavior."
         },
         {
           "item": 36,
           "met": true,
-          "reason": "Failed attempts use the shared retry schedule and standard cap."
+          "reason": "The shared fallback walk applies the standard retry cap and delays."
         },
         {
           "item": 37,
-          "met": true,
-          "reason": "Failed exploration without a report produces EXPLORE-FAILED and stops the drain."
+          "met": false,
+          "reason": "A capped failure followed by a quota-paused fallback leaves the latest run non-parking, allowing implementation without a report."
         },
         {
           "item": 38,
           "met": true,
-          "reason": "The park derives from captured runs and report absence without new store fields."
+          "reason": "Park derivation uses captured-run metadata and report absence without schema changes."
         },
         {
           "item": 39,
           "met": true,
-          "reason": "EXPLORE-FAILED remains separate from BLOCKED."
+          "reason": "EXPLORE-FAILED is distinct from BLOCKED and preserves its human-decision meaning."
         },
         {
           "item": 40,
           "met": true,
-          "reason": "Automatic selection and daemon selection exclude parked sets."
+          "reason": "Automatic selection and daemon scheduling exclude the parked status."
         },
         {
           "item": 41,
           "met": false,
-          "reason": "Manual failures can create a park without progress; repeated drains with exploration disabled can append duplicate park records."
+          "reason": "Manual failures can create a park without progress, while repeated disabled drains append duplicate park records."
         },
         {
           "item": 42,
           "met": true,
-          "reason": "The skip flag bypasses exploration and its drain gate."
+          "reason": "The skip flag bypasses exploration and parking for the targeted drain."
         },
         {
           "item": 43,
           "met": true,
-          "reason": "A successful manual report or removal of the declaration clears the park."
+          "reason": "Writing a report or withdrawing the declaration removes the derived park."
         },
         {
           "item": 44,
           "met": true,
-          "reason": "CONTEXT.md includes EXPLORE-FAILED in both required status lists."
+          "reason": "CONTEXT.md lists EXPLORE-FAILED among drain stops and automatic-selection exclusions."
         },
         {
           "item": 45,
           "met": false,
-          "reason": "ExploreMarkBadgeText hides the exploration mark beside EXPLORE-FAILED instead of retaining it with separate reason detail."
+          "reason": "ExploreMarkBadgeText deliberately suppresses the exploration mark beside EXPLORE-FAILED."
         },
         {
           "item": 46,
           "met": true,
-          "reason": "Undeclared sets carry no exploration mark, including after manual exploration."
+          "reason": "Undeclared sets receive no exploration mark, including after manual exploration."
         },
         {
           "item": 47,
           "met": true,
-          "reason": "Refresh resolves the exploration result and supplies the shared display surfaces."
+          "reason": "Refresh resolves exploration centrally and passes that result to all four surfaces."
         },
         {
           "item": 48,
           "met": true,
-          "reason": "Dashboard detail shows the report path and recorded tree without its body."
+          "reason": "Dashboard detail renders the report path and recorded tree without its body."
         },
         {
           "item": 49,
           "met": true,
-          "reason": "The sign-off preamble includes exploration beside the refine report."
+          "reason": "The sign-off preamble includes exploration alongside the refine-report pointer."
         }
       ],
-      "list_ratio": 0.9183673469387755,
+      "list_ratio": 0.8979591836734694,
       "quality": 3,
-      "rationale": "Good reuse and broad tests, but command coverage, configured effort, park records, and failed-state mark display remain incomplete."
+      "rationale": "Broad implementation and substantial tests, but failure aggregation, park logging, configured effort, and command-level coverage leave meaningful gaps."
     },
     "grader": {
       "agent": "codex --model \"gpt-6-astra\"",
-      "run_id": "b4798c7b-be9f-498b-bca9-c6f34dbfcb3f",
+      "run_id": "c719b2d6-182b-4362-8b4c-c1968139f714",
       "outcome": "completed",
       "spend": {
         "Tokens": {
-          "Input": 1354073,
-          "Output": 2778,
-          "CacheRead": 1227008,
+          "Input": 1055696,
+          "Output": 2766,
+          "CacheRead": 943616,
           "CacheWrite": 0,
           "HasInput": true,
           "HasOutput": true,
@@ -312,11 +313,11 @@
           "HasCost": false
         },
         "Turns": {
-          "Count": 16,
+          "Count": 14,
           "HasTurn": true
         },
         "PeakInput": {
-          "Tokens": 128505,
+          "Tokens": 122007,
           "HasPeak": true
         }
       },
@@ -330,7 +331,7 @@
         "ModelKeySource": ""
       }
     },
-    "reply": "ITEM 1 MET: Artifact listing places exploration.md after the spec and before progress.\nITEM 2 MET: Dashboard artifacts use the same type and ordering.\nITEM 3 MET: The orphan check exempts exploration.md.\nITEM 4 MET: Other registration checks remain; unlisted task markdown still fails.\nITEM 5 MET: ExploreRequested reads the set-level explore flag.\nITEM 6 MET: Automatic exploration requires an explicit true value.\nITEM 7 MET: ExplorerOverride uses the shared AgentDirective shape.\nITEM 8 MET: The guide states the keys and their opposite participation defaults.\nITEM 9 MET: The guide states the shared-seam dependency rule.\nITEM 10 MET: Shared constants supply the guide and manifest readers, with drift tests.\nITEM 11 MET: The command starts a fresh agent with the task listing, bodies, and available spec.\nITEM 12 MET: The prompt requests all five required descriptions of the code.\nITEM 13 MET: The prompt requires path or symbol evidence, page length, and observed-tree context.\nITEM 14 MET: The prompt excludes prior-art research and requests no such report section.\nITEM 15 MET: Successful passes replace the single flat exploration.md file.\nITEM 16 MET: Captured runs and spent retry caps use the explore phase.\nITEM 17 MET: Manual exploration ignores the declaration and automatic-exploration switch.\nITEM 18 MET: Failed, timed-out, and interrupted attempts return before report writing.\nITEM 19 NOT_MET: Tests drive exploreResolvedSet, but none joins the command entry point to agent execution, report writing, and captured runs.\nITEM 20 MET: Implement prompts conditionally include the report path and description.\nITEM 21 MET: Implement prompts contain the path, without report content.\nITEM 22 MET: The prompt limits corrections to lines made false by the attempt.\nITEM 23 MET: The edit boundary explicitly allows the exploration report.\nITEM 24 MET: The prior-art block remains unchanged.\nITEM 25 MET: Assist prompts include the report pointer beside refinement and progress.\nITEM 26 MET: Implement and assist goldens cover report presence and absence.\nITEM 27 MET: Exploration runs before the drain selects its first task.\nITEM 28 MET: An existing report skips the exploration pass.\nITEM 29 MET: Undeclared sets skip automatic exploration.\nITEM 30 MET: work.explore.enabled defaults to true when its group or key is absent.\nITEM 31 MET: The config switch disables automatic passes without disabling manual exploration.\nITEM 32 NOT_MET: Agent and CLI precedence exist, but no configured exploration effort is read; effort falls back to heavy.\nITEM 33 MET: Automatic exploration skips human-completed sets.\nITEM 34 MET: Report reuse does not compare its recorded tree with the checkout.\nITEM 35 MET: Whole-drain tests cover missing and existing reports and assert whether exploration ran.\nITEM 36 MET: Failed attempts use the shared retry schedule and standard cap.\nITEM 37 MET: Failed exploration without a report produces EXPLORE-FAILED and stops the drain.\nITEM 38 MET: The park derives from captured runs and report absence without new store fields.\nITEM 39 MET: EXPLORE-FAILED remains separate from BLOCKED.\nITEM 40 MET: Automatic selection and daemon selection exclude parked sets.\nITEM 41 NOT_MET: Manual failures can create a park without progress; repeated drains with exploration disabled can append duplicate park records.\nITEM 42 MET: The skip flag bypasses exploration and its drain gate.\nITEM 43 MET: A successful manual report or removal of the declaration clears the park.\nITEM 44 MET: CONTEXT.md includes EXPLORE-FAILED in both required status lists.\nITEM 45 NOT_MET: ExploreMarkBadgeText hides the exploration mark beside EXPLORE-FAILED instead of retaining it with separate reason detail.\nITEM 46 MET: Undeclared sets carry no exploration mark, including after manual exploration.\nITEM 47 MET: Refresh resolves the exploration result and supplies the shared display surfaces.\nITEM 48 MET: Dashboard detail shows the report path and recorded tree without its body.\nITEM 49 MET: The sign-off preamble includes exploration beside the refine report.\nQUALITY 3: Good reuse and broad tests, but command coverage, configured effort, park records, and failed-state mark display remain incomplete.\n"
+    "reply": "ITEM 1 MET: Artifact ordering places exploration after spec and before progress.\nITEM 2 MET: Dashboard artifacts consume the same ordered artifact list.\nITEM 3 MET: The orphan-markdown exemption includes exploration.md.\nITEM 4 MET: Other validation remains intact, including rejection of unlisted markdown.\nITEM 5 MET: ExploreRequested reads the set-level explore boolean.\nITEM 6 MET: Automatic exploration requires an explicit true value.\nITEM 7 MET: ExplorerOverride uses the shared agents-and-effort directive shape.\nITEM 8 MET: The guide names both keys and explicitly distinguishes opt-in from opt-out.\nITEM 9 MET: The guide states the shared-seam and dependent-later-task rule.\nITEM 10 MET: Shared constants feed the guide and manifest readers, with anti-drift tests.\nITEM 11 MET: The new command invokes a fresh Explorer with task listings, bodies, and optional spec.\nITEM 12 MET: The prompt requests all five required aspects of the existing code.\nITEM 13 MET: The prompt requires path-or-symbol evidence, roughly one page, and observed-tree framing.\nITEM 14 MET: The prompt excludes a prior-art catalogue and requests no prior-art section.\nITEM 15 MET: Successful passes overwrite one flat exploration.md file.\nITEM 16 MET: Captured runs and spent retry caps use a distinct explore phase.\nITEM 17 MET: Manual exploration bypasses both participation and automatic-exploration gates.\nITEM 18 MET: Failed, timed-out, and interrupted agent passes return before report writing.\nITEM 19 NOT_MET: Integration tests start at exploreResolvedSet; none exercises the command through report and captured-run creation.\nITEM 20 MET: Implement prompts conditionally describe the report and provide its path.\nITEM 21 MET: The implement template receives only the report pointer, never its body.\nITEM 22 MET: The prompt limits edits to lines falsified by the current attempt.\nITEM 23 MET: The edit boundary explicitly permits the report beside the task file.\nITEM 24 MET: The existing prior-art block is unchanged.\nITEM 25 MET: Assist prompts place the exploration pointer beside refinement and recent progress.\nITEM 26 MET: Implement and assist goldens cover report-present and report-absent cases.\nITEM 27 MET: The drain invokes exploration before entering task selection.\nITEM 28 MET: An existing report bypasses exploration without invoking an agent.\nITEM 29 MET: Undeclared sets bypass the exploration phase.\nITEM 30 MET: The independent work.explore.enabled gate defaults on, including absent configuration.\nITEM 31 MET: Disabling automatic exploration prevents its invocation while preserving manual exploration.\nITEM 32 NOT_MET: Agent and manifest/CLI precedence exists, but no configured exploration effort is supported; effort falls directly to heavy.\nITEM 33 MET: HumanCompleted explicitly bypasses automatic exploration.\nITEM 34 MET: Report reuse depends on availability, without comparing its recorded SHA to the checkout.\nITEM 35 MET: Whole-drain tests cover absent and existing reports and assert Explorer invocation behavior.\nITEM 36 MET: The shared fallback walk applies the standard retry cap and delays.\nITEM 37 NOT_MET: A capped failure followed by a quota-paused fallback leaves the latest run non-parking, allowing implementation without a report.\nITEM 38 MET: Park derivation uses captured-run metadata and report absence without schema changes.\nITEM 39 MET: EXPLORE-FAILED is distinct from BLOCKED and preserves its human-decision meaning.\nITEM 40 MET: Automatic selection and daemon scheduling exclude the parked status.\nITEM 41 NOT_MET: Manual failures can create a park without progress, while repeated disabled drains append duplicate park records.\nITEM 42 MET: The skip flag bypasses exploration and parking for the targeted drain.\nITEM 43 MET: Writing a report or withdrawing the declaration removes the derived park.\nITEM 44 MET: CONTEXT.md lists EXPLORE-FAILED among drain stops and automatic-selection exclusions.\nITEM 45 NOT_MET: ExploreMarkBadgeText deliberately suppresses the exploration mark beside EXPLORE-FAILED.\nITEM 46 MET: Undeclared sets receive no exploration mark, including after manual exploration.\nITEM 47 MET: Refresh resolves exploration centrally and passes that result to all four surfaces.\nITEM 48 MET: Dashboard detail renders the report path and recorded tree without its body.\nITEM 49 MET: The sign-off preamble includes exploration alongside the refine-report pointer.\nQUALITY 3: Broad implementation and substantial tests, but failure aggregation, park logging, configured effort, and command-level coverage leave meaningful gaps.\n"
   },
   "accepted": [
     {
@@ -342,6 +343,11 @@
       "item": 32,
       "behaviour": "The manifest's `explorer` object overrides the configured agent list and effort for the explore pass, and CLI flags override the `explorer` object.",
       "reason": "The spec (task 04 criteria) says that the `explorer` object overrides the configured agent list and the configured effort. The Reference has no configured Explorer effort: `resolveExplorer` falls back to `DefaultExploreEffort`. The spec wins; the Reference misses this behaviour."
+    },
+    {
+      "item": 37,
+      "behaviour": "A declared set whose explore pass gave up and wrote no report shows a park status of its own (for example EXPLORE-FAILED), and the drain stops at that status.",
+      "reason": "The spec says a set whose explore pass gave up parks instead of building blind. The Reference misses one path: a capped failure followed by a quota-paused fallback leaves the latest run non-parking."
     },
     {
       "item": 41,

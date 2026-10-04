@@ -5,6 +5,7 @@
   "grade": {
     "status": "graded",
     "acceptance_digest": "086f06b6fce02798bfe2ac79f58d9fed4f18de802d3c5bb8a29d5b852c0d6566",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
     "baseline_gates": [
       {
         "command": "go build ./...",
@@ -19,7 +20,7 @@
       {
         "command": "go test ./...",
         "exit_code": 0,
-        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t107.484s\nok  \tgithub.com/glebglazov/pop/config\t9.832s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.351s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t109.496s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t4.449s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t0.526s\nok  \tgithub.com/glebglazov/pop/integrate\t105.727s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.695s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t1.074s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t2.441s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.676s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.603s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t8.696s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t4.178s\nok  \tgithub.com/glebglazov/pop/layout\t3.516s\nok  \tgithub.com/glebglazov/pop/monitor\t4.641s\nok  \tgithub.com/glebglazov/pop/project\t4.063s\nok  \tgithub.com/glebglazov/pop/release\t1.580s\nok  \tgithub.com/glebglazov/pop/repogroup\t1.157s\nok  \tgithub.com/glebglazov/pop/routine\t13.533s\nok  \tgithub.com/glebglazov/pop/store\t10.860s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t28.034s\nok  \tgithub.com/glebglazov/pop/tasks\t154.940s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t44.629s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t3.322s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t63.282s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t10.704s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t6.803s\nok  \tgithub.com/glebglazov/pop/ui\t11.037s\nok  \tgithub.com/glebglazov/pop/wayfinder\t12.199s\nok  \tgithub.com/glebglazov/pop/work\t1.763s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.736s\n"
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t109.126s\nok  \tgithub.com/glebglazov/pop/config\t3.366s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.987s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t124.312s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.062s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t0.549s\nok  \tgithub.com/glebglazov/pop/integrate\t71.935s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.111s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.934s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.229s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.508s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.593s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.917s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t4.359s\nok  \tgithub.com/glebglazov/pop/layout\t3.021s\nok  \tgithub.com/glebglazov/pop/monitor\t4.480s\nok  \tgithub.com/glebglazov/pop/project\t5.336s\nok  \tgithub.com/glebglazov/pop/release\t2.356s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.465s\nok  \tgithub.com/glebglazov/pop/routine\t25.027s\nok  \tgithub.com/glebglazov/pop/store\t4.770s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t36.107s\nok  \tgithub.com/glebglazov/pop/tasks\t188.691s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t44.021s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t3.481s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t61.634s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t10.958s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t1.989s\nok  \tgithub.com/glebglazov/pop/ui\t8.048s\nok  \tgithub.com/glebglazov/pop/wayfinder\t5.839s\nok  \tgithub.com/glebglazov/pop/work\t1.672s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.136s\n"
       }
     ],
     "gates": [
@@ -36,7 +37,7 @@
       {
         "command": "go test ./...",
         "exit_code": 0,
-        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t90.318s\nok  \tgithub.com/glebglazov/pop/config\t4.649s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.137s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t93.619s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t0.596s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.224s\nok  \tgithub.com/glebglazov/pop/integrate\t73.572s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t6.936s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t1.712s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.851s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.041s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.146s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.143s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.538s\nok  \tgithub.com/glebglazov/pop/layout\t3.442s\nok  \tgithub.com/glebglazov/pop/monitor\t4.513s\nok  \tgithub.com/glebglazov/pop/project\t3.418s\nok  \tgithub.com/glebglazov/pop/release\t1.867s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.261s\nok  \tgithub.com/glebglazov/pop/routine\t19.185s\nok  \tgithub.com/glebglazov/pop/store\t5.988s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t26.830s\nok  \tgithub.com/glebglazov/pop/tasks\t143.509s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t37.859s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.289s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t53.247s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t5.195s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.932s\nok  \tgithub.com/glebglazov/pop/ui\t7.619s\nok  \tgithub.com/glebglazov/pop/wayfinder\t5.771s\nok  \tgithub.com/glebglazov/pop/work\t1.240s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.749s\n"
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t139.530s\nok  \tgithub.com/glebglazov/pop/config\t4.249s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.550s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t145.892s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.390s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.869s\nok  \tgithub.com/glebglazov/pop/integrate\t90.062s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.073s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.068s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.319s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.597s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.659s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.764s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t1.887s\nok  \tgithub.com/glebglazov/pop/layout\t1.582s\nok  \tgithub.com/glebglazov/pop/monitor\t4.037s\nok  \tgithub.com/glebglazov/pop/project\t6.985s\nok  \tgithub.com/glebglazov/pop/release\t2.152s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.413s\nok  \tgithub.com/glebglazov/pop/routine\t29.299s\nok  \tgithub.com/glebglazov/pop/store\t6.203s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t51.650s\nok  \tgithub.com/glebglazov/pop/tasks\t191.552s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t60.611s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t4.303s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t85.770s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t17.010s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t5.707s\nok  \tgithub.com/glebglazov/pop/ui\t10.641s\nok  \tgithub.com/glebglazov/pop/wayfinder\t5.200s\nok  \tgithub.com/glebglazov/pop/work\t1.947s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.186s\n"
       }
     ],
     "outside_scope": [],
@@ -45,107 +46,107 @@
         {
           "item": 1,
           "met": true,
-          "reason": "The header prints before the status table with the Task set, Runtime path, and binding kind."
+          "reason": "Whole-set setup prints the set identifier, resolved Runtime path, and routed binding kind before the status table."
         },
         {
           "item": 2,
           "met": true,
-          "reason": "Header output has no condition based on the invocation directory."
+          "reason": "Header rendering is unconditional, including runs inside the bound checkout."
         },
         {
           "item": 3,
           "met": true,
-          "reason": "Directory comparison controls the “invoked from” line and resolves symlinks."
+          "reason": "The invocation line appears only when directory comparison finds a different location."
         },
         {
           "item": 4,
           "met": true,
-          "reason": "The routing result carries the Default binding flag into the header."
+          "reason": "Routing propagates BoundDefault into the binding-recorded announcement."
         },
         {
           "item": 5,
           "met": true,
-          "reason": "The old “draining at bound checkout” output is removed."
+          "reason": "The old conditional bound-checkout message is removed."
         },
         {
           "item": 6,
-          "met": true,
-          "reason": "Single-task runs print the current checkout path without a Drain header."
+          "met": false,
+          "reason": "Single-task HITL targets return through runTargetedHITLGate before reaching the new current-checkout line."
         },
         {
           "item": 7,
           "met": true,
-          "reason": "Completed tasks print one green “done” result line."
+          "reason": "Successful task execution emits one green done result line."
         },
         {
           "item": 8,
           "met": true,
-          "reason": "Both commit SHA and verified no-op details print below the result line."
+          "reason": "Commit SHA or verified no-op detail prints immediately beneath the done line."
         },
         {
           "item": 9,
           "met": true,
-          "reason": "Whole-set runs no longer call the old completion summary; each ending has one result line."
+          "reason": "Whole-set execution no longer calls the old completion renderer; each ending emits one result."
         },
         {
           "item": 10,
           "met": true,
-          "reason": "Exhausted task failures print one red “failed” line and retain Failed status."
+          "reason": "Retry-exhausted task failures retain failed status and emit one red failed line."
         },
         {
           "item": 11,
           "met": true,
-          "reason": "Provider exhaustion prints one red “out of agents (left open)” line and preserves Open status."
+          "reason": "Provider-exhausted walks emit one red out-of-agents line and preserve open status."
         },
         {
           "item": 12,
           "met": true,
-          "reason": "Quota pauses print the yellow result line with the preset before recovery waits."
+          "reason": "Quota parking emits a yellow quota-paused line naming the selected preset."
         },
         {
           "item": 13,
           "met": true,
-          "reason": "Interrupted execution errors select the yellow “interrupted” result line."
+          "reason": "Interrupted execution errors map to the yellow interrupted result line."
         },
         {
           "item": 14,
           "met": true,
-          "reason": "Blocked and Deferred remain set-level reports; executed tasks retain their result lines."
+          "reason": "Blocked and Deferred remain set-level reports; executed tasks retain their own results."
         },
         {
           "item": 15,
           "met": true,
-          "reason": "Attempt failure output, attempt breakdowns, and exhausted-walk output remain."
+          "reason": "Attempt narration, timing breakdowns, and exhausted-walk narration remain intact."
         },
         {
           "item": 16,
           "met": true,
-          "reason": "The existing output layer prints complete lines without ANSI sequences for redirected output."
+          "reason": "The shared output layer preserves complete text and suppresses ANSI for redirected output."
         },
         {
           "item": 17,
           "met": true,
-          "reason": "Terminal output uses styles, and NO_COLOR disables them."
+          "reason": "Header styling and result colors use the existing terminal and NO_COLOR handling."
         },
         {
           "item": 18,
           "met": true,
-          "reason": "The new rendering functions write output only and add no Work journal rows."
+          "reason": "Added rendering writes only to output writers and introduces no journal operations."
         }
       ],
-      "list_ratio": 1,
-      "quality": 3,
-      "rationale": "Clear structure and useful tests, but single-task quota pauses now incorrectly print “Completed”; interruption and Deferred integration coverage is incomplete."
+      "list_ratio": 0.9444444444444444,
+      "quality": 4,
+      "rationale": "Clear, localized implementation with useful behavioral tests; single-task HITL coverage misses a real omission, and the supplied diff was reviewed statically."
     },
     "grader": {
       "agent": "codex --model \"gpt-6-astra\"",
-      "run_id": "54cee1f4-8dbc-4e81-8182-1048c304c2bd",
+      "run_id": "6c5c8fd1-01ca-4553-9722-00685878fc11",
       "outcome": "completed",
       "spend": {
         "Tokens": {
-          "Input": 497909,
-          "Output": 1598,
-          "CacheRead": 422912,
+          "Input": 350553,
+          "Output": 1716,
+          "CacheRead": 283904,
           "CacheWrite": 0,
           "HasInput": true,
           "HasOutput": true,
@@ -157,11 +158,11 @@
           "HasCost": false
         },
         "Turns": {
-          "Count": 9,
+          "Count": 7,
           "HasTurn": true
         },
         "PeakInput": {
-          "Tokens": 80514,
+          "Tokens": 77889,
           "HasPeak": true
         }
       },
@@ -175,7 +176,13 @@
         "ModelKeySource": ""
       }
     },
-    "reply": "ITEM 1 MET: The header prints before the status table with the Task set, Runtime path, and binding kind.\nITEM 2 MET: Header output has no condition based on the invocation directory.\nITEM 3 MET: Directory comparison controls the “invoked from” line and resolves symlinks.\nITEM 4 MET: The routing result carries the Default binding flag into the header.\nITEM 5 MET: The old “draining at bound checkout” output is removed.\nITEM 6 MET: Single-task runs print the current checkout path without a Drain header.\nITEM 7 MET: Completed tasks print one green “done” result line.\nITEM 8 MET: Both commit SHA and verified no-op details print below the result line.\nITEM 9 MET: Whole-set runs no longer call the old completion summary; each ending has one result line.\nITEM 10 MET: Exhausted task failures print one red “failed” line and retain Failed status.\nITEM 11 MET: Provider exhaustion prints one red “out of agents (left open)” line and preserves Open status.\nITEM 12 MET: Quota pauses print the yellow result line with the preset before recovery waits.\nITEM 13 MET: Interrupted execution errors select the yellow “interrupted” result line.\nITEM 14 MET: Blocked and Deferred remain set-level reports; executed tasks retain their result lines.\nITEM 15 MET: Attempt failure output, attempt breakdowns, and exhausted-walk output remain.\nITEM 16 MET: The existing output layer prints complete lines without ANSI sequences for redirected output.\nITEM 17 MET: Terminal output uses styles, and NO_COLOR disables them.\nITEM 18 MET: The new rendering functions write output only and add no Work journal rows.\nQUALITY 3: Clear structure and useful tests, but single-task quota pauses now incorrectly print “Completed”; interruption and Deferred integration coverage is incomplete.\n"
+    "reply": "ITEM 1 MET: Whole-set setup prints the set identifier, resolved Runtime path, and routed binding kind before the status table.\nITEM 2 MET: Header rendering is unconditional, including runs inside the bound checkout.\nITEM 3 MET: The invocation line appears only when directory comparison finds a different location.\nITEM 4 MET: Routing propagates BoundDefault into the binding-recorded announcement.\nITEM 5 MET: The old conditional bound-checkout message is removed.\nITEM 6 NOT_MET: Single-task HITL targets return through runTargetedHITLGate before reaching the new current-checkout line.\nITEM 7 MET: Successful task execution emits one green done result line.\nITEM 8 MET: Commit SHA or verified no-op detail prints immediately beneath the done line.\nITEM 9 MET: Whole-set execution no longer calls the old completion renderer; each ending emits one result.\nITEM 10 MET: Retry-exhausted task failures retain failed status and emit one red failed line.\nITEM 11 MET: Provider-exhausted walks emit one red out-of-agents line and preserve open status.\nITEM 12 MET: Quota parking emits a yellow quota-paused line naming the selected preset.\nITEM 13 MET: Interrupted execution errors map to the yellow interrupted result line.\nITEM 14 MET: Blocked and Deferred remain set-level reports; executed tasks retain their own results.\nITEM 15 MET: Attempt narration, timing breakdowns, and exhausted-walk narration remain intact.\nITEM 16 MET: The shared output layer preserves complete text and suppresses ANSI for redirected output.\nITEM 17 MET: Header styling and result colors use the existing terminal and NO_COLOR handling.\nITEM 18 MET: Added rendering writes only to output writers and introduces no journal operations.\nQUALITY 4: Clear, localized implementation with useful behavioral tests; single-task HITL coverage misses a real omission, and the supplied diff was reviewed statically.\n"
   },
-  "accepted": []
+  "accepted": [
+    {
+      "item": 6,
+      "behaviour": "A single-task file run (`<set>/<file>.md`) prints no Drain header and instead prints a line stating it runs in the current checkout, naming that path.",
+      "reason": "The spec asks for the current-checkout line on every single-task file run. The Reference skips it for HITL tasks, which return early through runTargetedHITLGate."
+    }
+  ]
 }
