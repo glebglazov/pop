@@ -139,6 +139,13 @@ func savePopTrialReports(clone, resultDir string, record *trialRecord) error {
 			copyErr = errors.Join(copyErr, fmt.Errorf("copy %s reports: %w", name, err))
 		}
 	}
+	exploration, err := os.ReadFile(filepath.Join(setDir, tasks.ExplorationFileName))
+	if err == nil {
+		err = tasks.WriteAtomic(filepath.Join(resultDir, "reports", tasks.ExplorationFileName), exploration, 0o644)
+	}
+	if err != nil && !os.IsNotExist(err) {
+		copyErr = errors.Join(copyErr, fmt.Errorf("copy exploration report: %w", err))
+	}
 	return copyErr
 }
 

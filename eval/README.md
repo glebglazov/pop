@@ -461,7 +461,8 @@ Records are written to `eval/results/<case>/<arm>/<NN>/`. Each result directory
 holds `trial.json`, `diff.patch`, the Arm's Captured run under `capture/`, and
 the Grader's Captured runs under `grading/`. A Pop-arm result also holds any
 Verify reports and Refine reports under `reports/verify/` and
-`reports/refine/`. A Trial with no reports can omit `reports/`.
+`reports/refine/`, and the Exploration report as `reports/exploration.md`
+when the set was explored. A Trial with no reports can omit `reports/`.
 The record holds the Case, Arm, repeat, attempt count, requested and actual model,
 start and end times, outcome, Captured run ID, spend, notional cost, and work
 directory. Unknown spend figures retain the capture seam's presence flags.

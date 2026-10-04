@@ -84,6 +84,7 @@ case "$2" in
    mkdir -p "$set_dir/verify" "$set_dir/refine"
    printf verified > "$set_dir/verify/verify-test.md"
    printf refined > "$set_dir/refine/refine-test.md"
+   printf explored > "$set_dir/exploration.md"
   fi
   ;;
  implement)
@@ -200,6 +201,9 @@ exit 9
 				}
 				if got := readFile(t, filepath.Join(result, "reports", "refine", "refine-test.md")); got != "refined" {
 					t.Fatalf("Refine report = %q", got)
+				}
+				if got := readFile(t, filepath.Join(result, "reports", "exploration.md")); got != "explored" {
+					t.Fatalf("Exploration report = %q", got)
 				}
 			}
 			if status == "FAILED" {
