@@ -92,6 +92,13 @@ type popSpendJSON struct {
 	RefineRunCount               int      `json:"refine_run_count"`
 	RefineTokenBlindRuns         int      `json:"refine_token_blind_runs"`
 	RefineNotionalCostUSD        *float64 `json:"refine_notional_cost_usd"`
+	ExploreInputTokens           int64    `json:"explore_input_tokens"`
+	ExploreOutputTokens          int64    `json:"explore_output_tokens"`
+	ExploreCacheReadTokens       int64    `json:"explore_cache_read_tokens"`
+	ExploreCacheWriteTokens      int64    `json:"explore_cache_write_tokens"`
+	ExploreRunCount              int      `json:"explore_run_count"`
+	ExploreTokenBlindRuns        int      `json:"explore_token_blind_runs"`
+	ExploreNotionalCostUSD       *float64 `json:"explore_notional_cost_usd"`
 	Rows                         []struct {
 		Turns           *int   `json:"turns"`
 		TurnBlindRuns   int    `json:"turn_blind_runs"`
@@ -332,12 +339,13 @@ func trialFigures(record trialRecord) (optionalFigures, error) {
 		return optionalFigures{}, fmt.Errorf("read Pop-arm spend for %s/%s/%d: %w", record.Case, record.Arm, record.Repeat, err)
 	}
 	var result optionalFigures
-	tokenBlind := spend.ImplementTokenBlindRuns + spend.VerificationTokenBlindRuns + spend.RefineTokenBlindRuns
-	runs := spend.ImplementRunCount + spend.VerificationRunCount + spend.RefineRunCount
+	tokenBlind := spend.ImplementTokenBlindRuns + spend.VerificationTokenBlindRuns + spend.RefineTokenBlindRuns + spend.ExploreTokenBlindRuns
+	runs := spend.ImplementRunCount + spend.VerificationRunCount + spend.RefineRunCount + spend.ExploreRunCount
 	if runs > 0 && tokenBlind == 0 {
 		value := float64(spend.ImplementInputTokens + spend.ImplementOutputTokens + spend.ImplementCacheReadTokens + spend.ImplementCacheWriteTokens +
 			spend.VerificationInputTokens + spend.VerificationOutputTokens + spend.VerificationCacheReadTokens + spend.VerificationCacheWriteTokens +
-			spend.RefineInputTokens + spend.RefineOutputTokens + spend.RefineCacheReadTokens + spend.RefineCacheWriteTokens)
+			spend.RefineInputTokens + spend.RefineOutputTokens + spend.RefineCacheReadTokens + spend.RefineCacheWriteTokens +
+			spend.ExploreInputTokens + spend.ExploreOutputTokens + spend.ExploreCacheReadTokens + spend.ExploreCacheWriteTokens)
 		result.tokens = &value
 	}
 	var cost float64
@@ -350,6 +358,7 @@ func trialFigures(record trialRecord) (optionalFigures, error) {
 		{spend.ImplementRunCount, spend.ImplementNotionalCostUSD},
 		{spend.VerificationRunCount, spend.VerificationNotionalCostUSD},
 		{spend.RefineRunCount, spend.RefineNotionalCostUSD},
+		{spend.ExploreRunCount, spend.ExploreNotionalCostUSD},
 	} {
 		if phase.runs == 0 {
 			continue

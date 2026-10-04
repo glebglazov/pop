@@ -182,9 +182,16 @@ type SpendSetBreakdownResult struct {
 	RefineCost           PartialCost
 	RefineRunCount       int
 	RefineTokenBlindRuns int
-	ImplementNotional    PartialCost
-	VerificationNotional PartialCost
-	RefineNotional       PartialCost
+	// The Explore bucket is the set-level pass before any task is built
+	// (ADR-0262), reported the same way: only when the set was explored.
+	ExploreTokens         TokenUsage
+	ExploreCost           PartialCost
+	ExploreRunCount       int
+	ExploreTokenBlindRuns int
+	ImplementNotional     PartialCost
+	VerificationNotional  PartialCost
+	RefineNotional        PartialCost
+	ExploreNotional       PartialCost
 	// RateTableDate is the fetched_at of the Rate table that priced this render.
 	RateTableDate time.Time
 }
@@ -249,6 +256,14 @@ type spendSetBreakdownJSON struct {
 	RefineNotionalCostUSD        *float64                `json:"refine_notional_cost_usd,omitempty"`
 	RefineRunCount               int                     `json:"refine_run_count"`
 	RefineTokenBlindRuns         int                     `json:"refine_token_blind_runs"`
+	ExploreInputTokens           int64                   `json:"explore_input_tokens"`
+	ExploreOutputTokens          int64                   `json:"explore_output_tokens"`
+	ExploreCacheReadTokens       int64                   `json:"explore_cache_read_tokens"`
+	ExploreCacheWriteTokens      int64                   `json:"explore_cache_write_tokens"`
+	ExplorePartialCostUSD        *float64                `json:"explore_partial_cost_usd,omitempty"`
+	ExploreNotionalCostUSD       *float64                `json:"explore_notional_cost_usd,omitempty"`
+	ExploreRunCount              int                     `json:"explore_run_count"`
+	ExploreTokenBlindRuns        int                     `json:"explore_token_blind_runs"`
 	Rows                         []spendBreakdownJSONRow `json:"rows"`
 }
 
@@ -790,6 +805,14 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 			addTokenUsage(&result.RefineTokens, spend.Tokens)
 			addPartialCost(&result.RefineCost, spend.Cost)
 			addPartialCost(&result.RefineNotional, notional.Cost)
+		case spendExploreRowKey:
+			result.ExploreRunCount++
+			if !spend.Tokens.HasUsage() {
+				result.ExploreTokenBlindRuns++
+			}
+			addTokenUsage(&result.ExploreTokens, spend.Tokens)
+			addPartialCost(&result.ExploreCost, spend.Cost)
+			addPartialCost(&result.ExploreNotional, notional.Cost)
 		default:
 			result.ImplementRunCount++
 			if !spend.Tokens.HasUsage() {
@@ -812,8 +835,9 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 }
 
 const (
-	spendVerifyRowKey = "__verify__"
-	spendRefineRowKey = "__refine__"
+	spendVerifyRowKey  = "__verify__"
+	spendRefineRowKey  = "__refine__"
+	spendExploreRowKey = "__explore__"
 )
 
 func spendBreakdownRowKey(run capturedRun, m *Manifest) (key, taskID, title string) {
@@ -822,6 +846,9 @@ func spendBreakdownRowKey(run capturedRun, m *Manifest) (key, taskID, title stri
 	}
 	if run.meta.Phase == "refine" {
 		return spendRefineRowKey, "refine", "Refine"
+	}
+	if run.meta.Phase == spendPhaseExplore {
+		return spendExploreRowKey, "explore", "Explore"
 	}
 	key = run.meta.TaskFile
 	if task := taskByFile(m, key); task != nil {
@@ -1247,6 +1274,13 @@ func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
 			result.RefineTokenBlindRuns,
 		)
 	}
+	if result.ExploreRunCount > 0 {
+		fmt.Fprintf(w, "explore spend: %s  (%d runs, %d blind)\n",
+			formatSpendCell(result.ExploreTokens, result.ExploreNotional, "", ""),
+			result.ExploreRunCount,
+			result.ExploreTokenBlindRuns,
+		)
+	}
 	fmt.Fprintln(w)
 
 	showAgents := result != nil && result.ShowAgents
@@ -1464,6 +1498,14 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 		RefineNotionalCostUSD:        partialCostUSDPtr(result.RefineNotional),
 		RefineRunCount:               result.RefineRunCount,
 		RefineTokenBlindRuns:         result.RefineTokenBlindRuns,
+		ExploreInputTokens:           result.ExploreTokens.Input,
+		ExploreOutputTokens:          result.ExploreTokens.Output,
+		ExploreCacheReadTokens:       result.ExploreTokens.CacheRead,
+		ExploreCacheWriteTokens:      result.ExploreTokens.CacheWrite,
+		ExplorePartialCostUSD:        partialCostUSDPtr(result.ExploreCost),
+		ExploreNotionalCostUSD:       partialCostUSDPtr(result.ExploreNotional),
+		ExploreRunCount:              result.ExploreRunCount,
+		ExploreTokenBlindRuns:        result.ExploreTokenBlindRuns,
 		Rows:                         make([]spendBreakdownJSONRow, len(result.Rows)),
 	}
 	for i, row := range result.Rows {

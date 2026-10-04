@@ -289,6 +289,9 @@ func TestPopTrialFiguresUseSpendLensTotalsAndRows(t *testing.T) {
   "verification_output_tokens": 10,
   "verification_run_count": 1,
   "verification_notional_cost_usd": 0.75,
+  "explore_input_tokens": 50,
+  "explore_run_count": 1,
+  "explore_notional_cost_usd": 0.5,
   "rows": [
     {"turns": 3, "turn_blind_runs": 0, "peak_input_tokens": 80, "peak_blind_runs": 0},
     {"turns": 2, "turn_blind_runs": 0, "peak_input_tokens": 120, "peak_blind_runs": 0}
@@ -298,7 +301,7 @@ func TestPopTrialFiguresUseSpendLensTotalsAndRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if figures.tokens == nil || *figures.tokens != 200 || figures.cost == nil || *figures.cost != 2 || figures.turns == nil || *figures.turns != 5 || figures.peak == nil || *figures.peak != 120 {
+	if figures.tokens == nil || *figures.tokens != 250 || figures.cost == nil || *figures.cost != 2.5 || figures.turns == nil || *figures.turns != 5 || figures.peak == nil || *figures.peak != 120 {
 		t.Fatalf("Pop figures = %+v", figures)
 	}
 	record.SetSpend = json.RawMessage(`{"implement_input_tokens":100,"implement_run_count":2,"implement_token_blind_runs":1,"rows":[{"turns":3,"turn_blind_runs":1,"peak_blind_runs":1}]}`)

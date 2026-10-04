@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -148,6 +149,52 @@ func TestExploreWritesTheReportAFreshAgentAnswered(t *testing.T) {
 	// MALFORMED — it is the one exempt document, so the set still registers.
 	if m := LoadManifest(d, "demo", filepath.Join(setDir, "index.json")); !m.Valid {
 		t.Fatalf("an explored set reads malformed: %v", m.Errors)
+	}
+}
+
+// TestExploreRunIsSpendOfItsOwnPhase: the Spend lens gives an explore pass its
+// own row and bucket in every rendering, so its cost is neither lost nor read as
+// the cost of building some task.
+func TestExploreRunIsSpendOfItsOwnPhase(t *testing.T) {
+	at := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	d, _, defPath, setDir := setupExploreFixture(t, at,
+		scriptedRefineRun{output: claudeRefineStream("## Where things live\\n\\nThe map.")})
+	if _, err := exploreResolvedSet(d, nil, exploreOpts(defPath, &bytes.Buffer{})); err != nil {
+		t.Fatalf("exploreResolvedSet: %v", err)
+	}
+	m := LoadManifest(d, "demo", filepath.Join(setDir, "index.json"))
+
+	// The fixed clock sits past the vendored table's age, so the lens would fetch.
+	table, err := loadVendoredRateTable()
+	if err != nil {
+		t.Fatalf("loadVendoredRateTable: %v", err)
+	}
+	breakdown, err := buildSpendSetBreakdown(d, "demo", m, table, nil)
+	if err != nil {
+		t.Fatalf("buildSpendSetBreakdown: %v", err)
+	}
+	if breakdown.ExploreRunCount != 1 || breakdown.ImplementRunCount != 0 {
+		t.Fatalf("buckets = explore %d / implement %d, want the run counted as explore",
+			breakdown.ExploreRunCount, breakdown.ImplementRunCount)
+	}
+	if len(breakdown.Rows) != 1 || breakdown.Rows[0].TaskID != "explore" || breakdown.Rows[0].Title != "Explore" {
+		t.Fatalf("rows = %+v, want one explore row", breakdown.Rows)
+	}
+
+	var text bytes.Buffer
+	RenderSpendSetBreakdown(&text, breakdown)
+	if !strings.Contains(text.String(), "explore spend: ") || !strings.Contains(text.String(), "(1 runs, ") {
+		t.Fatalf("text breakdown has no explore line:\n%s", text.String())
+	}
+	var encoded bytes.Buffer
+	if err := RenderSpendSetBreakdownJSON(&encoded, breakdown); err != nil {
+		t.Fatalf("RenderSpendSetBreakdownJSON: %v", err)
+	}
+	var decoded struct {
+		ExploreRunCount int `json:"explore_run_count"`
+	}
+	if err := json.Unmarshal(encoded.Bytes(), &decoded); err != nil || decoded.ExploreRunCount != 1 {
+		t.Fatalf("JSON breakdown has no explore bucket:\n%s", encoded.String())
 	}
 }
 
