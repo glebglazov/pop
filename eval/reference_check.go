@@ -20,6 +20,10 @@ import (
 const (
 	referenceCheckDirName    = "reference-check"
 	referenceCheckRecordName = "result.json"
+	// referenceCheckSamples is how many Grader sessions grade the Reference
+	// diff. An item that they do not all meet is unstable: the Grader reads its
+	// words in more than one way, and it would flip Trial grades the same way.
+	referenceCheckSamples = 5
 )
 
 // referenceCheck is the Grader's grade of a Case's Reference diff against its
@@ -28,6 +32,7 @@ const (
 type referenceCheck struct {
 	AcceptanceDigest string            `json:"acceptance_digest"`
 	Grader           string            `json:"grader"`
+	Samples          int               `json:"samples"`
 	ReferenceRange   string            `json:"reference_range"`
 	Grade            *gradeRecord      `json:"grade"`
 	Accepted         []acceptedFailure `json:"accepted"`
@@ -131,7 +136,7 @@ func runReferenceCheckCommandWithProgress(args []string, progress evalProgress) 
 	if err != nil {
 		return err
 	}
-	if err := checkGraderModel(grader, *arms); err != nil {
+	if err := checkGraderModel(grader.armFile, *arms); err != nil {
 		return err
 	}
 	label := "Reference check Case=" + manifest.Name
@@ -142,7 +147,7 @@ func runReferenceCheckCommandWithProgress(args []string, progress evalProgress) 
 	checkDir := filepath.Join(caseDir, referenceCheckDirName)
 	grade := &gradeRecord{Status: "ungraded", AcceptanceDigest: acceptanceDigest(acceptance), BaselineGates: []gateResult{}, Gates: []gateResult{}, OutsideScope: []string{}}
 	gradeErr := gradeDiff(manifest, acceptance, len(behaviours), patch, grade, label, filepath.Join(checkDir, "runs"),
-		gradeOptions{work: *work, grader: grader, home: home, timeout: *timeout, progress: progress})
+		gradeOptions{work: *work, grader: grader.armFile, samples: referenceCheckSamples, home: home, timeout: *timeout, progress: progress})
 	if gradeErr != nil {
 		grade.Reason = gradeErr.Error()
 	}
@@ -152,7 +157,7 @@ func runReferenceCheckCommandWithProgress(args []string, progress evalProgress) 
 		return errors.Join(gradeErr, err)
 	}
 	check := referenceCheck{
-		AcceptanceDigest: grade.AcceptanceDigest, Grader: grader.agentSpec(), ReferenceRange: manifest.ReferenceRange,
+		AcceptanceDigest: grade.AcceptanceDigest, Grader: grader.agentSpec(), Samples: referenceCheckSamples, ReferenceRange: manifest.ReferenceRange,
 		Grade: grade, Accepted: carryAccepted(previous.Accepted, grade.Scores, behaviours),
 	}
 	data, err := json.MarshalIndent(check, "", "  ")
@@ -166,7 +171,7 @@ func runReferenceCheckCommandWithProgress(args []string, progress evalProgress) 
 		return errors.Join(gradeErr, err)
 	}
 	fmt.Println(path)
-	progress.line("%s finished: %s unaccepted=%v result=%s", label, gradeSummary(trialRecord{Grade: grade}), unacceptedFailures(check, behaviours), path)
+	progress.line("%s finished: %s unstable=%v unaccepted=%v result=%s", label, gradeSummary(trialRecord{Grade: grade}), unstableItems(check), unacceptedFailures(check, behaviours), path)
 	if gradeErr != nil {
 		return fmt.Errorf("%s phase grading: %w", label, gradeErr)
 	}
@@ -211,15 +216,15 @@ func readReferenceCheck(path string) (referenceCheck, bool, error) {
 }
 
 // carryAccepted keeps each earlier reason whose behaviour the Reference still
-// fails, under that behaviour's new number. A reason for a rewritten item or
-// for an item the Reference now meets is dropped.
+// fails, under that behaviour's new number. A reason for a rewritten item, for
+// an item the Reference now meets, or for an unstable item is dropped.
 func carryAccepted(previous []acceptedFailure, scores *gradeScores, behaviours []string) []acceptedFailure {
 	carried := []acceptedFailure{}
 	if scores == nil {
 		return carried
 	}
 	for _, item := range scores.Items {
-		if item.Met {
+		if item.Met || item.Split {
 			continue
 		}
 		for _, accepted := range previous {
@@ -232,15 +237,30 @@ func carryAccepted(previous []acceptedFailure, scores *gradeScores, behaviours [
 	return carried
 }
 
-// unacceptedFailures lists the items that the Reference fails and that have no
-// accepted reason for the same behaviour at the same number.
+// unstableItems lists the items on which the Grader samples did not agree. A
+// reason cannot accept one: the fix is to reword the item.
+func unstableItems(check referenceCheck) []int {
+	unstable := []int{}
+	if check.Grade == nil || check.Grade.Scores == nil {
+		return unstable
+	}
+	for _, item := range check.Grade.Scores.Items {
+		if item.Split {
+			unstable = append(unstable, item.Item)
+		}
+	}
+	return unstable
+}
+
+// unacceptedFailures lists the stable items that the Reference fails and that
+// have no accepted reason for the same behaviour at the same number.
 func unacceptedFailures(check referenceCheck, behaviours []string) []int {
 	failed := []int{}
 	if check.Grade == nil || check.Grade.Scores == nil {
 		return failed
 	}
 	for _, item := range check.Grade.Scores.Items {
-		if item.Met {
+		if item.Met || item.Split {
 			continue
 		}
 		accepted := false
@@ -275,8 +295,8 @@ func checkReferenceCheck(caseDir, acceptance string, grader armFile) error {
 		return fmt.Errorf("Case has no Reference check at %s; %s", path, rerun)
 	}
 	graderHomeChanged := check.Grade != nil && check.Grade.Status == "graded" && check.Grade.AgentHomeDigest != agentHomeDigest()
-	if check.AcceptanceDigest != acceptanceDigest(acceptance) || check.Grader != grader.agentSpec() || check.ReferenceRange != manifest.ReferenceRange || graderHomeChanged {
-		return fmt.Errorf("Reference check at %s is stale: the Acceptance list, the Grader, the Grader's agent home or the Reference range changed; %s", path, rerun)
+	if check.AcceptanceDigest != acceptanceDigest(acceptance) || check.Grader != grader.agentSpec() || check.Samples != referenceCheckSamples || check.ReferenceRange != manifest.ReferenceRange || graderHomeChanged {
+		return fmt.Errorf("Reference check at %s is stale: the Acceptance list, the Grader, the Grader samples, the Grader's agent home or the Reference range changed; %s", path, rerun)
 	}
 	if check.Grade == nil || check.Grade.Status != "graded" || check.Grade.Scores == nil {
 		status, reason := "missing", ""
@@ -284,6 +304,9 @@ func checkReferenceCheck(caseDir, acceptance string, grader armFile) error {
 			status, reason = check.Grade.Status, check.Grade.Reason
 		}
 		return fmt.Errorf("Reference check at %s did not grade the Reference: grade=%s %s", path, status, reason)
+	}
+	if unstable := unstableItems(check); len(unstable) > 0 {
+		return fmt.Errorf("the Grader samples in %s do not agree on Acceptance items %v; reword each item so it can be read in only one way, then %s", path, unstable, rerun)
 	}
 	if failed := unacceptedFailures(check, acceptanceBehaviours(acceptance)); len(failed) > 0 {
 		return fmt.Errorf("the Reference fails Acceptance items %v and %s gives no accepted reason for them; fix each item or accept it with a reason", failed, path)

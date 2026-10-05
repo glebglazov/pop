@@ -1,3 +1,4 @@
 kind = "bare"
 agent = "codex"
 model = "gpt-6-astra"
+reasoning = "high"

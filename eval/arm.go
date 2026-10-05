@@ -18,12 +18,17 @@ const (
 )
 
 type armFile struct {
-	Kind     string         `toml:"kind"`
-	Agent    string         `toml:"agent"`
-	Model    string         `toml:"model"`
-	Input    string         `toml:"input"`
-	Config   map[string]any `toml:"config"`
-	Manifest map[string]any `toml:"manifest"`
+	Kind  string `toml:"kind"`
+	Agent string `toml:"agent"`
+	Model string `toml:"model"`
+	Input string `toml:"input"`
+	// Reasoning is the reasoning effort the agent runs at; loadArm turns it into
+	// the preset's own flag. Empty leaves the agent CLI's default in force.
+	Reasoning string         `toml:"reasoning"`
+	Config    map[string]any `toml:"config"`
+	Manifest  map[string]any `toml:"manifest"`
+
+	reasoningTokens []string
 }
 
 func loadArm(root, name string) (armFile, error) {
@@ -58,6 +63,26 @@ func loadArm(root, name string) (armFile, error) {
 	if arm.Kind == "pop" && arm.Input == armInputTicket {
 		return arm, fmt.Errorf("Pop arm cannot take the ticket: it drains the Case's Task split")
 	}
+	if arm.Reasoning != "" {
+		preset, err := tasks.AgentPresetName(arm.Agent)
+		if err != nil {
+			return arm, fmt.Errorf("resolve Arm agent: %w", err)
+		}
+		adapter, err := tasks.ResolveAgentAdapter(preset)
+		if err != nil {
+			return arm, fmt.Errorf("resolve Arm agent: %w", err)
+		}
+		capability := adapter.ReasoningCapability()
+		if capability.Kind != tasks.CapabilitySupported || capability.SpecTokens == nil {
+			return arm, fmt.Errorf("Arm agent %s cannot set a reasoning effort", preset)
+		}
+		for _, token := range capability.SpecTokens(arm.Reasoning) {
+			if strings.Contains(token, `"`) && strings.Contains(token, "'") {
+				return arm, fmt.Errorf("Arm reasoning %q cannot be quoted in an agent spec", arm.Reasoning)
+			}
+			arm.reasoningTokens = append(arm.reasoningTokens, token)
+		}
+	}
 	invocation, err := tasks.ResolveAgentInvocation(arm.agentSpec(), "", "", ".")
 	if err != nil {
 		return arm, fmt.Errorf("resolve Arm agent: %w", err)
@@ -72,5 +97,16 @@ func loadArm(root, name string) (armFile, error) {
 }
 
 func (a armFile) agentSpec() string {
-	return a.Agent + " --model " + strconv.Quote(a.Model)
+	spec := a.Agent + " --model " + strconv.Quote(a.Model)
+	// The spec splitter honours quotes but no escapes, so a token that holds a
+	// double quote, such as codex's model_reasoning_effort="high", rides in
+	// single quotes.
+	for _, token := range a.reasoningTokens {
+		quote := `"`
+		if strings.Contains(token, quote) {
+			quote = "'"
+		}
+		spec += " " + quote + token + quote
+	}
+	return spec
 }

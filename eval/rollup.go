@@ -38,12 +38,15 @@ type evalRollupRow struct {
 	// that never saw the planned names is not scored on them.
 	NameFreeAcceptanceRatio *float64 `json:"name_free_acceptance_ratio"`
 	QualityScore            *float64 `json:"quality_score"`
-	GateFailures            int      `json:"gate_failures"`
-	BaselineFailures        int      `json:"baseline_failures"`
-	Timeouts                int      `json:"timeouts"`
-	Invalid                 int      `json:"invalid"`
-	Lost                    int      `json:"lost"`
-	Ungraded                int      `json:"ungraded"`
+	// SplitItems is the most items in one Trial's grade on which the Grader
+	// samples did not agree: how far a regrade could move that Trial.
+	SplitItems       int `json:"split_items"`
+	GateFailures     int `json:"gate_failures"`
+	BaselineFailures int `json:"baseline_failures"`
+	Timeouts         int `json:"timeouts"`
+	Invalid          int `json:"invalid"`
+	Lost             int `json:"lost"`
+	Ungraded         int `json:"ungraded"`
 	// Stale counts Trials whose recorded origin differs from the Case and the
 	// harness now, and graded Trials whose Grader read another version of the
 	// Case's Acceptance list than the one the Case holds now.
@@ -286,6 +289,7 @@ func (a *rollupAccumulator) add(record trialRecord, nameOnly map[int]bool) error
 		a.ratio = append(a.ratio, record.Grade.Scores.ListRatio)
 		a.nameFree = append(a.nameFree, nameFreeRatio(*record.Grade.Scores, nameOnly))
 		a.quality = append(a.quality, float64(record.Grade.Scores.Quality))
+		a.row.SplitItems = max(a.row.SplitItems, splitItems(*record.Grade.Scores))
 	}
 	return nil
 }
@@ -443,13 +447,13 @@ func medianSorted(values []float64) float64 {
 }
 
 func renderEvalRollup(w io.Writer, rollup evalRollup) {
-	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %9s %7s %4s %4s %4s %4s %4s %4s %5s %4s %-26s %s\n",
-		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "accept-nn", "quality", "gate", "base", "time", "inv", "lost", "ungr", "stale", "unkn", "blind tok/$/turn/peak/wall", "pop")
+	fmt.Fprintf(w, "%-24s %-16s %6s %17s %17s %17s %17s %17s %8s %9s %7s %5s %4s %4s %4s %4s %4s %4s %5s %4s %-26s %s\n",
+		"case", "arm", "trials", "tokens median/spread", "cost median/spread", "turns median/spread", "peak median/spread", "wall-s median/spread", "accept", "accept-nn", "quality", "split", "gate", "base", "time", "inv", "lost", "ungr", "stale", "unkn", "blind tok/$/turn/peak/wall", "pop")
 	for _, row := range rollup.Rows {
-		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %9s %7s %4d %4d %4d %4d %4d %4d %5d %4d %-26s %s\n",
+		fmt.Fprintf(w, "%-24s %-16s %6d %17s %17s %17s %17s %17s %8s %9s %7s %5d %4d %4d %4d %4d %4d %4d %5d %4d %-26s %s\n",
 			row.Case, row.Arm, row.Trials,
 			formatMetric(row.TotalTokens, 0), formatMetric(row.NotionalCostUSD, 4), formatMetric(row.Turns, 1), formatMetric(row.PeakInputTokens, 0), formatMetric(row.WallClockSeconds, 1),
-			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.NameFreeAcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale, row.Unknown,
+			formatOptional(row.AcceptanceRatio, 3), formatOptional(row.NameFreeAcceptanceRatio, 3), formatOptional(row.QualityScore, 1), row.SplitItems, row.GateFailures, row.BaselineFailures, row.Timeouts, row.Invalid, row.Lost, row.Ungraded, row.Stale, row.Unknown,
 			fmt.Sprintf("%d/%d/%d/%d/%d", row.TotalTokens.Blind, row.NotionalCostUSD.Blind, row.Turns.Blind, row.PeakInputTokens.Blind, row.WallClockSeconds.Blind),
 			formatPopVersion(row.PopVersion))
 	}

@@ -38,7 +38,7 @@ func TestPopTrialCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	approveCase(t, caseDir, "Status: approved\n\n1. File changes.\n", grader)
+	approveCase(t, caseDir, "Status: approved\n\n1. File changes.\n", grader.armFile)
 	writeFile(t, filepath.Join(caseDir, "tasks", "index.json"), `{"tasks":[{"id":"change","file":"change.md","title":"Change","type":"AFK","status":"open","blocked_by":[]}]}`)
 	writeFile(t, filepath.Join(caseDir, "tasks", "change.md"), "## Acceptance criteria\n\n- [ ] File changes.\n")
 	human := filepath.Join(root, "human-data")

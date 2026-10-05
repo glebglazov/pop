@@ -377,3 +377,39 @@ func TestEvalRollupProvenance(t *testing.T) {
 		t.Fatalf("human Rollup:\n%s", human.String())
 	}
 }
+
+func TestEvalRollupShowsTheMostSplitItemsOfOneTrial(t *testing.T) {
+	results := t.TempDir()
+	for repeat, items := range [][]itemGrade{
+		{{Item: 1, Met: true, Split: true}, {Item: 2, Met: false, Split: true}, {Item: 3, Met: true}},
+		{{Item: 1, Met: true, Split: true}, {Item: 2, Met: true}, {Item: 3, Met: true}},
+		// A grade made before Grader samples existed has no split items.
+		{{Item: 1, Met: true}, {Item: 2, Met: true}, {Item: 3, Met: false}},
+	} {
+		dir := filepath.Join(results, "case-a", "bare", fmt.Sprintf("%02d", repeat+1))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		record := trialRecord{Case: "case-a", Arm: "bare", Repeat: repeat + 1, Outcome: outcomeCompleted,
+			Grade: &gradeRecord{Status: "graded", Scores: &gradeScores{Items: items, Quality: 4}}}
+		data, _ := json.Marshal(record)
+		writeFile(t, filepath.Join(dir, "trial.json"), string(data))
+	}
+	rollup, err := loadEvalRollup(results, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rollup.Rows) != 1 || rollup.Rows[0].SplitItems != 2 {
+		t.Fatalf("rows = %+v", rollup.Rows)
+	}
+	var human strings.Builder
+	renderEvalRollup(&human, rollup)
+	header, row, _ := strings.Cut(human.String(), "\n")
+	if !strings.Contains(header, "quality split gate") || !strings.Contains(row, "4.0     2    0") {
+		t.Fatalf("human Rollup:\n%s", human.String())
+	}
+	data, _ := json.Marshal(rollup)
+	if !strings.Contains(string(data), `"split_items":2`) {
+		t.Fatalf("JSON Rollup: %s", data)
+	}
+}

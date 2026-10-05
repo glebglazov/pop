@@ -89,7 +89,7 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	if err != nil {
 		return err
 	}
-	selectedCases, err := selectCases(*cases, caseNames, grader)
+	selectedCases, err := selectCases(*cases, caseNames, grader.armFile)
 	if err != nil {
 		return err
 	}
@@ -123,11 +123,11 @@ func runTrialCommandWithProgress(args []string, progress evalProgress) error {
 	if err != nil {
 		return err
 	}
-	if err := preflightMatrix(armNames, loadedArms, grader, home, *pop, *work, *results); err != nil {
+	if err := preflightMatrix(armNames, loadedArms, grader.armFile, home, *pop, *work, *results); err != nil {
 		return err
 	}
 	sort.Ints(repeats)
-	trialOpts := trialOptions{cases: *cases, arms: *arms, grader: grader, home: home, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
+	trialOpts := trialOptions{cases: *cases, arms: *arms, grader: grader.armFile, home: home, work: *work, results: *results, pop: *pop, ceiling: *ceiling, keepWork: *keepWork, progress: progress}
 	return runMatrix(selectedCases, armNames, repeats, *results, *redo, progress,
 		func(name, arm string, repeat int) (string, error) {
 			return runOneTrial(name, arm, repeat, trialOpts)

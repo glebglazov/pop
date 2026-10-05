@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,9 @@ type itemGrade struct {
 	Item   int    `json:"item"`
 	Met    bool   `json:"met"`
 	Reason string `json:"reason"`
+	// Split says the Grader samples did not agree on this item, so Met is a
+	// majority and not a sure decision.
+	Split bool `json:"split,omitempty"`
 }
 
 type gradeScores struct {
@@ -50,12 +54,20 @@ type gradeRecord struct {
 	// BaselineGates are the Objective gates run on the untouched parent tree.
 	// Gates says whether the Trial tree passes only when every one of these
 	// passed: a gate the parent already fails cannot tell the Arm's work apart.
-	BaselineGates []gateResult       `json:"baseline_gates"`
-	Gates         []gateResult       `json:"gates"`
-	OutsideScope  []string           `json:"outside_scope"`
-	Scores        *gradeScores       `json:"scores,omitempty"`
-	Grader        *capturedRunRecord `json:"grader,omitempty"`
-	Reply         string             `json:"reply"`
+	BaselineGates []gateResult `json:"baseline_gates"`
+	Gates         []gateResult `json:"gates"`
+	OutsideScope  []string     `json:"outside_scope"`
+	// Scores is the per-item majority of the Samples and their median quality.
+	Scores  *gradeScores   `json:"scores,omitempty"`
+	Samples []graderSample `json:"samples,omitempty"`
+}
+
+// graderSample is one Grader session of a grade: its run, its whole reply, and
+// the scores parsed from that reply alone.
+type graderSample struct {
+	Grader *capturedRunRecord `json:"grader,omitempty"`
+	Reply  string             `json:"reply"`
+	Scores *gradeScores       `json:"scores,omitempty"`
 }
 
 func runGradeCommand(args []string) error {
@@ -105,7 +117,7 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	if err != nil {
 		return err
 	}
-	acceptance, err := loadApprovedAcceptance(caseDir, grader)
+	acceptance, err := loadApprovedAcceptance(caseDir, grader.armFile)
 	if err != nil {
 		return err
 	}
@@ -130,7 +142,7 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 	record.Grade = grade
 	label := trialLabel(record.Case, record.Arm, record.Repeat)
 	gradeErr := gradeOneTrial(manifest, acceptance, behaviourCount, &record, gradeOptions{
-		work: *work, grader: grader, home: home, arms: *arms,
+		work: *work, grader: grader.armFile, samples: grader.samples, home: home, arms: *arms,
 		timeout: *timeout, resultDir: resultDir, progress: progress,
 	})
 	if gradeErr != nil {
@@ -157,9 +169,12 @@ func runGradeCommandWithProgress(args []string, progress evalProgress, standalon
 type gradeOptions struct {
 	work, arms, resultDir string
 	grader                armFile
-	home                  agentHome
-	timeout               time.Duration
-	progress              evalProgress
+	// samples is how many Grader sessions grade the diff. Each item's decision
+	// is their majority, so the count is odd.
+	samples  int
+	home     agentHome
+	timeout  time.Duration
+	progress evalProgress
 }
 
 func gradeOneTrial(manifest caseManifest, acceptance string, behaviourCount int, record *trialRecord, opts gradeOptions) error {
@@ -290,59 +305,143 @@ func gradeDiff(manifest caseManifest, acceptance string, behaviourCount int, pat
 			fmt.Fprintf(&quoted, "> %s\n", line)
 		}
 	}
-	opts.progress.line("%s Grader execution started", label)
-	stopWaiting = opts.progress.wait(label, "Grader invocation", opts.timeout)
 	grade.AgentHomeDigest = agentHomeDigest()
-	attempt, captureErr := opts.home.capture(tasks.CapturedAgentOptions{
-		AgentSpec: grader.agentSpec(), Prompt: graderPrompt(string(patch), acceptance, quoted.String(), grade.OutsideScope),
-		RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: captureDir,
-	})
-	stopWaiting()
-	if attempt != nil {
-		grade.Reply = attempt.Output
-		grade.Grader = &capturedRunRecord{Agent: grader.agentSpec(), RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional}
+	prompt := graderPrompt(string(patch), acceptance, quoted.String(), grade.OutsideScope)
+	opts.progress.line("%s Grader execution started: samples=%d", label, opts.samples)
+	// Samples run one after another: each session clears the shared agent home.
+	for sample := 1; sample <= opts.samples; sample++ {
+		subject := fmt.Sprintf("Grader sample %d/%d", sample, opts.samples)
+		opts.progress.line("%s %s started", label, subject)
+		stopWaiting = opts.progress.wait(label, fmt.Sprintf("Grader invocation %d/%d", sample, opts.samples), opts.timeout)
+		attempt, captureErr := opts.home.capture(tasks.CapturedAgentOptions{
+			AgentSpec: grader.agentSpec(), Prompt: prompt,
+			RuntimePath: parentTree, Timeout: opts.timeout, DestinationDir: captureDir,
+		})
+		stopWaiting()
+		if attempt != nil {
+			grade.Samples = append(grade.Samples, graderSample{
+				Grader: &capturedRunRecord{Agent: grader.agentSpec(), RunID: attempt.RunID, Outcome: attempt.Outcome, ActualModel: attempt.ActualModel, Spend: attempt.Spend, Notional: attempt.Notional},
+				Reply:  attempt.Output,
+			})
+		}
+		if captureErr != nil {
+			opts.progress.line("%s %s failed: %v", label, subject, captureErr)
+			return captureErr
+		}
+		// One failed sample leaves the grade ungraded: a majority of the
+		// samples that remain could tie, and the later samples would only spend.
+		if attempt.Outcome != "completed" {
+			grade.Reason = subject + " outcome: " + attempt.Outcome
+			opts.progress.line("%s %s finished: outcome=%s grade=ungraded", label, subject, attempt.Outcome)
+			return nil
+		}
+		scores, err := parseGraderReply(attempt.Output, behaviourCount)
+		if err != nil {
+			grade.Reason = subject + ": " + err.Error()
+			opts.progress.line("%s %s finished: outcome=completed grade=ungraded reason=%s", label, subject, err)
+			return nil
+		}
+		grade.Samples[len(grade.Samples)-1].Scores = scores
+		opts.progress.line("%s %s finished: outcome=completed", label, subject)
 	}
-	if captureErr != nil {
-		opts.progress.line("%s Grader execution failed: %v", label, captureErr)
-		return captureErr
-	}
-	if attempt.Outcome != "completed" {
-		grade.Reason = "Grader outcome: " + attempt.Outcome
-		opts.progress.line("%s Grader execution finished: outcome=%s grade=ungraded", label, attempt.Outcome)
-		return nil
-	}
-	scores, err := parseGraderReply(attempt.Output, behaviourCount)
-	if err != nil {
-		grade.Reason = err.Error()
-		opts.progress.line("%s Grader execution finished: outcome=completed grade=ungraded reason=%s", label, err)
-		return nil
-	}
-	grade.Status, grade.Scores = "graded", scores
-	opts.progress.line("%s Grader execution finished: outcome=completed grade=graded", label)
+	grade.Status, grade.Scores = "graded", majorityScores(grade.Samples)
+	opts.progress.line("%s Grader execution finished: outcome=completed grade=graded split=%d", label, splitItems(*grade.Scores))
 	return nil
 }
 
-// loadGrader reads the harness config's Grader arm. The Grader grades every
-// Trial and every Reference check, so it must be a Bare arm.
-func loadGrader(configPath, graders string) (armFile, error) {
+// majorityScores combines the scores of an odd number of samples: each item is
+// met when most samples met it, with the reason of the first sample on that
+// side, and quality is the median quality with that sample's rationale.
+func majorityScores(samples []graderSample) *gradeScores {
+	first := samples[0].Scores
+	combined := &gradeScores{}
+	met := 0
+	for i, item := range first.Items {
+		votes := 0
+		for _, sample := range samples {
+			if sample.Scores.Items[i].Met {
+				votes++
+			}
+		}
+		decision := itemGrade{Item: item.Item, Met: 2*votes > len(samples), Split: votes != 0 && votes != len(samples)}
+		for _, sample := range samples {
+			if sample.Scores.Items[i].Met == decision.Met {
+				decision.Reason = sample.Scores.Items[i].Reason
+				break
+			}
+		}
+		if decision.Met {
+			met++
+		}
+		combined.Items = append(combined.Items, decision)
+	}
+	qualities := make([]int, len(samples))
+	for i, sample := range samples {
+		qualities[i] = sample.Scores.Quality
+	}
+	slices.Sort(qualities)
+	combined.Quality = qualities[len(qualities)/2]
+	for _, sample := range samples {
+		if sample.Scores.Quality == combined.Quality {
+			combined.Rationale = sample.Scores.Rationale
+			break
+		}
+	}
+	combined.ListRatio = float64(met) / float64(len(first.Items))
+	return combined
+}
+
+func splitItems(scores gradeScores) int {
+	split := 0
+	for _, item := range scores.Items {
+		if item.Split {
+			split++
+		}
+	}
+	return split
+}
+
+// graderSetup is the Grader arm and how many samples grade each Trial.
+type graderSetup struct {
+	armFile
+	samples int
+}
+
+const defaultGraderSamples = 3
+
+// loadGrader reads the harness config's Grader arm and sample count. The
+// Grader grades every Trial and every Reference check, so it must be a Bare
+// arm, and it must pin its reasoning effort: an agent CLI's default effort can
+// change under the harness and move every grade with it.
+func loadGrader(configPath, graders string) (graderSetup, error) {
 	var cfg struct {
-		GraderArm string `toml:"grader_arm"`
+		GraderArm     string `toml:"grader_arm"`
+		GraderSamples *int   `toml:"grader_samples"`
 	}
 	metadata, err := toml.DecodeFile(configPath, &cfg)
 	if err != nil {
-		return armFile{}, fmt.Errorf("read harness config: %w", err)
+		return graderSetup{}, fmt.Errorf("read harness config: %w", err)
 	}
 	if len(metadata.Undecoded()) != 0 {
-		return armFile{}, errors.New("unknown harness config field")
+		return graderSetup{}, errors.New("unknown harness config field")
 	}
-	grader, err := loadArm(graders, cfg.GraderArm)
-	if err != nil {
-		return armFile{}, err
+	setup := graderSetup{samples: defaultGraderSamples}
+	if cfg.GraderSamples != nil {
+		setup.samples = *cfg.GraderSamples
 	}
-	if grader.Kind != "bare" {
-		return armFile{}, errors.New("Grader must use a Bare arm")
+	if setup.samples < 1 || setup.samples%2 == 0 {
+		return graderSetup{}, errors.New("grader_samples must be an odd number of 1 or more")
 	}
-	return grader, nil
+	if setup.armFile, err = loadArm(graders, cfg.GraderArm); err != nil {
+		return graderSetup{}, err
+	}
+	if setup.Kind != "bare" {
+		return graderSetup{}, errors.New("Grader must use a Bare arm")
+	}
+	if setup.Reasoning == "" {
+		return graderSetup{}, errors.New("Grader must set reasoning, so its reasoning effort does not follow the agent CLI's default")
+	}
+	return setup, nil
 }
 
 // checkGraderModel refuses a Grader that shares a model with any Arm under

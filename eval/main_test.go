@@ -412,6 +412,15 @@ func TestLoadApprovedAcceptanceHoldsTheListToItsReferenceCheck(t *testing.T) {
 	if _, err := loadApprovedAcceptance(caseDir, other); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("Grader change error = %v", err)
 	}
+	// A check graded by one Grader session, as before Grader samples, cannot
+	// show an unstable item, so it no longer opens the lock.
+	oneSample := check
+	oneSample.Samples = 1
+	stale, _ := json.Marshal(oneSample)
+	writeFile(t, checkPath, string(stale))
+	if _, err := loadApprovedAcceptance(caseDir, grader); err == nil || !strings.Contains(err.Error(), "samples") {
+		t.Fatalf("one-sample check error = %v", err)
+	}
 	for _, graderHome := range []string{"other", ""} {
 		changed := check
 		changedGrade := *check.Grade
@@ -474,13 +483,13 @@ func testGrader(t *testing.T, root string) (graders, config string, grader armFi
 	if err := os.MkdirAll(graders, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(graders, "grader.toml"), "kind = 'bare'\nagent = 'claude'\nmodel = 'grader-test'\n")
+	writeFile(t, filepath.Join(graders, "grader.toml"), "kind = 'bare'\nagent = 'claude'\nmodel = 'grader-test'\nreasoning = 'high'\n")
 	writeFile(t, config, "grader_arm = 'grader'\n")
-	grader, err := loadGrader(config, graders)
+	setup, err := loadGrader(config, graders)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return graders, config, grader
+	return graders, config, setup.armFile
 }
 
 // approveCase writes acceptance as the Case's approved list and a current
@@ -497,7 +506,7 @@ func approveCase(t *testing.T, caseDir, acceptance string, grader armFile) {
 	for i := range acceptanceBehaviours(acceptance) {
 		scores.Items = append(scores.Items, itemGrade{Item: i + 1, Met: true, Reason: "Reference meets it."})
 	}
-	check := referenceCheck{AcceptanceDigest: acceptanceDigest(acceptance), Grader: grader.agentSpec(), ReferenceRange: manifest.ReferenceRange,
+	check := referenceCheck{AcceptanceDigest: acceptanceDigest(acceptance), Grader: grader.agentSpec(), Samples: referenceCheckSamples, ReferenceRange: manifest.ReferenceRange,
 		Grade: &gradeRecord{Status: "graded", AgentHomeDigest: agentHomeDigest(), Scores: scores}, Accepted: []acceptedFailure{}}
 	data, _ := json.Marshal(check)
 	if err := os.MkdirAll(filepath.Join(caseDir, referenceCheckDirName), 0o755); err != nil {

@@ -40,9 +40,13 @@ different. Each step can stop the grade:
 5. Give the Grader the diff, the Acceptance list, the quoted standard
    documents and the scope flag, in a separate parent clone. The Grader does
    not see `spec.md`, the Arm, or the Reference. So each item must be correct
-   without the spec.
+   without the spec. The Grader runs more than one session on the same prompt,
+   one after the other: `grader_samples` for a Trial, 5 for the Reference
+   check.
 6. Record one met or not-met decision with a reason for each item, and a
-   quality score.
+   quality score. Each item's decision is the majority of the samples, and
+   the quality score is their median. An item on which the samples do not
+   agree is split.
 
 [Grade a Trial](#grade-a-trial) gives the details of each step.
 
@@ -52,7 +56,8 @@ different. Each step can stop the grade:
 |---|---|---|
 | `parent_commit` | the start tree of every grade, for the Reference and for each Trial | The Reference diff must still apply to it. When a Case's parent is ported, port the Reference range too, and make the Reference's tests obey the parent's test rules. The Rollup counts Trials run from an earlier parent as stale. |
 | Acceptance digest | the list, the Reference check, and each Trial grade | The check becomes stale. The Rollup counts the earlier grades as stale. |
-| Grader agent | `eval/graders/<name>.toml` and the Reference check | The check becomes stale. |
+| Grader agent | `eval/graders/<name>.toml`, with its model and reasoning effort, and the Reference check | The check becomes stale. |
+| Grader samples | the Reference check's 5 samples and the check record | A check made with another sample count is stale. |
 | `reference_range` | `case.json` and the Reference check | The check becomes stale. |
 | Agent home digest | the files in `eval/agent-home/`, each Trial, each grade, and the Reference check | The Rollup counts Trials run and grades made in another agent home as stale. The check becomes stale. See [The agent home](#the-agent-home). |
 | `accepted` reasons | the human's decisions and the lock on `run` and `grade` | A reason stays only while its item's behaviour text stays the same. |
@@ -206,7 +211,13 @@ kind = "bare" # bare or pop
 agent = "claude" # Agent preset spec, with optional arguments
 model = "opus" # required; do not also set a model in agent
 input = "spec" # Bare arm only: spec (default) or ticket
+reasoning = "high" # optional; the agent's reasoning effort
 ```
+
+`reasoning` is written as the preset's own flag, for example `--effort high`
+for claude and `-c model_reasoning_effort="high"` for codex. A preset that has
+no reasoning flag refuses it. Without `reasoning`, the agent CLI's default
+effort applies.
 
 Pop arm files can also contain `[config]` and `[manifest]` tables. Their keys
 and nested tables hold Pop config and Task-set manifest overrides. Bare arm
@@ -225,12 +236,27 @@ its status, before a human approves the list. The Reference diff is read from
 `reference_range` and applied to the parent commit. Then the Baseline gates,
 the Objective gates and the Grader run on it exactly as for a Trial.
 
+The Grader grades the Reference diff 5 times, whatever `grader_samples` is.
+An item that the 5 samples do not all decide the same way is unstable: the
+Grader reads its words in more than one way, and it will flip Trial grades in
+the same way. The record marks it `split`. The command prints the unstable
+items as `unstable=[...]`.
+
 The result is `reference-check/result.json` in the Case directory, with the
 Grader's captured runs under `reference-check/runs/`. It holds the digest of
-the list's numbered behaviours, the Grader agent and model, the Reference
-range, the grade, and `accepted`: the human's reasons for items that the
-Reference fails. The command prints each such item without an accepted reason
-as `unaccepted=[...]`.
+the list's numbered behaviours, the Grader agent with its model and reasoning
+effort, the sample count, the Reference range, the grade, and `accepted`: the
+human's reasons for items that the Reference fails. The command prints each
+such item without an accepted reason as `unaccepted=[...]`.
+
+A reason cannot accept an unstable item. Reword the item, then run the check
+again:
+
+- Make the item state one behaviour.
+- Do not give examples ("for example", "such as"). The Grader can read an
+  example as a requirement or as a choice.
+- When the item asks for an absence, state it as a check on the diff, for
+  example "The diff adds no new config key."
 
 For each unaccepted item, compare it with the spec, not with the Reference:
 
@@ -246,9 +272,10 @@ stays with its behaviour text, under the item's new number. A reason whose
 behaviour text changed is dropped.
 
 `run` and `grade` use a list only when it has `Status: approved` and its
-Reference check is current: the digest, the Grader and the Reference range
-agree with the Case, the Grader ran in the current agent home, the grade is
-`graded`, and every failed item has an accepted reason. An edit to a behaviour makes the check stale. An edit to the
+Reference check is current: the digest, the Grader, the sample count and the
+Reference range agree with the Case, the Grader ran in the current agent
+home, the grade is `graded`, no item is unstable, and every failed item has
+an accepted reason. An edit to a behaviour makes the check stale. An edit to the
 status line or to a heading does not. `--cases`, `--arms`, `--graders`,
 `--config`, `--work`, `--agent-home`, and `--timeout` work as for `grade`.
 
@@ -386,8 +413,10 @@ Trial Case=example Arm=bare repeat=1 Baseline gate started: go test ./...
 Trial Case=example Arm=bare repeat=1 Baseline gate finished: passed exit=0 command=go test ./...
 Trial Case=example Arm=bare repeat=1 Objective gate started: go test ./...
 Trial Case=example Arm=bare repeat=1 Objective gate finished: passed exit=0 command=go test ./...
-Trial Case=example Arm=bare repeat=1 Grader execution started
-Trial Case=example Arm=bare repeat=1 Grader execution finished: outcome=completed grade=graded
+Trial Case=example Arm=bare repeat=1 Grader execution started: samples=1
+Trial Case=example Arm=bare repeat=1 Grader sample 1/1 started
+Trial Case=example Arm=bare repeat=1 Grader sample 1/1 finished: outcome=completed
+Trial Case=example Arm=bare repeat=1 Grader execution finished: outcome=completed grade=graded split=0
 Trial 1/1 Case=example Arm=bare repeat=1 finished: outcome=completed grade=graded acceptance=3/3 quality=4/5 result=eval/results/example/bare/01
 Eval Matrix finished: completed=1 timed_out=0 invalid=0 lost=0 graded=1 gate_failed=0 baseline_failed=0 ungraded=0
 Read the Rollup: go run ./eval rollup --results /path/to/repository/eval/results
@@ -533,10 +562,20 @@ deleted, and renamed paths are checked. Files outside scope are passed to the
 Grader as a flag and do not fail a gate.
 
 `eval/config.toml` selects `grader_arm`, loaded from `eval/graders/<name>.toml`
-in the same file shape as a Bare arm. The default is Codex with `gpt-5.5`.
-Grading rejects a Grader model used by any file in the Arm directory or by the
-Trial's requested or reported model. Grader files have a separate directory so
-that they are not counted as comparison Arms.
+in the same file shape as a Bare arm. The default is Codex with `gpt-6-astra`
+at reasoning effort `high`. A Grader must set `reasoning`, so that a change to
+the agent CLI's default effort cannot change the grades. Grading rejects a
+Grader model used by any file in the Arm directory or by the Trial's requested
+or reported model. Grader files have a separate directory so that they are not
+counted as comparison Arms.
+
+`grader_samples` in `eval/config.toml` sets how many Grader sessions grade
+each Trial. It must be odd, so that each item has a majority. The default is
+3. The sessions run one after the other, because each session clears the
+agent home. Each item's decision is the majority of the samples, with the
+reason of the first sample on the majority side. The quality score is the
+median, with the rationale of the first sample that gave it. An item on which
+the samples do not agree has `split: true`.
 
 The Grader runs through the capture seam in another fresh clone at the parent
 SHA. Its prompt contains only the Trial diff, approved Acceptance list, quoted
@@ -557,12 +596,14 @@ QUALITY 3: The code is clear but leaves compatibility work.
 
 Items must be in order, with nonempty one-line reasons. Quality must be 1–5
 with a nonempty one-line rationale. Extra text, missing items, or invalid scores
-leave `grade.status` as `ungraded`, with no guessed scores. `grade.reply` keeps
-the whole reply in all cases. Successful grading writes `grade.scores`, including
-the per-item decisions, list ratio, quality, and rationale.
+in one sample leave `grade.status` as `ungraded`, with no guessed scores, and
+the later samples do not run. Successful grading writes `grade.scores`,
+including the per-item decisions, list ratio, quality, and rationale.
 
-`grade.grader` stores the Grader's Captured run ID, outcome, actual model, spend,
-and notional cost separately from Arm spend. `grade.agent_home_digest` names
+`grade.samples` keeps one entry for each sample that ran, in order. Each entry
+has the whole reply, the scores of that reply alone, and `grader`: the
+Captured run ID, outcome, actual model, spend, and notional cost, separately
+from Arm spend. `grade.agent_home_digest` names
 the agent home the Grader ran in. Captured runs are stored in the
 Trial result directory under `grading/`. Regrading replaces the grade fields;
 it does not run the Arm again or change its spend. Previous capture files stay.
@@ -585,7 +626,9 @@ Bare-kind Arm and for a Trial recorded before Trials named their Pop revision. E
 maximum minus the minimum. The cells cover total tokens, notional cost, turns,
 peak input, and wall-clock seconds. The row also shows median Acceptance-list
 ratio (`accept`), the same ratio without the Case's name-only items
-(`accept-nn`), and quality score, plus gate-failure, baseline-failure (`base`),
+(`accept-nn`), quality score, and `split` (`split_items` in `--json`): the most
+split items in one Trial's grade, that is, how many item decisions a regrade
+of that Trial could change. It also shows gate-failure, baseline-failure (`base`),
 Trial-ceiling, Invalid, Lost, and ungraded counts. Invalid Trials do not
 contribute figures. Lost Trials and baseline-failed Trials contribute their
 spend and work-shape figures but no quality figures. An absent
