@@ -17,7 +17,7 @@ Status: approved
 13. The human-authored report files in the same directory, with the same timestamp stamp and the same header of facts as a Verifier-authored report, and the latest-report readers pick it up when it is the latest.
 14. The sign-off gate's preamble names the latest Verify report and the commit it was written against, and never quotes a line of its contents.
 15. The sign-off gate offers a paging entry that opens the Verify report document without leaving the prompt.
-16. The set's detail view carries the Verify report pointer.
+16. The set's detail view that `pop tasks status <set>` prints carries the Verify report pointer.
 17. The Verify report appears in the set's artifact list, ranked above the Refine report.
 18. No agent-facing prompt view gains the Verify report pointer, and no prompt golden changes except for the Verifier response-contract change of item 6.
 19. A set that has never been verified renders nothing at all on the gate preamble, the paging entry, the detail view and the artifact list.

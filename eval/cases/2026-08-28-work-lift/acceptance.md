@@ -1,6 +1,7 @@
 # Acceptance list
 
 Status: approved
+Name-only items: 1, 3, 4, 7, 8, 9
 
 1. A Work view preset that declares `lift = true` grants the Work dashboard's derived row ordering.
 2. The shipped `active` preset is the only shipped preset that declares the grant.
@@ -15,13 +16,14 @@ Status: approved
 11. A pane in a checkout that a set is bound to gets the same rows in the same leading order as before, and the repository pass does not contribute to that answer.
 12. A pane that carries a Task-set tag gets the tag answer unchanged, whatever work the repository holds.
 13. A repository's Task sets lift whether or not they carry a Worktree binding.
-14. The repository pass matches a pane to work by the repository's git common directory, not by project name, so a sibling worktree matches and two repositories that share a project name do not share work.
-15. A pane standing outside any repository, or in a repository pop knows no work for, lifts nothing and reports nothing.
-16. The repository pass concatenates the answers of every Work kind that has work in that repository instead of stopping at the first, asserted with two kinds answering.
-17. The pane's repository is resolved once when the dashboard launches: a dashboard left open across many rebuilds forks git no more than it does at launch, asserted against a counting git seam.
-18. `pop work status` lifts nothing and forks no git for attribution.
-19. A row that the active preset hides is still not lifted, and the preset's own narrowing is unchanged.
-20. A pane standing anywhere in a repository lifts that repository's live Maps, and a Map that is not live does not lift by locality.
-21. A repository that holds both a Task set and a Map lifts both from one pane, with the Task set rows ahead of the Map rows.
-22. A pane inside a Map's own Work session still gets the stamp answer, unchanged by the weaker repository pass.
-23. A Routine never lifts by locality, and a comment records that the asymmetry is deliberate.
+14. The repository pass matches a pane to work by the repository's git common directory, not by project name.
+15. Two repositories that share a project name and hold work with the same identifiers each lift only their own rows.
+16. A pane standing outside any repository, or in a repository pop knows no work for, lifts nothing and reports nothing.
+17. The repository pass concatenates the answers of every Work kind that has work in that repository instead of stopping at the first, asserted with two kinds answering.
+18. The pane's repository is resolved once when the dashboard launches: a dashboard left open across many rebuilds forks git no more than it does at launch, asserted against a counting git seam.
+19. `pop work status` lifts nothing and forks no git for attribution.
+20. A row that the active preset hides is still not lifted, and the preset's own narrowing is unchanged.
+21. A pane standing anywhere in a repository lifts that repository's live Maps, and, under the shipped presets, a Map that is not live does not lift by locality.
+22. A repository that holds both a Task set and a Map lifts both from one pane, with the Task set rows ahead of the Map rows.
+23. A pane inside a Map's own Work session still gets the stamp answer, unchanged by the weaker repository pass.
+24. A Routine never lifts by locality, and a comment records that the asymmetry is deliberate.

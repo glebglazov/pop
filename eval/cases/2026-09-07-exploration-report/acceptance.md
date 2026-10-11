@@ -1,6 +1,7 @@
 # Acceptance list
 
 Status: approved
+Name-only items: 1, 2, 3, 5, 7, 8, 11, 15
 
 1. When a task set's folder holds `exploration.md`, `pop tasks artifacts` lists it as an artifact with its own type, "exploration". It comes after the spec and before the progress record.
 2. The dashboard detail view lists `exploration.md` as an artifact with its own type, in the same position: after the spec, before the progress record.
@@ -19,7 +20,7 @@ Status: approved
 15. A successful explore pass writes `exploration.md` flat in the set directory, with no timestamped file or subdirectory. When a report already exists, the pass overwrites it.
 16. The explore pass files a captured run under a phase of its own, and it spends against a retry cap of its own, beside implement, verify and refine.
 17. A hand-run `pop tasks explore` runs on any set, whatever the set's `explore` key says, and it also runs when the machine config switches automatic exploration off.
-18. A failed, timed-out or interrupted explore pass writes no report, and it leaves an existing report unchanged.
+18. When the explore pass's agent run fails, times out or is interrupted, the pass writes no report and leaves an existing report unchanged.
 19. Tests drive the whole explore path together: the command, the agent reply, the report on disk and the captured run row, not each piece separately.
 20. When a set has an exploration report, each implement attempt's prompt gives the report's path and says what the report is. When a set has no report, the prompt says nothing about exploration.
 21. The implement prompt gives the report as a path and never puts the report's content in the prompt, whatever the report's length.
@@ -35,19 +36,22 @@ Status: approved
 31. When that config switches exploration off, no drain runs an explore pass, but the hand-run `pop tasks explore` still works.
 32. The manifest's `explorer` object overrides the configured agent list and effort for the explore pass, and CLI flags override the `explorer` object.
 33. The drain's explore step does not run for a human-completed set, the same as refinement.
-34. Nothing compares the tree recorded in the report to the checkout. When a report is absent, the drain writes one. When a report is present, the drain reuses it.
+34. Nothing compares the tree recorded in the report to the checkout. When a declared set has never had an explore pass, the drain writes a report. When a report is present, the drain reuses it.
 35. A test drives a whole drain of a declared set in two cases: with no report, where the pass runs, and with a report already there, where no pass runs. The test asserts what ran in each case.
 36. When the explore pass fails, it retries up to a standard per-phase cap before it gives up.
-37. A declared set whose explore pass gave up and wrote no report shows a park status of its own (for example EXPLORE-FAILED), and the drain stops at that status.
+37. A ready declared set whose explore pass ran, filed a captured run, gave up and wrote no report shows a park status of its own, and the drain stops at that status.
 38. The park status comes from the explore phase's captured run plus the absence of the report. It adds no store column and no table.
 39. The park status is different from BLOCKED, and BLOCKED keeps its meaning that a human owes a decision.
-40. Automatic selection and the Work daemon skip a parked set, so nothing explores it again in a loop.
-41. When a set parks, exactly one set-level progress record is added. It names the explore phase and the reason.
-42. The implement drain has a skip flag. With it, a declared set drains once without exploring and without parking.
-43. A successful hand-run explore pass clears the park, and removing the `explore` declaration from the manifest also clears it.
-44. The status-derivation text in `CONTEXT.md` includes the new park status in the list of statuses where draining stops. It also lists it among the statuses that automatic selection skips.
-45. A set that declared `explore` and has no report shows an exploration mark beside its status. The reason (not yet run, or the pass failed) appears as detail beside the mark, not inside the mark's value.
-46. A set that never declared `explore` shows no exploration mark on any surface.
-47. The exploration mark is resolved once on the read side, beside the verification mark, and the dashboard row, the dashboard detail view, `pop work status` and `pop tasks status` all show that one result.
-48. The dashboard detail view shows the exploration report as a pointer (its path plus the tree it records) and never shows the report's body.
-49. The sign-off gate names the exploration report in the same place where it names the refine report.
+40. The Work daemon and automatic selection's choice of a ready set skip a parked set, so nothing explores it again in a loop.
+41. Automatic selection's HITL fallback also skips a parked set.
+42. When a set parks, exactly one set-level progress record is added. It names the explore phase and the reason.
+43. The implement drain has a skip flag. With it, a declared set drains once without exploring and without parking.
+44. A successful hand-run explore pass clears the park, and removing the `explore` declaration from the manifest also clears it.
+45. The status-derivation text in `CONTEXT.md` includes the new park status in the list of statuses where draining stops. It also lists it among the statuses that automatic selection skips.
+46. A set that declared `explore`, has no report and is not parked shows an exploration mark beside its status, with the reason as detail beside the mark, not inside the mark's value.
+47. A set that never declared `explore` shows no exploration mark on any surface.
+48. The exploration mark is resolved once on the read side, beside the verification mark, and the dashboard row, the dashboard detail view, `pop work status` and the `pop tasks status` table all read that one resolution.
+49. A parked set shows its exploration mark on the dashboard row and in `pop work status`, the same as in the dashboard detail view and in `pop tasks status`.
+50. The dashboard detail view shows the exploration report as a pointer (its path plus the tree it records) and never shows the report's body.
+51. The sign-off gate names the exploration report in the same place where it names the refine report.
+52. When the report that a successful explore pass wrote is removed later, the next drain of the declared set runs the explore pass again and writes a new report. The drain does not park the set.

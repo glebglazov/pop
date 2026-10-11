@@ -1,10 +1,11 @@
 {
-  "acceptance_digest": "b25cb7b613088419b6384a9de289a47ca9264a24298f3900a0fc3f1864eed9ef",
-  "grader": "codex --model \"gpt-6-astra\"",
+  "acceptance_digest": "bf4b743ca5cf5f0c3e6c3cea9f1f0cf627110ec08a1ee69dfe2e8146bd3e37a7",
+  "grader": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+  "samples": 5,
   "reference_range": "7a4062da156d8c6ab0503a37f00642e39b1769b5..31cea805b467611730ba06e42a209ee4d1b3acef",
   "grade": {
     "status": "graded",
-    "acceptance_digest": "b25cb7b613088419b6384a9de289a47ca9264a24298f3900a0fc3f1864eed9ef",
+    "acceptance_digest": "bf4b743ca5cf5f0c3e6c3cea9f1f0cf627110ec08a1ee69dfe2e8146bd3e37a7",
     "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
     "baseline_gates": [
       {
@@ -20,7 +21,7 @@
       {
         "command": "go test ./...",
         "exit_code": 0,
-        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t97.804s\nok  \tgithub.com/glebglazov/pop/config\t1.888s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.382s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t115.989s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t0.588s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.319s\nok  \tgithub.com/glebglazov/pop/integrate\t74.630s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.487s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.482s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.754s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t3.993s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.082s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.108s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.567s\nok  \tgithub.com/glebglazov/pop/layout\t2.961s\nok  \tgithub.com/glebglazov/pop/monitor\t4.275s\nok  \tgithub.com/glebglazov/pop/project\t4.020s\nok  \tgithub.com/glebglazov/pop/release\t2.301s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.233s\nok  \tgithub.com/glebglazov/pop/routine\t18.237s\nok  \tgithub.com/glebglazov/pop/store\t5.828s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t42.191s\nok  \tgithub.com/glebglazov/pop/tasks\t190.522s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t46.980s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.371s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t63.332s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t7.572s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t2.180s\nok  \tgithub.com/glebglazov/pop/ui\t6.549s\nok  \tgithub.com/glebglazov/pop/wayfinder\t3.429s\nok  \tgithub.com/glebglazov/pop/work\t1.296s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.503s\n"
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t85.762s\nok  \tgithub.com/glebglazov/pop/config\t1.465s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t0.839s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t102.209s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.134s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t4.527s\nok  \tgithub.com/glebglazov/pop/integrate\t58.370s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t11.378s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.648s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.928s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t5.300s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t5.527s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t14.161s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t4.736s\nok  \tgithub.com/glebglazov/pop/layout\t5.013s\nok  \tgithub.com/glebglazov/pop/monitor\t6.145s\nok  \tgithub.com/glebglazov/pop/project\t5.439s\nok  \tgithub.com/glebglazov/pop/release\t3.974s\nok  \tgithub.com/glebglazov/pop/repogroup\t3.959s\nok  \tgithub.com/glebglazov/pop/routine\t25.199s\nok  \tgithub.com/glebglazov/pop/store\t7.603s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t36.206s\nok  \tgithub.com/glebglazov/pop/tasks\t156.615s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t35.391s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.192s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t52.508s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.154s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.148s\nok  \tgithub.com/glebglazov/pop/ui\t7.237s\nok  \tgithub.com/glebglazov/pop/wayfinder\t4.660s\nok  \tgithub.com/glebglazov/pop/work\t1.503s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.012s\n"
       }
     ],
     "gates": [
@@ -37,7 +38,7 @@
       {
         "command": "go test ./...",
         "exit_code": 0,
-        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t101.440s\nok  \tgithub.com/glebglazov/pop/config\t4.794s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.420s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t121.234s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.012s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t0.534s\nok  \tgithub.com/glebglazov/pop/integrate\t71.207s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.832s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.520s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.786s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.038s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.151s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.364s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.902s\nok  \tgithub.com/glebglazov/pop/layout\t3.059s\nok  \tgithub.com/glebglazov/pop/monitor\t4.024s\nok  \tgithub.com/glebglazov/pop/project\t3.974s\nok  \tgithub.com/glebglazov/pop/release\t2.189s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.244s\nok  \tgithub.com/glebglazov/pop/routine\t18.251s\nok  \tgithub.com/glebglazov/pop/store\t5.795s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t48.504s\nok  \tgithub.com/glebglazov/pop/tasks\t168.533s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t46.827s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.122s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t66.073s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t6.068s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t4.205s\nok  \tgithub.com/glebglazov/pop/ui\t7.371s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.505s\nok  \tgithub.com/glebglazov/pop/work\t1.311s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.927s\n"
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t97.548s\nok  \tgithub.com/glebglazov/pop/config\t2.530s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t0.532s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t113.357s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.522s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t2.077s\nok  \tgithub.com/glebglazov/pop/integrate\t71.289s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t10.699s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.027s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.326s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.582s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.738s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t14.408s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.430s\nok  \tgithub.com/glebglazov/pop/layout\t3.348s\nok  \tgithub.com/glebglazov/pop/monitor\t5.994s\nok  \tgithub.com/glebglazov/pop/project\t3.888s\nok  \tgithub.com/glebglazov/pop/release\t3.029s\nok  \tgithub.com/glebglazov/pop/repogroup\t3.438s\nok  \tgithub.com/glebglazov/pop/routine\t35.921s\nok  \tgithub.com/glebglazov/pop/store\t8.156s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t50.087s\nok  \tgithub.com/glebglazov/pop/tasks\t174.384s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t53.066s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.982s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t66.483s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t7.072s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t5.193s\nok  \tgithub.com/glebglazov/pop/ui\t6.423s\nok  \tgithub.com/glebglazov/pop/wayfinder\t4.548s\nok  \tgithub.com/glebglazov/pop/work\t1.344s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.077s\n"
       }
     ],
     "outside_scope": [],
@@ -46,72 +47,72 @@
         {
           "item": 1,
           "met": true,
-          "reason": "Verifier replies produce timestamped documents under the set’s verify directory."
+          "reason": "Verifier replies produce timestamped reports under the set’s verify directory."
         },
         {
           "item": 2,
           "met": true,
-          "reason": "Sequential verifications retain separate reports; fallback publishes once after resolving the verdict."
+          "reason": "Reports accumulate without sequential overwrites; fallback publishes once after resolving the invocation."
         },
         {
           "item": 3,
           "met": true,
-          "reason": "The response contract keeps VERDICT first, and report extraction removes that line from substantive replies."
+          "reason": "The contract keeps VERDICT first, and the remaining prose becomes the report body."
         },
         {
           "item": 4,
           "met": true,
-          "reason": "Existing verdict parsing remains unchanged, while malformed replies and absent output are recorded."
+          "reason": "Verdict parsing remains unchanged; malformed text and empty-response explanations are preserved."
         },
         {
           "item": 5,
           "met": true,
-          "reason": "Report publication applies equally to PASS, FIXABLE, and NEEDS-HUMAN."
+          "reason": "Report publication applies to PASS, FIXABLE, and NEEDS-HUMAN."
         },
         {
           "item": 6,
           "met": true,
-          "reason": "PASS findings must now identify checked evidence and explain each acceptance criterion."
+          "reason": "PASS findings must describe checked evidence and justify each acceptance criterion."
         },
         {
           "item": 7,
           "met": true,
-          "reason": "Cached verdict paths bypass report publication."
+          "reason": "Cache hits bypass the report-publication path."
         },
         {
           "item": 8,
           "met": true,
-          "reason": "Invalidation still deletes cache rows without deleting report documents."
+          "reason": "Invalidation still deletes cached verdicts without touching report documents."
         },
         {
           "item": 9,
           "met": true,
-          "reason": "Previous reports are excluded from Verifier prompts; prior human notes retain their existing path."
+          "reason": "Previous reports stay outside Verifier prompts; accepted-note forwarding remains unchanged."
         },
         {
           "item": 10,
           "met": true,
-          "reason": "Human acceptance publishes a report without invoking a Verifier."
+          "reason": "Human acceptance publishes a report without invoking an agent."
         },
         {
           "item": 11,
           "met": true,
-          "reason": "Human reports include the supplied rationale and the overridden non-PASS verdict."
+          "reason": "Human reports include the supplied rationale and overridden non-PASS verdict."
         },
         {
           "item": 12,
           "met": true,
-          "reason": "Human reports use “Accepted by: human” instead of the Verifier authorship label."
+          "reason": "Human reports use an explicit “Accepted by: human” header."
         },
         {
           "item": 13,
           "met": true,
-          "reason": "Human reports use the shared directory, timestamp format, factual header, and latest-report reader."
+          "reason": "Human reports use the shared directory, timestamp format, factual header, and latest-report lookup."
         },
         {
           "item": 14,
           "met": true,
-          "reason": "The gate preamble displays the latest report’s path and recorded commit without its prose."
+          "reason": "The gate preamble displays the latest report path and recorded commit without its prose."
         },
         {
           "item": 15,
@@ -121,7 +122,7 @@
         {
           "item": 16,
           "met": true,
-          "reason": "The CLI set detail view displays the latest Verify report pointer."
+          "reason": "The set detail renderer adds the latest Verify report pointer."
         },
         {
           "item": 17,
@@ -131,7 +132,7 @@
         {
           "item": 18,
           "met": true,
-          "reason": "No agent prompt gains a report pointer; golden changes only update the Verifier response contract."
+          "reason": "Agent prompt views gain no pointer; only Verifier response-contract goldens change."
         },
         {
           "item": 19,
@@ -141,72 +142,875 @@
         {
           "item": 20,
           "met": true,
-          "reason": "Verification status and badge derivation remain independent of report age."
+          "reason": "Badge and verification-status derivation remain independent of report age."
         },
         {
           "item": 21,
           "met": false,
-          "reason": "Status reasons remain truncated, but status-row rendering gains no adjacent report pointer."
+          "reason": "Status rows retain truncated findings but gain no adjacent report pointer; only the separate detail view does."
         },
         {
           "item": 22,
           "met": true,
-          "reason": "Both passes share document rendering, filing, timestamp scanning, header parsing, and pointer machinery."
+          "reason": "Both passes share rendering, filing, timestamp scanning, and document-header parsing."
         },
         {
           "item": 23,
           "met": false,
-          "reason": "Refine’s pager failure text changes from “Could not read the refine report” to “Could not read the report.”"
+          "reason": "Refine’s paging failure text changes from “Could not read the refine report” to “Could not read the report.”"
         },
         {
           "item": 24,
           "met": true,
-          "reason": "Refiner prompt golden files are unchanged."
+          "reason": "Refine prompt golden files are unchanged."
         }
       ],
       "list_ratio": 0.9166666666666666,
-      "quality": 3,
-      "rationale": "Coherent shared machinery and substantial tests, but status-row pointers are missing and a Refine output regression remains; the supplied diff was reviewed without execution."
+      "quality": 4,
+      "rationale": "Clear shared machinery and broad supplied tests; the missing status-row pointer and minor Refine output regression prevent full acceptance."
     },
-    "grader": {
-      "agent": "codex --model \"gpt-6-astra\"",
-      "run_id": "19dce1ee-20a3-4a33-8e23-4e529c65f4df",
-      "outcome": "completed",
-      "spend": {
-        "Tokens": {
-          "Input": 662392,
-          "Output": 1810,
-          "CacheRead": 593408,
-          "CacheWrite": 0,
-          "HasInput": true,
-          "HasOutput": true,
-          "HasCacheRead": true,
-          "HasCacheWrite": false
+    "samples": [
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "cacf56aa-e6bb-4e05-9c33-c5ca14c3db1e",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 712148,
+              "Output": 2456,
+              "CacheRead": 628224,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 12,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 94080,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
         },
-        "Cost": {
-          "Dollars": 0,
-          "HasCost": false
-        },
-        "Turns": {
-          "Count": 12,
-          "HasTurn": true
-        },
-        "PeakInput": {
-          "Tokens": 79152,
-          "HasPeak": true
+        "reply": "ITEM 1 MET: Verifier replies produce timestamped reports under the set’s verify directory.\nITEM 2 MET: Reports accumulate without sequential overwrites; fallback publishes once after resolving the invocation.\nITEM 3 MET: The contract keeps VERDICT first, and the remaining prose becomes the report body.\nITEM 4 MET: Verdict parsing remains unchanged; malformed text and empty-response explanations are preserved.\nITEM 5 MET: Report publication applies to PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: PASS findings must describe checked evidence and justify each acceptance criterion.\nITEM 7 MET: Cache hits bypass the report-publication path.\nITEM 8 MET: Invalidation still deletes cached verdicts without touching report documents.\nITEM 9 MET: Previous reports stay outside Verifier prompts; accepted-note forwarding remains unchanged.\nITEM 10 MET: Human acceptance publishes a report without invoking an agent.\nITEM 11 MET: Human reports include the supplied rationale and overridden non-PASS verdict.\nITEM 12 MET: Human reports use an explicit “Accepted by: human” header.\nITEM 13 MET: Human reports use the shared directory, timestamp format, factual header, and latest-report lookup.\nITEM 14 MET: The gate preamble displays the latest report path and recorded commit without its prose.\nITEM 15 MET: The paging action opens the report and returns to the gate loop.\nITEM 16 MET: The set detail renderer adds the latest Verify report pointer.\nITEM 17 MET: Artifact ordering places Verify reports above Refine reports.\nITEM 18 MET: Agent prompt views gain no pointer; only Verifier response-contract goldens change.\nITEM 19 MET: Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact.\nITEM 20 MET: Badge and verification-status derivation remain independent of report age.\nITEM 21 NOT_MET: Status rows retain truncated findings but gain no adjacent report pointer; only the separate detail view does.\nITEM 22 MET: Both passes share rendering, filing, timestamp scanning, and document-header parsing.\nITEM 23 NOT_MET: Refine’s paging failure text changes from “Could not read the refine report” to “Could not read the report.”\nITEM 24 MET: Refine prompt golden files are unchanged.\nQUALITY 4: Clear shared machinery and broad supplied tests; the missing status-row pointer and minor Refine output regression prevent full acceptance.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Verifier replies produce timestamped reports under the set’s verify directory."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Reports accumulate without sequential overwrites; fallback publishes once after resolving the invocation."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The contract keeps VERDICT first, and the remaining prose becomes the report body."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Verdict parsing remains unchanged; malformed text and empty-response explanations are preserved."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Report publication applies to PASS, FIXABLE, and NEEDS-HUMAN."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "PASS findings must describe checked evidence and justify each acceptance criterion."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cache hits bypass the report-publication path."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation still deletes cached verdicts without touching report documents."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Previous reports stay outside Verifier prompts; accepted-note forwarding remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Human acceptance publishes a report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports include the supplied rationale and overridden non-PASS verdict."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports use an explicit “Accepted by: human” header."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports use the shared directory, timestamp format, factual header, and latest-report lookup."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble displays the latest report path and recorded commit without its prose."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "The paging action opens the report and returns to the gate loop."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "The set detail renderer adds the latest Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Artifact ordering places Verify reports above Refine reports."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Agent prompt views gain no pointer; only Verifier response-contract goldens change."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Badge and verification-status derivation remain independent of report age."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "Status rows retain truncated findings but gain no adjacent report pointer; only the separate detail view does."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Both passes share rendering, filing, timestamp scanning, and document-header parsing."
+            },
+            {
+              "item": 23,
+              "met": false,
+              "reason": "Refine’s paging failure text changes from “Could not read the refine report” to “Could not read the report.”"
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refine prompt golden files are unchanged."
+            }
+          ],
+          "list_ratio": 0.9166666666666666,
+          "quality": 4,
+          "rationale": "Clear shared machinery and broad supplied tests; the missing status-row pointer and minor Refine output regression prevent full acceptance."
         }
       },
-      "notional": {
-        "Cost": {
-          "Dollars": 0,
-          "HasCost": false
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "254452a0-b603-445f-8e29-7e932ff3d370",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 768220,
+              "Output": 2624,
+              "CacheRead": 682112,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 13,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 96158,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
         },
-        "RateSource": "",
-        "ModelKey": "",
-        "ModelKeySource": ""
+        "reply": "ITEM 1 MET: Verifier replies produce timestamped documents under the set’s verify directory.\nITEM 2 MET: Reports accumulate without sequential overwrites; publication occurs once after agent fallback resolves.\nITEM 3 MET: The response contract keeps VERDICT first, and the remaining prose becomes the report body.\nITEM 4 MET: Verdict parsing is unchanged; malformed replies are retained and absent replies are documented.\nITEM 5 MET: Report publication runs for PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: PASS explicitly requires evidence and explanations for each acceptance criterion.\nITEM 7 MET: Cache returns bypass report publication.\nITEM 8 MET: Invalidation still deletes cached verdicts without deleting reports.\nITEM 9 MET: Previous reports never enter Verifier prompts; human-note forwarding remains unchanged.\nITEM 10 MET: The human Accept path publishes a report without invoking an agent.\nITEM 11 MET: Human reports include the supplied rationale and overridden non-PASS verdict.\nITEM 12 MET: Human reports use “Accepted by: human” instead of Verifier authorship.\nITEM 13 MET: Human reports use the shared directory, timestamp format, factual header, and latest-report reader.\nITEM 14 MET: The gate preamble shows the latest report path and recorded commit without its prose.\nITEM 15 MET: A paging action displays the Verify report and returns to the gate menu.\nITEM 16 MET: The task-set detail renderer includes the Verify report pointer.\nITEM 17 MET: Verify artifacts rank above Refine artifacts.\nITEM 18 MET: Agent prompt views gain no Verify pointer; only Verifier response-contract goldens change.\nITEM 19 MET: Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact.\nITEM 20 MET: Badge and verification-status derivation remain independent of report age.\nITEM 21 NOT_MET: Status rows retain first-line findings truncation but gain no adjacent full-report pointer.\nITEM 22 MET: Both passes share rendering, filing, latest scanning, and document-header parsing; Refine’s private implementations are removed.\nITEM 23 NOT_MET: Refine’s paging failure output changes from “Could not read the refine report” to “Could not read the report.”\nITEM 24 MET: Refine prompt golden files are unchanged.\nQUALITY 4: Clear shared machinery and broad regression coverage, with a missing status-row pointer and minor Refine output regression; assessment was static.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Verifier replies produce timestamped documents under the set’s verify directory."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Reports accumulate without sequential overwrites; publication occurs once after agent fallback resolves."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The response contract keeps VERDICT first, and the remaining prose becomes the report body."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Verdict parsing is unchanged; malformed replies are retained and absent replies are documented."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Report publication runs for PASS, FIXABLE, and NEEDS-HUMAN."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "PASS explicitly requires evidence and explanations for each acceptance criterion."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cache returns bypass report publication."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation still deletes cached verdicts without deleting reports."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Previous reports never enter Verifier prompts; human-note forwarding remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The human Accept path publishes a report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports include the supplied rationale and overridden non-PASS verdict."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports use “Accepted by: human” instead of Verifier authorship."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports use the shared directory, timestamp format, factual header, and latest-report reader."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble shows the latest report path and recorded commit without its prose."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "A paging action displays the Verify report and returns to the gate menu."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "The task-set detail renderer includes the Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Verify artifacts rank above Refine artifacts."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Agent prompt views gain no Verify pointer; only Verifier response-contract goldens change."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Badge and verification-status derivation remain independent of report age."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "Status rows retain first-line findings truncation but gain no adjacent full-report pointer."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Both passes share rendering, filing, latest scanning, and document-header parsing; Refine’s private implementations are removed."
+            },
+            {
+              "item": 23,
+              "met": false,
+              "reason": "Refine’s paging failure output changes from “Could not read the refine report” to “Could not read the report.”"
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refine prompt golden files are unchanged."
+            }
+          ],
+          "list_ratio": 0.9166666666666666,
+          "quality": 4,
+          "rationale": "Clear shared machinery and broad regression coverage, with a missing status-row pointer and minor Refine output regression; assessment was static."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "cfc07c71-b2b1-4fb2-ae5b-6c5605d577d8",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 753118,
+              "Output": 2344,
+              "CacheRead": 667392,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 13,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 88792,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Verifier results publish timestamped documents under the set’s verify directory.\nITEM 2 MET: Reports accumulate without sequential overwrites; fallback publishes only the final verification report.\nITEM 3 MET: The contract keeps VERDICT first, and report extraction preserves the following prose.\nITEM 4 MET: Verdict parsing remains unchanged; malformed replies are retained and empty replies are documented.\nITEM 5 MET: Publishing runs for PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: The response contract requires evidence and criterion-by-criterion findings for PASS.\nITEM 7 MET: Cached verdicts bypass report publishing.\nITEM 8 MET: Invalidation still deletes verdict-cache entries without deleting reports.\nITEM 9 MET: Previous reports stay outside Verifier prompts; accepted-note forwarding remains unchanged.\nITEM 10 MET: Human acceptance publishes a report without invoking an agent.\nITEM 11 MET: Human reports include the rationale and overridden non-PASS verdict.\nITEM 12 MET: Human reports identify authorship with “Accepted by: human.”\nITEM 13 MET: Human reports use the shared directory, naming, header machinery, and latest-report readers.\nITEM 14 MET: The gate preamble displays the latest report’s path and commit metadata without its body.\nITEM 15 MET: The paging action opens the report and returns to the gate loop.\nITEM 16 MET: The set detail renderer includes the Verify report pointer.\nITEM 17 MET: Artifact ordering places Verify reports above Refine reports.\nITEM 18 MET: No agent prompt gains a Verify pointer; only Verifier response-contract goldens change.\nITEM 19 MET: Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact.\nITEM 20 MET: Verification status and badge derivation remain independent of report age.\nITEM 21 NOT_MET: Compact status rows retain truncated findings but gain no adjacent report pointer.\nITEM 22 MET: Both passes share rendering, filing, timestamp scanning, and document-header parsing.\nITEM 23 NOT_MET: Refine’s paging failure text changes from “Could not read the refine report” to “Could not read the report.”\nITEM 24 MET: Refine prompt golden files are unchanged.\nQUALITY 4: Cohesive shared machinery and substantial regression coverage, with a missing compact-row pointer and a minor Refine output regression; assessed statically.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Verifier results publish timestamped documents under the set’s verify directory."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Reports accumulate without sequential overwrites; fallback publishes only the final verification report."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The contract keeps VERDICT first, and report extraction preserves the following prose."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Verdict parsing remains unchanged; malformed replies are retained and empty replies are documented."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Publishing runs for PASS, FIXABLE, and NEEDS-HUMAN."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "The response contract requires evidence and criterion-by-criterion findings for PASS."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cached verdicts bypass report publishing."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation still deletes verdict-cache entries without deleting reports."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Previous reports stay outside Verifier prompts; accepted-note forwarding remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Human acceptance publishes a report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports include the rationale and overridden non-PASS verdict."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports identify authorship with “Accepted by: human.”"
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports use the shared directory, naming, header machinery, and latest-report readers."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble displays the latest report’s path and commit metadata without its body."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "The paging action opens the report and returns to the gate loop."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "The set detail renderer includes the Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Artifact ordering places Verify reports above Refine reports."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "No agent prompt gains a Verify pointer; only Verifier response-contract goldens change."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Verification status and badge derivation remain independent of report age."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "Compact status rows retain truncated findings but gain no adjacent report pointer."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Both passes share rendering, filing, timestamp scanning, and document-header parsing."
+            },
+            {
+              "item": 23,
+              "met": false,
+              "reason": "Refine’s paging failure text changes from “Could not read the refine report” to “Could not read the report.”"
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refine prompt golden files are unchanged."
+            }
+          ],
+          "list_ratio": 0.9166666666666666,
+          "quality": 4,
+          "rationale": "Cohesive shared machinery and substantial regression coverage, with a missing compact-row pointer and a minor Refine output regression; assessed statically."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "5688b774-922b-466a-a802-3c1bca933639",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 762494,
+              "Output": 2932,
+              "CacheRead": 682368,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 13,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 90159,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Verifier replies produce timestamped documents under the set’s verify directory.\nITEM 2 MET: Reports accumulate without sequential overwrites; fallback produces one report after the agent walk.\nITEM 3 MET: The contract keeps VERDICT first, and report publication extracts the remaining prose.\nITEM 4 MET: Verdict parsing remains unchanged, while malformed replies and absent output are recorded.\nITEM 5 MET: Publication runs for PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: The response contract requires evidence and criterion-by-criterion reasoning for PASS.\nITEM 7 MET: Cache hits bypass agent invocation and report publication.\nITEM 8 MET: Invalidation deletes verdict rows without removing report documents.\nITEM 9 MET: Previous reports stay out of Verifier prompts; accepted-note forwarding remains unchanged.\nITEM 10 MET: Human acceptance publishes a report without invoking an agent.\nITEM 11 MET: Human reports include the rationale, overridden verdict, and its findings.\nITEM 12 MET: Human reports use “Accepted by: human” instead of the Verifier authorship field.\nITEM 13 MET: Human reports share the directory, timestamp format, factual header, and latest-report lookup.\nITEM 14 MET: The gate preamble displays the latest report’s path and recorded commit without its prose.\nITEM 15 MET: The paging action opens the report and returns to the gate menu.\nITEM 16 MET: The set detail renderer includes the latest Verify report pointer.\nITEM 17 MET: Artifact ordering places Verify reports above Refine reports.\nITEM 18 MET: No agent prompt gains the pointer; golden changes are confined to the Verifier response contract.\nITEM 19 MET: Absent reports produce no Verify preamble, paging entry, detail pointer, or artifact.\nITEM 20 MET: Verification status and badge derivation remain independent of report age.\nITEM 21 NOT_MET: Status rows retain first-line findings but gain no adjacent report pointer; only the detail view does.\nITEM 22 MET: Both passes share rendering, filing, timestamp scanning, header parsing, and pointer machinery.\nITEM 23 NOT_MET: Refine’s paging error changes from “Could not read the refine report” to “Could not read the report.”\nITEM 24 MET: Refine prompt golden files are unmodified.\nQUALITY 4: Strong shared design and broad added tests; static review finds missing status-row pointers, changed Refine error wording, and misleading human-report prose claiming no Verifier judged an overridden SHA.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Verifier replies produce timestamped documents under the set’s verify directory."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Reports accumulate without sequential overwrites; fallback produces one report after the agent walk."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The contract keeps VERDICT first, and report publication extracts the remaining prose."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Verdict parsing remains unchanged, while malformed replies and absent output are recorded."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Publication runs for PASS, FIXABLE, and NEEDS-HUMAN."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "The response contract requires evidence and criterion-by-criterion reasoning for PASS."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cache hits bypass agent invocation and report publication."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation deletes verdict rows without removing report documents."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Previous reports stay out of Verifier prompts; accepted-note forwarding remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Human acceptance publishes a report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports include the rationale, overridden verdict, and its findings."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports use “Accepted by: human” instead of the Verifier authorship field."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports share the directory, timestamp format, factual header, and latest-report lookup."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble displays the latest report’s path and recorded commit without its prose."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "The paging action opens the report and returns to the gate menu."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "The set detail renderer includes the latest Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Artifact ordering places Verify reports above Refine reports."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "No agent prompt gains the pointer; golden changes are confined to the Verifier response contract."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Absent reports produce no Verify preamble, paging entry, detail pointer, or artifact."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Verification status and badge derivation remain independent of report age."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "Status rows retain first-line findings but gain no adjacent report pointer; only the detail view does."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Both passes share rendering, filing, timestamp scanning, header parsing, and pointer machinery."
+            },
+            {
+              "item": 23,
+              "met": false,
+              "reason": "Refine’s paging error changes from “Could not read the refine report” to “Could not read the report.”"
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refine prompt golden files are unmodified."
+            }
+          ],
+          "list_ratio": 0.9166666666666666,
+          "quality": 4,
+          "rationale": "Strong shared design and broad added tests; static review finds missing status-row pointers, changed Refine error wording, and misleading human-report prose claiming no Verifier judged an overridden SHA."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "41e5e2ac-3cd9-4b05-8ae8-3ce39a6b63c9",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 833117,
+              "Output": 2577,
+              "CacheRead": 748800,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 14,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 94045,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Verifier replies produce timestamped documents under the set’s verify directory.\nITEM 2 MET: Reports accumulate without sequential overwrites; fallback publishes once after the final reply.\nITEM 3 MET: The contract requires the verdict first, and report creation removes that line while retaining the prose.\nITEM 4 MET: Parsing behavior remains unchanged; malformed replies are preserved and absent output is documented.\nITEM 5 MET: Report publication runs for PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: The response contract requires evidence and criterion-by-criterion reasoning for PASS.\nITEM 7 MET: Cache hits bypass report publication.\nITEM 8 MET: Invalidation still deletes cached verdicts without touching report files.\nITEM 9 MET: Previous reports never enter Verifier prompts; human acceptance-note propagation remains unchanged.\nITEM 10 MET: Human acceptance publishes a report without invoking an agent.\nITEM 11 MET: Human reports include the supplied rationale and overridden non-PASS verdict.\nITEM 12 MET: Human reports use an “Accepted by: human” header instead of “Verifier.”\nITEM 13 MET: Human reports use the same filing, timestamp, header, and latest-report machinery.\nITEM 14 MET: The gate preamble displays the latest report’s path and commit facts without its prose.\nITEM 15 MET: The paging entry opens the report and returns to the gate menu.\nITEM 16 MET: The set detail renderer includes the latest Verify report pointer.\nITEM 17 MET: Verify reports lead the artifact ordering, ahead of Refine reports.\nITEM 18 MET: Agent prompt views gain no pointer; only Verifier response-contract goldens change.\nITEM 19 MET: Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact.\nITEM 20 MET: Report readers do not alter verification status or verified-at badge derivation.\nITEM 21 NOT_MET: Status rows retain truncated findings but gain no adjacent full-report pointer.\nITEM 22 MET: Both passes share rendering, filing, timestamp scanning, and document-header parsing.\nITEM 23 NOT_MET: Refine’s pager failure text changes from “Could not read the refine report” to “Could not read the report.”\nITEM 24 MET: Refiner prompt golden files are unchanged.\nQUALITY 4: Clear shared machinery and broad supplied tests; the missing status-row pointer and Refine message regression leave acceptance gaps.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Verifier replies produce timestamped documents under the set’s verify directory."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Reports accumulate without sequential overwrites; fallback publishes once after the final reply."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The contract requires the verdict first, and report creation removes that line while retaining the prose."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Parsing behavior remains unchanged; malformed replies are preserved and absent output is documented."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Report publication runs for PASS, FIXABLE, and NEEDS-HUMAN."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "The response contract requires evidence and criterion-by-criterion reasoning for PASS."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cache hits bypass report publication."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation still deletes cached verdicts without touching report files."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Previous reports never enter Verifier prompts; human acceptance-note propagation remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Human acceptance publishes a report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports include the supplied rationale and overridden non-PASS verdict."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports use an “Accepted by: human” header instead of “Verifier.”"
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports use the same filing, timestamp, header, and latest-report machinery."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble displays the latest report’s path and commit facts without its prose."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "The paging entry opens the report and returns to the gate menu."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "The set detail renderer includes the latest Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Verify reports lead the artifact ordering, ahead of Refine reports."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Agent prompt views gain no pointer; only Verifier response-contract goldens change."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Report readers do not alter verification status or verified-at badge derivation."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "Status rows retain truncated findings but gain no adjacent full-report pointer."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Both passes share rendering, filing, timestamp scanning, and document-header parsing."
+            },
+            {
+              "item": 23,
+              "met": false,
+              "reason": "Refine’s pager failure text changes from “Could not read the refine report” to “Could not read the report.”"
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refiner prompt golden files are unchanged."
+            }
+          ],
+          "list_ratio": 0.9166666666666666,
+          "quality": 4,
+          "rationale": "Clear shared machinery and broad supplied tests; the missing status-row pointer and Refine message regression leave acceptance gaps."
+        }
       }
-    },
-    "reply": "ITEM 1 MET: Verifier replies produce timestamped documents under the set’s verify directory.\nITEM 2 MET: Sequential verifications retain separate reports; fallback publishes once after resolving the verdict.\nITEM 3 MET: The response contract keeps VERDICT first, and report extraction removes that line from substantive replies.\nITEM 4 MET: Existing verdict parsing remains unchanged, while malformed replies and absent output are recorded.\nITEM 5 MET: Report publication applies equally to PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: PASS findings must now identify checked evidence and explain each acceptance criterion.\nITEM 7 MET: Cached verdict paths bypass report publication.\nITEM 8 MET: Invalidation still deletes cache rows without deleting report documents.\nITEM 9 MET: Previous reports are excluded from Verifier prompts; prior human notes retain their existing path.\nITEM 10 MET: Human acceptance publishes a report without invoking a Verifier.\nITEM 11 MET: Human reports include the supplied rationale and the overridden non-PASS verdict.\nITEM 12 MET: Human reports use “Accepted by: human” instead of the Verifier authorship label.\nITEM 13 MET: Human reports use the shared directory, timestamp format, factual header, and latest-report reader.\nITEM 14 MET: The gate preamble displays the latest report’s path and recorded commit without its prose.\nITEM 15 MET: The paging action opens the report and returns to the gate loop.\nITEM 16 MET: The CLI set detail view displays the latest Verify report pointer.\nITEM 17 MET: Artifact ordering places Verify reports above Refine reports.\nITEM 18 MET: No agent prompt gains a report pointer; golden changes only update the Verifier response contract.\nITEM 19 MET: Missing reports produce no Verify preamble, paging entry, detail pointer, or artifact.\nITEM 20 MET: Verification status and badge derivation remain independent of report age.\nITEM 21 NOT_MET: Status reasons remain truncated, but status-row rendering gains no adjacent report pointer.\nITEM 22 MET: Both passes share document rendering, filing, timestamp scanning, header parsing, and pointer machinery.\nITEM 23 NOT_MET: Refine’s pager failure text changes from “Could not read the refine report” to “Could not read the report.”\nITEM 24 MET: Refiner prompt golden files are unchanged.\nQUALITY 3: Coherent shared machinery and substantial tests, but status-row pointers are missing and a Refine output regression remains; the supplied diff was reviewed without execution.\n"
+    ]
   },
   "accepted": [
     {
