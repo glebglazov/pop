@@ -1,0 +1,791 @@
+diff --git a/cmd/tasks_test.go b/cmd/tasks_test.go
+index f0421db3..d1cae235 100644
+--- a/cmd/tasks_test.go
++++ b/cmd/tasks_test.go
+@@ -888,7 +888,7 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
+ 	if strings.Contains(stdout.String(), "Run AFK tasks in this Task set?") {
+ 		t.Fatalf("set drain must not ask for AFK consent:\n%s", stdout.String())
+ 	}
+-	if !strings.Contains(stdout.String(), "✓ Completed demo/01-a") {
++	if !strings.Contains(stdout.String(), "✓ demo/01-a done") {
+ 		t.Fatalf("expected set to drain:\n%s", stdout.String())
+ 	}
+ 	_ = root
+diff --git a/supervisor/supervisor_spawn_test.go b/supervisor/supervisor_spawn_test.go
+index c0792753..a5c4bdd1 100644
+--- a/supervisor/supervisor_spawn_test.go
++++ b/supervisor/supervisor_spawn_test.go
+@@ -77,7 +77,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
+ 	if strings.Contains(confirmOut.String(), "Run AFK tasks in this Task set?") {
+ 		t.Fatalf("queue spawn must not ask for AFK consent:\n%s", confirmOut.String())
+ 	}
+-	if !strings.Contains(out, "✓ Completed queue-drain/01-a") {
++	if !strings.Contains(out, "✓ queue-drain/01-a done") {
+ 		t.Fatalf("AFK task should run without a start prompt:\n%s", out)
+ 	}
+ 	for _, want := range []string{
+diff --git a/tasks/agent_exhaustion_fallback_test.go b/tasks/agent_exhaustion_fallback_test.go
+index 787e5ea6..45d0f5c6 100644
+--- a/tasks/agent_exhaustion_fallback_test.go
++++ b/tasks/agent_exhaustion_fallback_test.go
+@@ -91,6 +91,9 @@ func TestEveryAgentSpentStopsTheDrain(t *testing.T) {
+ 	if want := "Out of agents for demo/01-a after 4 attempts"; !strings.Contains(buf.String(), want) {
+ 		t.Fatalf("output missing %q:\n%s", want, buf.String())
+ 	}
++	if got := strings.Count(buf.String(), "✗ demo/01-a out of agents (left open)"); got != 1 {
++		t.Fatalf("out-of-agents result lines = %d, want 1:\n%s", got, buf.String())
++	}
+ 	assertTaskStatus(t, env, "01-a", TaskOpen)
+ 	assertTaskStatus(t, env, "02-b", TaskOpen)
+ }
+diff --git a/tasks/attempts.go b/tasks/attempts.go
+index e4442f0b..1fe189d9 100644
+--- a/tasks/attempts.go
++++ b/tasks/attempts.go
+@@ -307,10 +307,9 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
+ 			if err != nil {
+ 				return nil, nil, taskExitErr(sel, ExitOperational, "%v", err)
+ 			}
+-			printConciseSummary(out, result)
+ 			// Every attempt the task had, including those an earlier agent in the
+ 			// fallback list spent before handing the turn on.
+-			printAttemptBreakdown(d, out, ledger.streams)
++			result.attemptStreams = ledger.streams
+ 			return result, nil, nil
+ 		}
+ 
+@@ -746,16 +745,6 @@ func finalizeTaskDone(d *Deps, sel *Selection, runtimePath, summary string, comm
+ 	}})
+ }
+ 
+-func printConciseSummary(w io.Writer, result *RunTaskResult) {
+-	out := outputFor(w)
+-	out.line(ansiGreen, "✓ Completed %s/%s", result.Selection.TaskSetID, result.Selection.TaskID)
+-	if result.NoOp {
+-		fmt.Fprintln(out, "  No implementation commit (verified no-op)")
+-	} else if result.CommitSHA != "" {
+-		fmt.Fprintf(out, "  Implementation commit: %s\n", result.CommitSHA[:min(12, len(result.CommitSHA))])
+-	}
+-}
+-
+ func min(a, b int) int {
+ 	if a < b {
+ 		return a
+diff --git a/tasks/drain_header.go b/tasks/drain_header.go
+new file mode 100644
+index 00000000..83139791
+--- /dev/null
++++ b/tasks/drain_header.go
+@@ -0,0 +1,42 @@
++package tasks
++
++import "io"
++
++// DrainHeader is the unconditional opening of a whole-set Implement, printed
++// before the status table so where a drain runs is always stated, not only when
++// it surprises. Drain routing fills it; the executor's output layer renders it.
++type DrainHeader struct {
++	TaskSetID   string
++	RuntimePath string
++	// BindingKind is "managed" or "adopted"; empty when the drain runs at an
++	// explicit runtime override with no Worktree binding.
++	BindingKind string
++	// InvokedFrom is the invocation checkout, set only when it differs from
++	// RuntimePath.
++	InvokedFrom string
++	// BoundDefault reports this run just recorded a Default binding to the
++	// current checkout.
++	BoundDefault bool
++}
++
++// Print writes the header lines to w, styled only on a color-capable terminal.
++func (h DrainHeader) Print(w io.Writer) {
++	o := outputFor(w)
++	kind := "no binding"
++	if h.BindingKind != "" {
++		kind = h.BindingKind + " binding"
++	}
++	o.line(ansiBold, "Draining %s at %s (%s)", h.TaskSetID, h.RuntimePath, kind)
++	if h.InvokedFrom != "" {
++		o.line(ansiDim, "  invoked from %s", h.InvokedFrom)
++	}
++	if h.BoundDefault {
++		o.line(ansiDim, "  binding recorded to current checkout")
++	}
++}
++
++// printCurrentCheckoutLine is the single-task sibling of DrainHeader: a file run
++// has no drain, so it states only the checkout it runs in.
++func printCurrentCheckoutLine(w io.Writer, taskSetID, taskID, runtimePath string) {
++	outputFor(w).line(ansiBold, "Running %s/%s in current checkout %s", taskSetID, taskID, runtimePath)
++}
+diff --git a/tasks/drain_outcome_test.go b/tasks/drain_outcome_test.go
+index 4eb010f0..9cb36702 100644
+--- a/tasks/drain_outcome_test.go
++++ b/tasks/drain_outcome_test.go
+@@ -1,6 +1,7 @@
+ package tasks
+ 
+ import (
++	"bytes"
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
+@@ -16,7 +17,8 @@ func TestRunTaskSetQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
+ 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+ 	})
+ 	installClaudeQuotaAgent(t, env.root)
+-	opts := env.runTaskSetOpts(true, "", nil)
++	var buf bytes.Buffer
++	opts := env.runTaskSetOpts(true, "", &buf)
+ 	opts.AgentPreset = "claude"
+ 
+ 	d := env.deps()
+@@ -56,6 +58,9 @@ func TestRunTaskSetQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
+ 	case <-time.After(hangGuard):
+ 		t.Fatal("goroutine did not exit after waiter deregistration")
+ 	}
++	if got := strings.Count(buf.String(), "◌ demo/01-a quota-paused (claude)"); got != 1 {
++		t.Fatalf("quota-paused result lines = %d, want 1:\n%s", got, buf.String())
++	}
+ }
+ 
+ func TestRunTaskSetCodexQuotaPauseRegistersWaiterWithResetAt(t *testing.T) {
+diff --git a/tasks/executor.go b/tasks/executor.go
+index 35fe4a71..df5ac7f6 100644
+--- a/tasks/executor.go
++++ b/tasks/executor.go
+@@ -73,6 +73,9 @@ type RunTaskResult struct {
+ 	NoAgentStarted bool
+ 	CommitSHA          string
+ 	AgentSummary       string
++	// attemptStreams are the Captured attempt streams a completed task's walk
++	// wrote, for the timing breakdown beneath its result line.
++	attemptStreams []string
+ }
+ 
+ // RunTask executes one task task through an agent.
+@@ -141,6 +144,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
+ 	if out == nil {
+ 		out = os.Stdout
+ 	}
++	printCurrentCheckoutLine(out, sel.TaskSetID, sel.TaskID, runtimePath)
+ 
+ 	// A ready HITL target routes to that task's HITL gate instead of an agent
+ 	// run: it never claims a Drain, runs no agent, and asks no "Run task?"
+@@ -284,6 +288,10 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
+ 		}
+ 	}
+ 
++	if result.ProceedVerdict == nil {
++		printTaskDone(d, out, result)
++	}
++
+ 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
+ 	if err != nil {
+ 		return nil, taskExitErr(sel, ExitOperational, "refresh after completion: %v", err)
+diff --git a/tasks/executor_test.go b/tasks/executor_test.go
+index bf926ce6..e8f93931 100644
+--- a/tasks/executor_test.go
++++ b/tasks/executor_test.go
+@@ -324,7 +324,7 @@ func TestRunTaskYesPrintsConciseSummary(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ 	out := buf.String()
+-	if !strings.Contains(out, "Completed demo/01-a") {
++	if !strings.Contains(out, "✓ demo/01-a done") {
+ 		t.Fatalf("missing concise summary:\n%s", out)
+ 	}
+ 	if strings.Count(out, "STATUS") != 1 {
+@@ -332,6 +332,36 @@ func TestRunTaskYesPrintsConciseSummary(t *testing.T) {
+ 	}
+ }
+ 
++// TestRunTaskPrintsCurrentCheckoutLine asserts a single-task file run states
++// the checkout it runs in before the status table, and prints no Drain header
++// because it has no drain.
++func TestRunTaskPrintsCurrentCheckoutLine(t *testing.T) {
++	env := setupExecutorFixture(t, false)
++	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
++		checkTask: true,
++		summary:   "done work",
++	})
++
++	var buf bytes.Buffer
++	opts := env.runOpts(true, agent)
++	opts.Output = &buf
++
++	if _, err := RunTaskWith(env.deps(), nil, nil, opts); err != nil {
++		t.Fatal(err)
++	}
++	out := buf.String()
++	line := strings.Index(out, "Running demo/01-a in current checkout ")
++	if line < 0 {
++		t.Fatalf("missing current-checkout line:\n%s", out)
++	}
++	if table := strings.Index(out, "STATUS"); table < line {
++		t.Fatalf("current-checkout line must precede the status table:\n%s", out)
++	}
++	if strings.Contains(out, "Draining ") || strings.Contains(out, "\033[") {
++		t.Fatalf("single-task run printed a Drain header or ANSI:\n%s", out)
++	}
++}
++
+ func TestRunTaskInteractivePrintsRefreshedTable(t *testing.T) {
+ 	env := setupExecutorFixture(t, true)
+ 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+diff --git a/tasks/implement/run.go b/tasks/implement/run.go
+index 96212e24..b2cee699 100644
+--- a/tasks/implement/run.go
++++ b/tasks/implement/run.go
+@@ -4,6 +4,7 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"io"
++	"os"
+ 	"strings"
+ 	"time"
+ 
+@@ -56,8 +57,8 @@ type RuntimeConfirmOptions struct {
+ 	Yes        bool
+ 	ConfirmIn  io.Reader
+ 	ConfirmOut io.Writer
+-	// Output receives the drain-at-binding location report. When nil, the report
+-	// is discarded (tests that only assert ResolveInput may omit it).
++	// Output receives the Drain header. When nil, the header is discarded (tests
++	// that only assert ResolveInput may omit it).
+ 	Output io.Writer
+ }
+ 
+@@ -71,11 +72,15 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
+ 	if d == nil {
+ 		d = DefaultDeps()
+ 	}
++	out := opts.Output
++	if out == nil {
++		out = os.Stdout
++	}
+ 	resolveInput, err := resolveTaskSetRuntime(d, opts.ResolveInput, opts.TaskSetOverride, opts.InWorktree, opts.ForceRebind, RuntimeConfirmOptions{
+ 		Yes:        opts.Yes,
+ 		ConfirmIn:  opts.ConfirmIn,
+ 		ConfirmOut: opts.ConfirmOut,
+-		Output:     opts.Output,
++		Output:     out,
+ 	})
+ 	if err != nil {
+ 		return nil, err
+@@ -99,7 +104,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
+ 		Yes:                    opts.Yes,
+ 		ConfirmIn:              opts.ConfirmIn,
+ 		ConfirmOut:             opts.ConfirmOut,
+-		Output:                 opts.Output,
++		Output:                 out,
+ 		BindCheckout:           bindCheckout(d),
+ 		RefreshManagedCheckout: refreshManagedCheckout(d),
+ 		PreSeedTopic:           opts.PreSeedTopic,
+@@ -122,27 +127,43 @@ func ResolveTaskSetRuntimeWith(d *Deps, in tasks.ResolveInput, taskSetPath strin
+ 	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, false, confirm)
+ }
+ 
++// resolveTaskSetRuntime routes the drain and prints its Drain header, so every
++// whole-set run states where it drains before the status table.
+ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, forceRebind bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
+-	resolved, err := tasks.ResolvePathsWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, in)
++	in, header, err := routeTaskSetRuntime(d, in, taskSetPath, inWorktree, forceRebind, confirm)
+ 	if err != nil {
+ 		return in, err
+ 	}
++	out := confirm.Output
++	if out == nil {
++		out = io.Discard
++	}
++	header.Print(out)
++	return in, nil
++}
++
++func routeTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, forceRebind bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, tasks.DrainHeader, error) {
++	var header tasks.DrainHeader
++	resolved, err := tasks.ResolvePathsWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, in)
++	if err != nil {
++		return in, header, err
++	}
+ 	refresh, err := tasks.RefreshWith(d.tasksDeps(), resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
+ 	if err != nil {
+-		return in, err
++		return in, header, err
+ 	}
+ 	taskSetOverride, err := tasks.ResolveTaskSetTarget(refresh, taskSetPath)
+ 	if err != nil {
+-		return in, err
++		return in, header, err
+ 	}
+ 	if taskSetOverride != "" {
+ 		if err := tasks.RejectArchivedTaskSet(d.tasksDeps(), tasks.StatePathFor(resolved.DefinitionPath), resolved.DefinitionPath, taskSetOverride); err != nil {
+-			return in, err
++			return in, header, err
+ 		}
+ 	}
+ 	taskSetID, _, err := tasks.SelectTaskSet(refresh, taskSetOverride)
+ 	if err != nil {
+-		return in, err
++		return in, header, err
+ 	}
+ 
+ 	started, progress := taskSetRowInfo(refresh, taskSetID)
+@@ -152,7 +173,7 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
+ 
+ 	key, existing, bound, err := binding.GetForSet(td, resolved.ProjectPath, taskSetID)
+ 	if err != nil {
+-		return in, err
++		return in, header, err
+ 	}
+ 
+ 	confirmOut := confirm.ConfirmOut
+@@ -168,18 +189,18 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
+ 	if inWorktree {
+ 		if bound {
+ 			if !forceRebind {
+-				return in, fmt.Errorf("tasks implement: task set %s is already bound; pass --force-rebind to retarget --in-worktree", taskSetID)
++				return in, header, fmt.Errorf("tasks implement: task set %s is already bound; pass --force-rebind to retarget --in-worktree", taskSetID)
+ 			}
+ 			confirmed, err := binding.AuthorizeLeavingBinding(td, d.projectDeps(), cfg, taskSetID, existing, key, started, progress, confirm.Yes, confirm.ConfirmIn, confirmOut, hooks)
+ 			if err != nil {
+-				return in, err
++				return in, header, err
+ 			}
+ 			if !confirmed {
+ 				inWorktree = false
+ 				forceRebind = false
+ 			} else {
+ 				if err := binding.Delete(td, key); err != nil {
+-					return in, err
++					return in, header, err
+ 				}
+ 				return provisionInWorktree(d, in, resolved.ProjectPath, taskSetID)
+ 			}
+@@ -191,12 +212,12 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
+ 	if bound && forceRebind {
+ 		differs, err := binding.CheckoutPathsDiffer(td, existing.RuntimePath, resolved.ProjectPath)
+ 		if err != nil {
+-			return in, err
++			return in, header, err
+ 		}
+ 		if differs {
+ 			confirmed, err := binding.AuthorizeLeavingBinding(td, d.projectDeps(), cfg, taskSetID, existing, key, started, progress, confirm.Yes, confirm.ConfirmIn, confirmOut, hooks)
+ 			if err != nil {
+-				return in, err
++				return in, header, err
+ 			}
+ 			if !confirmed {
+ 				forceRebind = false
+@@ -219,52 +240,37 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
+ 	})
+ 	if err != nil {
+ 		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
+-			return in, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", taskSetID, err)
++			return in, header, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", taskSetID, err)
+ 		}
+-		return in, err
++		return in, header, err
+ 	}
+ 
+ 	currentID, err := tasks.ResolveRepositoryIdentity(td, resolved.ProjectPath)
+ 	if err != nil {
+-		return in, err
++		return in, header, err
+ 	}
+ 	runtimeID, err := tasks.ResolveRepositoryIdentity(td, route.RuntimePath)
+ 	if err != nil {
+-		return in, err
++		return in, header, err
+ 	}
+ 	if currentID.CommonDir != runtimeID.CommonDir {
+-		return in, fmt.Errorf("task set %q belongs to a different repository than the current checkout (%s vs %s); run implement from a checkout of the set's repository",
++		return in, header, fmt.Errorf("task set %q belongs to a different repository than the current checkout (%s vs %s); run implement from a checkout of the set's repository",
+ 			taskSetID, currentID.CommonDir, runtimeID.CommonDir)
+ 	}
+ 
+ 	// Foreground implement never reaches the Queue-only worktree directive
+ 	// (ADR-0072), so ProvisionedManaged/AdoptedNamed are never set here. An
+ 	// existing binding wins regardless of cwd (ADR-0151): point the executor at
+-	// it and, when invoked from elsewhere, report where the drain actually runs.
++	// it; the Drain header names where the drain actually runs.
+ 	// --force-rebind re-points to the current checkout (Rebound). An unbound set's
+ 	// BoundDefault persists a binding to the current checkout — RuntimePath is that
+ 	// same checkout the executor already resolves, so it needs no re-pointing here.
+ 	if route.Rebound || route.UsedExistingBinding || route.ProvisionedManaged || route.AdoptedNamed || strings.TrimSpace(in.RuntimeOverride) != "" {
+ 		in.RuntimeOverride = route.RuntimePath
+ 	}
+-	if route.UsedExistingBinding && !route.Rebound {
+-		currentRuntime, err := tasks.ResolveRuntimePathWith(td, resolved.ProjectPath, "")
+-		if err != nil {
+-			return in, err
+-		}
+-		boundRuntime, err := tasks.ResolveRuntimePathWith(td, route.RuntimePath, "")
+-		if err != nil {
+-			return in, err
+-		}
+-		if boundRuntime != currentRuntime {
+-			out := confirm.Output
+-			if out == nil {
+-				out = io.Discard
+-			}
+-			fmt.Fprintf(out, "draining at bound checkout %s\n", route.RuntimePath)
+-		}
+-	}
+-	return in, nil
++	header, err = drainHeader(td, taskSetID, resolved.ProjectPath, route.RuntimePath, route.Binding)
++	header.BoundDefault = route.BoundDefault
++	return in, header, err
+ }
+ 
+ // provisionInWorktree implements `--in-worktree`: it forks a managed worktree
+@@ -272,31 +278,59 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
+ // the set, and points the drain at the new checkout. Callers retargeting an
+ // already-bound set must authorize leaving the binding and delete the old row
+ // before calling this helper.
+-func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID string) (tasks.ResolveInput, error) {
++func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID string) (tasks.ResolveInput, tasks.DrainHeader, error) {
+ 	td := d.tasksDeps()
+ 	cfg, _ := d.loadDefaultConfig()
+ 
+ 	key, _, bound, err := binding.GetForSet(td, projectPath, setID)
+ 	if err != nil {
+-		return in, err
++		return in, tasks.DrainHeader{}, err
+ 	}
+ 	if bound {
+-		return in, fmt.Errorf("tasks implement: task set %s is already bound", setID)
++		return in, tasks.DrainHeader{}, fmt.Errorf("tasks implement: task set %s is already bound", setID)
+ 	}
+ 
+ 	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), projectPath, setID, "HEAD", d.now())
+ 	if err != nil {
+-		return in, err
++		return in, tasks.DrainHeader{}, err
+ 	}
+ 	if id, err := tasks.ResolveRepositoryIdentity(td, projectPath); err == nil {
+ 		b.Project = binding.DetectProject(d.projectDeps(), td, cfg, id)
+ 	}
+ 	if err := binding.Put(td, key, b); err != nil {
+-		return in, err
++		return in, tasks.DrainHeader{}, err
+ 	}
+ 
+ 	in.RuntimeOverride = b.RuntimePath
+-	return in, nil
++	header, err := drainHeader(td, setID, projectPath, b.RuntimePath, b)
++	return in, header, err
++}
++
++// drainHeader describes where a routed drain runs: the set, its Runtime path,
++// the binding kind, and the invocation checkout when it is not the Runtime
++// path. b is the zero Binding when the drain runs at an unbound runtime
++// override.
++func drainHeader(td *tasks.Deps, setID, currentCheckout, runtimePath string, b binding.Binding) (tasks.DrainHeader, error) {
++	currentRuntime, err := tasks.ResolveRuntimePathWith(td, currentCheckout, "")
++	if err != nil {
++		return tasks.DrainHeader{}, err
++	}
++	drainRuntime, err := tasks.ResolveRuntimePathWith(td, runtimePath, "")
++	if err != nil {
++		return tasks.DrainHeader{}, err
++	}
++	header := tasks.DrainHeader{TaskSetID: setID, RuntimePath: drainRuntime}
++	switch {
++	case b.RuntimePath == "":
++	case b.Provisioned:
++		header.BindingKind = "managed"
++	default:
++		header.BindingKind = "adopted"
++	}
++	if drainRuntime != currentRuntime {
++		header.InvokedFrom = currentRuntime
++	}
++	return header, nil
+ }
+ 
+ // bindCheckout returns the binding hook whole-set implement passes to the
+diff --git a/tasks/implement/run_test.go b/tasks/implement/run_test.go
+index dab40257..c5563c77 100644
+--- a/tasks/implement/run_test.go
++++ b/tasks/implement/run_test.go
+@@ -155,6 +155,52 @@ func TestResolveTaskSetRuntimeUnboundBindsCurrentCheckout(t *testing.T) {
+ 	}
+ }
+ 
++// TestResolveTaskSetRuntimeHeaderFromInsideBinding asserts a drain invoked from
++// inside its checkout prints the Drain header — set, Runtime path, binding kind
++// — with a just-recorded Default binding announced, no invoked-from line, and
++// no ANSI on redirected output.
++func TestResolveTaskSetRuntimeHeaderFromInsideBinding(t *testing.T) {
++	t.Parallel()
++	root, d := setupImplementFixture(t)
++	wantRoot, _ := filepath.EvalSymlinks(root)
++
++	var first bytes.Buffer
++	if _, err := ResolveTaskSetRuntimeWith(d, tasks.ResolveInput{CWD: root}, "demo", false, RuntimeConfirmOptions{Output: &first}); err != nil {
++		t.Fatalf("resolve runtime: %v", err)
++	}
++	want := "Draining demo at " + wantRoot + " (adopted binding)\n  binding recorded to current checkout\n"
++	if first.String() != want {
++		t.Fatalf("first header = %q, want %q", first.String(), want)
++	}
++
++	var second bytes.Buffer
++	if _, err := ResolveTaskSetRuntimeWith(d, tasks.ResolveInput{CWD: root}, "demo", false, RuntimeConfirmOptions{Output: &second}); err != nil {
++		t.Fatalf("resolve runtime again: %v", err)
++	}
++	if want := "Draining demo at " + wantRoot + " (adopted binding)\n"; second.String() != want {
++		t.Fatalf("resumed header = %q, want %q", second.String(), want)
++	}
++}
++
++// TestResolveTaskSetRuntimeHeaderNamesManagedWorktree asserts --in-worktree's
++// header names the managed binding and the checkout it was invoked from.
++func TestResolveTaskSetRuntimeHeaderNamesManagedWorktree(t *testing.T) {
++	t.Parallel()
++	root, d := setupImplementFixture(t)
++	wantRoot, _ := filepath.EvalSymlinks(root)
++
++	var report bytes.Buffer
++	resolved, err := ResolveTaskSetRuntimeWith(d, tasks.ResolveInput{CWD: root}, "demo", true, RuntimeConfirmOptions{Output: &report})
++	if err != nil {
++		t.Fatalf("resolve runtime: %v", err)
++	}
++	wantRuntime, _ := filepath.EvalSymlinks(resolved.RuntimeOverride)
++	want := "Draining demo at " + wantRuntime + " (managed binding)\n  invoked from " + wantRoot + "\n"
++	if report.String() != want {
++		t.Fatalf("header = %q, want %q", report.String(), want)
++	}
++}
++
+ // TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds asserts --in-worktree
+ // forks a managed worktree off the current checkout, records a provisioned
+ // binding, and points the drain at the new checkout (ADR-0072).
+@@ -307,8 +353,17 @@ func TestResolveTaskSetRuntimeBoundDrainsAtBindingFromOtherCheckout(t *testing.T
+ 	if resolved.RuntimeOverride != wt {
+ 		t.Fatalf("RuntimeOverride = %q, want bound checkout %q", resolved.RuntimeOverride, wt)
+ 	}
+-	if !strings.Contains(report.String(), "draining at bound checkout "+wt) {
+-		t.Fatalf("report = %q, want drain-at-binding location for %q", report.String(), wt)
++	wantRoot, _ := filepath.EvalSymlinks(root)
++	wantRuntime, _ := filepath.EvalSymlinks(wt)
++	header := report.String()
++	if !strings.Contains(header, "Draining demo at "+wantRuntime+" (adopted binding)\n") {
++		t.Fatalf("header = %q, want set, bound checkout %q and binding kind", header, wantRuntime)
++	}
++	if !strings.Contains(header, "invoked from "+wantRoot+"\n") {
++		t.Fatalf("header = %q, want invoked-from line for %q", header, wantRoot)
++	}
++	if strings.Contains(header, "binding recorded") || strings.Contains(header, "draining at bound checkout") {
++		t.Fatalf("header = %q, want no Default binding announcement and no retired report line", header)
+ 	}
+ 
+ 	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+@@ -485,8 +540,8 @@ func TestResolveTaskSetRuntimeForceRebindCleanSetRepoints(t *testing.T) {
+ 	if err != nil || !ok || b.RuntimePath != currentRuntime {
+ 		t.Fatalf("binding = %+v ok=%v, want rebind to %q", b, ok, currentRuntime)
+ 	}
+-	if out.String() != "" {
+-		t.Fatalf("unexpected output for clean rebind: %q", out.String())
++	if want := "Draining demo at " + currentRuntime + " (adopted binding)\n"; out.String() != want {
++		t.Fatalf("clean rebind output = %q, want only the Drain header %q", out.String(), want)
+ 	}
+ }
+ 
+diff --git a/tasks/output_test.go b/tasks/output_test.go
+index a04675c4..b8123cf7 100644
+--- a/tasks/output_test.go
++++ b/tasks/output_test.go
+@@ -24,6 +24,15 @@ func TestStyledTableUsesSemanticColor(t *testing.T) {
+ 	}
+ }
+ 
++func TestTaskResultLineColorsTheWholeLine(t *testing.T) {
++	var buf bytes.Buffer
++	sel := &Selection{TaskSetID: "demo", TaskID: "01-a"}
++	printTaskResultLine(&output{Writer: &buf, color: true}, sel, taskEndingQuotaPaused("claude"))
++	if got, want := buf.String(), ansiYellow+"◌ demo/01-a quota-paused (claude)"+ansiReset+"\n"; got != want {
++		t.Fatalf("result line = %q, want %q", got, want)
++	}
++}
++
+ func TestColorEnabledHonorsNoColor(t *testing.T) {
+ 	// ADR-0145: NO_COLOR reads os.Getenv directly — stays serial deliberately.
+ 	t.Setenv("NO_COLOR", "1")
+diff --git a/tasks/run_selected_task.go b/tasks/run_selected_task.go
+index 7fcc43a2..3e743dfe 100644
+--- a/tasks/run_selected_task.go
++++ b/tasks/run_selected_task.go
+@@ -97,6 +97,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
+ 	resolveSpec := newEffortSpecResolver(opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
+ 	taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, baseAgentPresets, resolveSpec, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays, r.agentProbeMemo)
+ 	if execErr != nil {
++		printTaskResultLine(out, sel, taskEndingForExecErr(execErr))
+ 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
+ 		if refreshErr == nil {
+ 			result.Refresh = afterRefresh
+@@ -152,6 +153,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
+ 			if len(presets) == 0 {
+ 				presets = []AgentProceedVerdict{*u}
+ 			}
++			printTaskResultLine(out, sel, taskEndingOutOfAgents)
+ 			result.ProceedVerdict = &presets[0]
+ 			// Carry the no-op fact up to the set-level result: the drain's own
+ 			// finalize reads it there, and a walk that started no agent records a
+@@ -164,6 +166,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
+ 		// park the drain, register a recovery waiter, and poll until the preset's
+ 		// cooldown elapses and a recovery turn is acquired. Both foreground and
+ 		// unattended drains enter the wait loop.
++		printTaskResultLine(out, sel, taskEndingQuotaPaused(u.Preset))
+ 		priority := 0
+ 		if row := findRow(currentRefresh, taskSetID); row != nil {
+ 			priority = row.Priority
+@@ -185,6 +188,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
+ 		return runTaskContinue, nil, nil
+ 	}
+ 
++	printTaskDone(d, out, taskResult)
+ 	result.Completed = append(result.Completed, taskResult)
+ 	return runTaskContinue, nil, nil
+ }
+diff --git a/tasks/run_tasks_test.go b/tasks/run_tasks_test.go
+index 7c53f1c1..21be7eee 100644
+--- a/tasks/run_tasks_test.go
++++ b/tasks/run_tasks_test.go
+@@ -1813,7 +1813,7 @@ func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {
+ 		"   Attempt 1/3",
+ 		"── Agent output",
+ 		"── Agent finished for demo/01-a",
+-		"✓ Completed demo/01-a",
++		"✓ demo/01-a done",
+ 		"✓ Completed task set demo",
+ 	} {
+ 		if !strings.Contains(out, want) {
+@@ -1823,8 +1823,11 @@ func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {
+ 	if strings.Contains(out, "\033[") {
+ 		t.Fatalf("redirected output contains ANSI:\n%q", out)
+ 	}
+-	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed task set demo") {
+-		t.Fatalf("missing concise summary:\n%s", out)
++	if !strings.Contains(out, "✓ demo/01-a done\n  No implementation commit (verified no-op)\n") {
++		t.Fatalf("result line not followed by its commit detail:\n%s", out)
++	}
++	if got := strings.Count(out, "demo/01-a done"); got != 1 || strings.Contains(out, "Completed demo/01-a") {
++		t.Fatalf("want exactly one result line for demo/01-a, got %d:\n%s", got, out)
+ 	}
+ 	if strings.Count(out, "STATUS") != 1 {
+ 		t.Fatalf("expected pre-run table only:\n%s", out)
+@@ -2956,13 +2959,17 @@ func TestRunTaskSetInterruptionPropagation(t *testing.T) {
+ 	})
+ 	agent := writeSlowAgent(t, env.root, 10*time.Second)
+ 
+-	opts := env.runTaskSetOpts(true, agent, nil)
++	var buf bytes.Buffer
++	opts := env.runTaskSetOpts(true, agent, &buf)
+ 	opts.Timeout = time.Minute
+ 	signalOwnPidWhenAgentStarts(t, env.root)
+ 
+ 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+ 	assertExitCode(t, err, ExitInterrupted)
+ 	assertTaskOpen(t, env.execFixture(), "01-a")
++	if got := strings.Count(buf.String(), "◌ demo/01-a interrupted"); got != 1 {
++		t.Fatalf("interrupted result lines = %d, want 1:\n%s", got, buf.String())
++	}
+ }
+ 
+ func TestRunTaskSetClearsAutoDrainOnDone(t *testing.T) {
+diff --git a/tasks/task_result_line.go b/tasks/task_result_line.go
+new file mode 100644
+index 00000000..4f6881de
+--- /dev/null
++++ b/tasks/task_result_line.go
+@@ -0,0 +1,60 @@
++package tasks
++
++import (
++	"fmt"
++	"io"
++)
++
++// taskEnding is how one task's run in a drain ended, as its Task result line
++// says it: the glyph and the color tell done, stopped and paused apart at a
++// glance, and the outcome word says which. Blocked and Deferred are set-level
++// endings and never take this form.
++type taskEnding struct {
++	style   string
++	glyph   string
++	outcome string
++}
++
++var (
++	taskEndingDone        = taskEnding{style: ansiGreen, glyph: "✓", outcome: "done"}
++	taskEndingFailed      = taskEnding{style: ansiRed, glyph: "✗", outcome: "failed"}
++	taskEndingOutOfAgents = taskEnding{style: ansiRed, glyph: "✗", outcome: "out of agents (left open)"}
++	taskEndingInterrupted = taskEnding{style: ansiYellow, glyph: "◌", outcome: "interrupted"}
++)
++
++func taskEndingQuotaPaused(preset string) taskEnding {
++	return taskEnding{style: ansiYellow, glyph: "◌", outcome: fmt.Sprintf("quota-paused (%s)", preset)}
++}
++
++// taskEndingForExecErr names the ending an attempt walk that returned an error
++// stopped on. An interrupt and a walk that left the task Open stop the drain
++// without failing the task; every other error is a failure.
++func taskEndingForExecErr(err error) taskEnding {
++	if isInterrupted(err) {
++		return taskEndingInterrupted
++	}
++	if fault, exhausted := exhaustedWalkFault(err); exhausted && fault.leavesTaskOpen() {
++		return taskEndingOutOfAgents
++	}
++	return taskEndingFailed
++}
++
++// printTaskResultLine prints the one stdout line that closes a task's run. It
++// writes nothing to the Work journal.
++func printTaskResultLine(w io.Writer, sel *Selection, ending taskEnding) {
++	outputFor(w).line(ending.style, "%s %s/%s %s", ending.glyph, sel.TaskSetID, sel.TaskID, ending.outcome)
++}
++
++// printTaskDone closes a completed task: its green result line, the
++// implementation commit beneath it, then the timing of every attempt the task
++// had.
++func printTaskDone(d *Deps, w io.Writer, result *RunTaskResult) {
++	out := outputFor(w)
++	printTaskResultLine(out, result.Selection, taskEndingDone)
++	if result.NoOp {
++		fmt.Fprintln(out, "  No implementation commit (verified no-op)")
++	} else if result.CommitSHA != "" {
++		fmt.Fprintf(out, "  Implementation commit: %s\n", result.CommitSHA[:min(12, len(result.CommitSHA))])
++	}
++	printAttemptBreakdown(d, out, result.attemptStreams)
++}
+diff --git a/tasks/timings_test.go b/tasks/timings_test.go
+index 6b86c7fc..554084cc 100644
+--- a/tasks/timings_test.go
++++ b/tasks/timings_test.go
+@@ -828,7 +828,7 @@ func TestRunTaskPrintsInlineBreakdownOnDone(t *testing.T) {
+ 	}
+ 	out := buf.String()
+ 
+-	summary, heading := strings.Index(out, "✓ Completed demo/01-a"), strings.Index(out, "Attempt timing")
++	summary, heading := strings.Index(out, "✓ demo/01-a done"), strings.Index(out, "Attempt timing")
+ 	if summary == -1 || heading == -1 || heading < summary {
+ 		t.Fatalf("breakdown not after completion summary:\n%s", out)
+ 	}
+diff --git a/tasks/turn_cap_exhaustion_test.go b/tasks/turn_cap_exhaustion_test.go
+index 06c04ab6..d142e693 100644
+--- a/tasks/turn_cap_exhaustion_test.go
++++ b/tasks/turn_cap_exhaustion_test.go
+@@ -204,6 +204,9 @@ func TestDrainFailsTheTaskWhenTheLastTryEndsAtTheTurnCap(t *testing.T) {
+ 	if !strings.Contains(err.Error(), "stopped at its 4-turn cap on attempt 2") {
+ 		t.Fatalf("failure = %v, want the cap named as the reason", err)
+ 	}
++	if got := strings.Count(buf.String(), "✗ demo/01-a failed"); got != 1 {
++		t.Fatalf("failed result lines = %d, want 1:\n%s", got, buf.String())
++	}
+ 	assertTaskFailed(t, env.execFixture(), "01-a", 2)
+ 
+ 	runtimePath, err := ResolveRuntimePathWith(d, env.root, "")

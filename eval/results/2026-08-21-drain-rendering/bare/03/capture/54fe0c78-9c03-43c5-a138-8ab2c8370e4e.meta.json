@@ -1,0 +1,13 @@
+{
+  "run_id": "54fe0c78-9c03-43c5-a138-8ab2c8370e4e",
+  "phase": "eval",
+  "task_set_id": "",
+  "task_id": "",
+  "task_file": "",
+  "start_time": "2026-10-10T09:08:29.455176Z",
+  "end_time": "2026-10-10T09:23:01.895099Z",
+  "outcome": "completed",
+  "agent": "claude",
+  "requested_agent": "claude --model \"opus\"",
+  "attempt": 1
+}

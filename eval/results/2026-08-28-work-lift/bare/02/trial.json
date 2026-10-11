@@ -1,0 +1,722 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "8505573c5dec3d658405730460633cc864f4f57dfb77b40df6d5f692db1ee29d",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t66.222s\nok  \tgithub.com/glebglazov/pop/config\t1.883s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.661s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t71.578s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.125s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.496s\nok  \tgithub.com/glebglazov/pop/integrate\t55.485s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.146s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.570s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.851s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.070s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.198s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t8.977s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.625s\nok  \tgithub.com/glebglazov/pop/layout\t2.545s\nok  \tgithub.com/glebglazov/pop/monitor\t4.532s\nok  \tgithub.com/glebglazov/pop/project\t3.281s\nok  \tgithub.com/glebglazov/pop/release\t2.149s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.156s\nok  \tgithub.com/glebglazov/pop/routine\t16.713s\nok  \tgithub.com/glebglazov/pop/store\t5.053s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t20.982s\nok  \tgithub.com/glebglazov/pop/tasks\t124.045s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t26.917s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.146s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t41.043s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t5.011s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.773s\nok  \tgithub.com/glebglazov/pop/ui\t6.736s\nok  \tgithub.com/glebglazov/pop/wayfinder\t3.053s\nok  \tgithub.com/glebglazov/pop/work\t1.203s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.757s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t68.052s\nok  \tgithub.com/glebglazov/pop/config\t1.301s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.637s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t74.141s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.267s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.262s\nok  \tgithub.com/glebglazov/pop/integrate\t54.961s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.218s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.384s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.638s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t3.908s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.035s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.048s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.095s\nok  \tgithub.com/glebglazov/pop/layout\t3.349s\nok  \tgithub.com/glebglazov/pop/monitor\t4.275s\nok  \tgithub.com/glebglazov/pop/project\t3.676s\nok  \tgithub.com/glebglazov/pop/release\t2.289s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.273s\nok  \tgithub.com/glebglazov/pop/routine\t19.005s\nok  \tgithub.com/glebglazov/pop/store\t5.181s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t19.945s\nok  \tgithub.com/glebglazov/pop/tasks\t124.646s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t30.073s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.396s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t40.616s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t3.646s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.163s\nok  \tgithub.com/glebglazov/pop/ui\t6.564s\nok  \tgithub.com/glebglazov/pop/wayfinder\t1.992s\nok  \tgithub.com/glebglazov/pop/work\t0.908s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.979s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Lift flows from preset decoding through build options to row ordering and marking."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Only the shipped active preset declares Lift true."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "The pin alias sets Lift without warnings or deprecation findings."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "When both keys appear, lift determines the grant."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "Omitting both spellings leaves Lift false."
+        },
+        {
+          "item": 6,
+          "met": false,
+          "reason": "A non-bool pin produces no finding when lift is also present because decoding stops after lift."
+        },
+        {
+          "item": 7,
+          "met": false,
+          "reason": "The assertNothingPinned helper remains in dashboardshell/work_lift_test.go and names derived ordering as pinning."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "The diff preserves the manual and unrelated pin terminology and behavior."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "The field metadata and shipped grant use lift; pin is retained only for decoding compatibility."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Repository attribution covers sibling worktrees, with a real-worktree regression test."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Checkout attribution returns before repository attribution and retains its existing ranking."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Task-set tags retain first-pass precedence over repository work."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Repository candidates include both bound and unbound Task sets."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Repository candidates are filtered by canonical git common directory."
+        },
+        {
+          "item": 15,
+          "met": false,
+          "reason": "Both kinds discard duplicate IDs across repositories, and cursor keys still collide on identical project names and IDs."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "Missing or unknown repository identities yield no attribution, lifted rows, or status message."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "The repository pass concatenates every answering kind, explicitly tested with Task sets and Maps."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Launch resolves repository identity once; a counting git seam asserts no additional attribution calls over five rebuilds."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Status builds use empty pane facts, with a test rejecting repository-attribution git calls."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Attribution cannot reintroduce rows removed by the preset, and narrowing remains unchanged."
+        },
+        {
+          "item": 21,
+          "met": true,
+          "reason": "Repository locality selects active, non-broken Maps; shipped preset filtering prevents hidden Maps from lifting."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "Combined attribution lifts Task sets before Maps, covered by a concrete two-kind snapshot test."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Map session stamps return before the weaker repository pass, with regression coverage."
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "Routines implement neither locality seam, and an explicit comment explains the deliberate asymmetry."
+        }
+      ],
+      "list_ratio": 0.875,
+      "quality": 3,
+      "rationale": "Clear architecture and substantial regression coverage, but repository collisions, incomplete alias validation, and a missed rename leave acceptance gaps."
+    },
+    "samples": [
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "9899d479-ef89-4d9c-95c9-13b523c02834",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 798123,
+              "Output": 2475,
+              "CacheRead": 705792,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 12,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 102685,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Lift flows from preset decoding through build options to row ordering and marking.\nITEM 2 MET: Only the shipped active preset declares Lift true.\nITEM 3 MET: The pin alias sets Lift without warnings or deprecation findings.\nITEM 4 MET: When both keys appear, lift determines the grant.\nITEM 5 MET: Omitting both spellings leaves Lift false.\nITEM 6 NOT_MET: A non-bool pin produces no finding when lift is also present because decoding stops after lift.\nITEM 7 NOT_MET: The assertNothingPinned helper remains in dashboardshell/work_lift_test.go and names derived ordering as pinning.\nITEM 8 MET: The diff preserves the manual and unrelated pin terminology and behavior.\nITEM 9 MET: The field metadata and shipped grant use lift; pin is retained only for decoding compatibility.\nITEM 10 MET: Repository attribution covers sibling worktrees, with a real-worktree regression test.\nITEM 11 MET: Checkout attribution returns before repository attribution and retains its existing ranking.\nITEM 12 MET: Task-set tags retain first-pass precedence over repository work.\nITEM 13 MET: Repository candidates include both bound and unbound Task sets.\nITEM 14 MET: Repository candidates are filtered by canonical git common directory.\nITEM 15 NOT_MET: Both kinds discard duplicate IDs across repositories, and cursor keys still collide on identical project names and IDs.\nITEM 16 MET: Missing or unknown repository identities yield no attribution, lifted rows, or status message.\nITEM 17 MET: The repository pass concatenates every answering kind, explicitly tested with Task sets and Maps.\nITEM 18 MET: Launch resolves repository identity once; a counting git seam asserts no additional attribution calls over five rebuilds.\nITEM 19 MET: Status builds use empty pane facts, with a test rejecting repository-attribution git calls.\nITEM 20 MET: Attribution cannot reintroduce rows removed by the preset, and narrowing remains unchanged.\nITEM 21 MET: Repository locality selects active, non-broken Maps; shipped preset filtering prevents hidden Maps from lifting.\nITEM 22 MET: Combined attribution lifts Task sets before Maps, covered by a concrete two-kind snapshot test.\nITEM 23 MET: Map session stamps return before the weaker repository pass, with regression coverage.\nITEM 24 MET: Routines implement neither locality seam, and an explicit comment explains the deliberate asymmetry.\nQUALITY 3: Clear architecture and substantial regression coverage, but repository collisions, incomplete alias validation, and a missed rename leave acceptance gaps.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Lift flows from preset decoding through build options to row ordering and marking."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Only the shipped active preset declares Lift true."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The pin alias sets Lift without warnings or deprecation findings."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "When both keys appear, lift determines the grant."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Omitting both spellings leaves Lift false."
+            },
+            {
+              "item": 6,
+              "met": false,
+              "reason": "A non-bool pin produces no finding when lift is also present because decoding stops after lift."
+            },
+            {
+              "item": 7,
+              "met": false,
+              "reason": "The assertNothingPinned helper remains in dashboardshell/work_lift_test.go and names derived ordering as pinning."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "The diff preserves the manual and unrelated pin terminology and behavior."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The field metadata and shipped grant use lift; pin is retained only for decoding compatibility."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Repository attribution covers sibling worktrees, with a real-worktree regression test."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Checkout attribution returns before repository attribution and retains its existing ranking."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Task-set tags retain first-pass precedence over repository work."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Repository candidates include both bound and unbound Task sets."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Repository candidates are filtered by canonical git common directory."
+            },
+            {
+              "item": 15,
+              "met": false,
+              "reason": "Both kinds discard duplicate IDs across repositories, and cursor keys still collide on identical project names and IDs."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Missing or unknown repository identities yield no attribution, lifted rows, or status message."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "The repository pass concatenates every answering kind, explicitly tested with Task sets and Maps."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Launch resolves repository identity once; a counting git seam asserts no additional attribution calls over five rebuilds."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Status builds use empty pane facts, with a test rejecting repository-attribution git calls."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Attribution cannot reintroduce rows removed by the preset, and narrowing remains unchanged."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Repository locality selects active, non-broken Maps; shipped preset filtering prevents hidden Maps from lifting."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Combined attribution lifts Task sets before Maps, covered by a concrete two-kind snapshot test."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Map session stamps return before the weaker repository pass, with regression coverage."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Routines implement neither locality seam, and an explicit comment explains the deliberate asymmetry."
+            }
+          ],
+          "list_ratio": 0.875,
+          "quality": 3,
+          "rationale": "Clear architecture and substantial regression coverage, but repository collisions, incomplete alias validation, and a missed rename leave acceptance gaps."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "89507bcc-4567-4764-8d30-80d4951deb2b",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 857476,
+              "Output": 2273,
+              "CacheRead": 765440,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 13,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 102120,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: The lift field reaches LiftPane and enables derived row ordering.\nITEM 2 MET: Only the shipped active preset grants lift.\nITEM 3 MET: Boolean pin decodes silently into the same Lift field.\nITEM 4 MET: Decoding checks lift first and gives it precedence.\nITEM 5 MET: Omitting both spellings leaves Lift false.\nITEM 6 NOT_MET: When lift is present, a non-bool pin is ignored without a config finding.\nITEM 7 NOT_MET: assertNothingPinned remains an identifier for derived ordering in dashboardshell/work_lift_test.go.\nITEM 8 MET: The diff preserves the manual and unrelated pin senses.\nITEM 9 MET: The field description, serialization tag and shipped grant use lift; pin is a read alias.\nITEM 10 MET: Repository attribution lifts bound sets from sibling worktrees, with integration coverage.\nITEM 11 MET: Checkout attribution returns before the repository pass and retains existing ranking.\nITEM 12 MET: Task-set tags retain precedence over checkout and repository answers.\nITEM 13 MET: Repository candidates include both bound and unbound Task sets.\nITEM 14 MET: Repository candidates are matched using RepoCommonDir.\nITEM 15 NOT_MET: ID-only indexes discard duplicate identifiers across repositories, and project-name-based cursor keys collide.\nITEM 16 MET: Missing or unknown repositories produce no attribution, lift or status message.\nITEM 17 MET: The repository pass concatenates every answering kind, tested with Task sets and Maps.\nITEM 18 MET: Launch resolves the repository once; a counting git seam verifies no additional resolution across five rebuilds.\nITEM 19 MET: Status uses empty pane facts, with coverage rejecting attribution-related git calls.\nITEM 20 MET: Lifting only moves admitted rows and preserves preset narrowing.\nITEM 21 MET: Repository locality selects active, non-broken Maps; shipped filtering prevents archived Maps from lifting.\nITEM 22 MET: Repository answers combine Task sets and Maps with Task sets first, covered by a combined snapshot test.\nITEM 23 MET: Map session attribution returns before repository attribution, with regression coverage.\nITEM 24 MET: Routines implement no locality attribution, and a comment explicitly explains the deliberate asymmetry.\nQUALITY 3: Clear attribution seams and substantial regression coverage, but repository identity collisions, incomplete validation and a missed rename prevent a higher rating.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "The lift field reaches LiftPane and enables derived row ordering."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Only the shipped active preset grants lift."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Boolean pin decodes silently into the same Lift field."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Decoding checks lift first and gives it precedence."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Omitting both spellings leaves Lift false."
+            },
+            {
+              "item": 6,
+              "met": false,
+              "reason": "When lift is present, a non-bool pin is ignored without a config finding."
+            },
+            {
+              "item": 7,
+              "met": false,
+              "reason": "assertNothingPinned remains an identifier for derived ordering in dashboardshell/work_lift_test.go."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "The diff preserves the manual and unrelated pin senses."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The field description, serialization tag and shipped grant use lift; pin is a read alias."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Repository attribution lifts bound sets from sibling worktrees, with integration coverage."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Checkout attribution returns before the repository pass and retains existing ranking."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Task-set tags retain precedence over checkout and repository answers."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Repository candidates include both bound and unbound Task sets."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Repository candidates are matched using RepoCommonDir."
+            },
+            {
+              "item": 15,
+              "met": false,
+              "reason": "ID-only indexes discard duplicate identifiers across repositories, and project-name-based cursor keys collide."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Missing or unknown repositories produce no attribution, lift or status message."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "The repository pass concatenates every answering kind, tested with Task sets and Maps."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Launch resolves the repository once; a counting git seam verifies no additional resolution across five rebuilds."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Status uses empty pane facts, with coverage rejecting attribution-related git calls."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Lifting only moves admitted rows and preserves preset narrowing."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Repository locality selects active, non-broken Maps; shipped filtering prevents archived Maps from lifting."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Repository answers combine Task sets and Maps with Task sets first, covered by a combined snapshot test."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Map session attribution returns before repository attribution, with regression coverage."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Routines implement no locality attribution, and a comment explicitly explains the deliberate asymmetry."
+            }
+          ],
+          "list_ratio": 0.875,
+          "quality": 3,
+          "rationale": "Clear attribution seams and substantial regression coverage, but repository identity collisions, incomplete validation and a missed rename prevent a higher rating."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "2545490d-2771-447e-8158-23e9c2483e9f",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 724106,
+              "Output": 2426,
+              "CacheRead": 647040,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 12,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 93362,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Lift flows from the preset through build options to row ordering and marking.\nITEM 2 MET: Only the shipped active preset enables Lift.\nITEM 3 MET: Boolean pin silently decodes into the same Lift field.\nITEM 4 MET: The decoder checks lift first, giving it precedence.\nITEM 5 MET: Neither spelling leaves Lift false.\nITEM 6 NOT_MET: When lift is present, a non-boolean pin is ignored without a finding.\nITEM 7 NOT_MET: assertNothingPinned remains an identifier for derived ordering in dashboardshell/work_lift_test.go.\nITEM 8 MET: The diff preserves the specified manual and unrelated pin terminology.\nITEM 9 MET: The field, description, serialization key, and shipped grant use lift.\nITEM 10 MET: Repository attribution connects sibling worktrees to bound sets, with integration coverage.\nITEM 11 MET: Checkout attribution returns before the repository pass, preserving its existing ranking.\nITEM 12 MET: Task-set tags retain precedence over repository attribution.\nITEM 13 MET: Repository candidates include both bound and unbound Task sets.\nITEM 14 MET: Repository candidate matching compares git common directories.\nITEM 15 NOT_MET: ID-only indexes discard duplicate containers across repositories, and project-name-based cursor keys still collide.\nITEM 16 MET: Missing or unmatched repository identities yield no attribution or message.\nITEM 17 MET: The repository pass concatenates kind answers, explicitly tested with two answering kinds.\nITEM 18 MET: Launch resolves and carries repository identity; a counting seam asserts one query across five rebuilds.\nITEM 19 MET: Status builds omit pane attribution; its test rejects attribution-related git queries.\nITEM 20 MET: Lifting operates only on admitted rows, with coverage for hidden repository-attributed sets.\nITEM 21 MET: Repository attribution selects active, non-broken Maps; shipped preset filtering prevents archived Maps from lifting.\nITEM 22 MET: Repository answers combine Task sets before Maps, with concrete cross-kind coverage.\nITEM 23 MET: Map session stamps resolve before locality, with a regression test.\nITEM 24 MET: Routines implement no locality seam, and a comment explicitly explains the deliberate asymmetry.\nQUALITY 3: Clear seams and substantial regression coverage, but repository collisions, incomplete alias validation, and a missed rename leave acceptance gaps.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Lift flows from the preset through build options to row ordering and marking."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Only the shipped active preset enables Lift."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Boolean pin silently decodes into the same Lift field."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "The decoder checks lift first, giving it precedence."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Neither spelling leaves Lift false."
+            },
+            {
+              "item": 6,
+              "met": false,
+              "reason": "When lift is present, a non-boolean pin is ignored without a finding."
+            },
+            {
+              "item": 7,
+              "met": false,
+              "reason": "assertNothingPinned remains an identifier for derived ordering in dashboardshell/work_lift_test.go."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "The diff preserves the specified manual and unrelated pin terminology."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The field, description, serialization key, and shipped grant use lift."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Repository attribution connects sibling worktrees to bound sets, with integration coverage."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Checkout attribution returns before the repository pass, preserving its existing ranking."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Task-set tags retain precedence over repository attribution."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Repository candidates include both bound and unbound Task sets."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Repository candidate matching compares git common directories."
+            },
+            {
+              "item": 15,
+              "met": false,
+              "reason": "ID-only indexes discard duplicate containers across repositories, and project-name-based cursor keys still collide."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Missing or unmatched repository identities yield no attribution or message."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "The repository pass concatenates kind answers, explicitly tested with two answering kinds."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Launch resolves and carries repository identity; a counting seam asserts one query across five rebuilds."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Status builds omit pane attribution; its test rejects attribution-related git queries."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Lifting operates only on admitted rows, with coverage for hidden repository-attributed sets."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Repository attribution selects active, non-broken Maps; shipped preset filtering prevents archived Maps from lifting."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Repository answers combine Task sets before Maps, with concrete cross-kind coverage."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Map session stamps resolve before locality, with a regression test."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Routines implement no locality seam, and a comment explicitly explains the deliberate asymmetry."
+            }
+          ],
+          "list_ratio": 0.875,
+          "quality": 3,
+          "rationale": "Clear seams and substantial regression coverage, but repository collisions, incomplete alias validation, and a missed rename leave acceptance gaps."
+        }
+      }
+    ]
+  },
+  "case": "2026-08-28-work-lift",
+  "arm": "bare",
+  "repeat": 2,
+  "attempts": 1,
+  "model": "opus",
+  "parent_commit": "a0b86ff539eae8c9a4fce8dfc5dbbbe345a79cc9",
+  "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+  "actual_model": "claude-opus-5-5",
+  "started_at": "2026-10-10T00:56:23.715971Z",
+  "ended_at": "2026-10-10T01:14:34.959672Z",
+  "outcome": "completed",
+  "agent_outcome": "completed",
+  "run_id": "b6573327-25b6-4b71-8832-a1e74bf2109c",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-2462734799",
+  "spend": {
+    "Tokens": {
+      "Input": 154,
+      "Output": 55287,
+      "CacheRead": 11282965,
+      "CacheWrite": 226342,
+      "HasInput": true,
+      "HasOutput": true,
+      "HasCacheRead": true,
+      "HasCacheWrite": true
+    },
+    "Cost": {
+      "Dollars": 5.173685000000001,
+      "HasCost": true
+    },
+    "Turns": {
+      "Count": 76,
+      "HasTurn": true
+    },
+    "PeakInput": {
+      "Tokens": 238212,
+      "HasPeak": true
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 5.173685000000001,
+      "HasCost": true
+    },
+    "RateSource": "",
+    "ModelKey": "anthropic/claude-opus-5-5",
+    "ModelKeySource": "actual"
+  }
+}

@@ -1,0 +1,622 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "1015113e3689428b5b3b00ae3f40df0f481513c42be577823cc58e3e241a28f5",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": "go: downloading gopkg.in/yaml.v3 v3.0.1\ngo: downloading github.com/spf13/cobra v1.10.2\ngo: downloading github.com/spf13/pflag v1.0.9\n"
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t73.395s\nok  \tgithub.com/glebglazov/pop/config\t1.786s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.318s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t79.809s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t0.936s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.333s\nok  \tgithub.com/glebglazov/pop/integrate\t59.891s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.271s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t1.572s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t2.172s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t1.872s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t2.941s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.128s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.747s\nok  \tgithub.com/glebglazov/pop/layout\t2.918s\nok  \tgithub.com/glebglazov/pop/monitor\t5.284s\nok  \tgithub.com/glebglazov/pop/project\t4.098s\nok  \tgithub.com/glebglazov/pop/release\t2.817s\nok  \tgithub.com/glebglazov/pop/repogroup\t3.047s\nok  \tgithub.com/glebglazov/pop/routine\t21.902s\nok  \tgithub.com/glebglazov/pop/store\t5.000s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t25.443s\nok  \tgithub.com/glebglazov/pop/tasks\t129.186s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t31.724s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.276s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t42.829s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t5.827s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.064s\nok  \tgithub.com/glebglazov/pop/ui\t6.187s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.472s\nok  \tgithub.com/glebglazov/pop/work\t1.279s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.460s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t71.855s\nok  \tgithub.com/glebglazov/pop/config\t4.614s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.771s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t77.425s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.863s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.687s\nok  \tgithub.com/glebglazov/pop/integrate\t56.988s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t6.847s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.711s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.001s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.213s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.356s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t8.414s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.229s\nok  \tgithub.com/glebglazov/pop/layout\t1.834s\nok  \tgithub.com/glebglazov/pop/monitor\t3.988s\nok  \tgithub.com/glebglazov/pop/project\t3.178s\nok  \tgithub.com/glebglazov/pop/release\t1.899s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.132s\nok  \tgithub.com/glebglazov/pop/routine\t15.131s\nok  \tgithub.com/glebglazov/pop/store\t3.552s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t19.804s\nok  \tgithub.com/glebglazov/pop/tasks\t121.652s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t31.166s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.019s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t41.971s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.678s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t2.757s\nok  \tgithub.com/glebglazov/pop/ui\t6.465s\nok  \tgithub.com/glebglazov/pop/wayfinder\t3.089s\nok  \tgithub.com/glebglazov/pop/work\t0.871s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.719s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Header precedes the status table and names the set, resolved Runtime path, and binding kind."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Whole-set setup prints the header regardless of invocation location."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "Canonical invocation and Runtime paths determine whether the “invoked from” line appears."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Routing carries BoundDefault into the binding-recorded announcement."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "The old conditional bound-checkout message is removed."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Single-task AFK execution prints the current-checkout path without a Drain header."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "The current-checkout line prints before the single-task HITL branch."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Successful whole-set execution prints one green done result."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "Commit SHA or verified no-op detail prints beneath the done result."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "The old completion printer is removed, with mutually exclusive result-printing branches."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Retry exhaustion that fails the task prints one red failed result."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Provider exhaustion preserves the open task and prints the distinct red left-open result."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Quota parking prints a yellow quota-paused result naming the selected preset."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Interrupted execution maps to the yellow interrupted result."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Blocked and Deferred remain set-level reports; executed tasks retain their own results."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "Attempt narration and exhaustion breakdown remain; successful attempt timing follows the result."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Both output helpers preserve complete lines and suppress ANSI for redirected output."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Result lines use the existing terminal-color helper, which honors NO_COLOR."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Header and result helpers write output without adding journal records."
+        }
+      ],
+      "list_ratio": 1,
+      "quality": 4,
+      "rationale": "Clear, focused implementation with useful tests; HITL, interruption, and Blocked/Deferred output integration coverage remains limited."
+    },
+    "samples": [
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "f1c962d8-2050-4a2e-8fae-cc5284b04aea",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 350571,
+              "Output": 1521,
+              "CacheRead": 284288,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 7,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 77454,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Header precedes the status table and names the set, resolved Runtime path, and binding kind.\nITEM 2 MET: Whole-set setup prints the header regardless of invocation location.\nITEM 3 MET: Canonical invocation and Runtime paths determine whether the “invoked from” line appears.\nITEM 4 MET: Routing carries BoundDefault into the binding-recorded announcement.\nITEM 5 MET: The old conditional bound-checkout message is removed.\nITEM 6 MET: Single-task AFK execution prints the current-checkout path without a Drain header.\nITEM 7 MET: The current-checkout line prints before the single-task HITL branch.\nITEM 8 MET: Successful whole-set execution prints one green done result.\nITEM 9 MET: Commit SHA or verified no-op detail prints beneath the done result.\nITEM 10 MET: The old completion printer is removed, with mutually exclusive result-printing branches.\nITEM 11 MET: Retry exhaustion that fails the task prints one red failed result.\nITEM 12 MET: Provider exhaustion preserves the open task and prints the distinct red left-open result.\nITEM 13 MET: Quota parking prints a yellow quota-paused result naming the selected preset.\nITEM 14 MET: Interrupted execution maps to the yellow interrupted result.\nITEM 15 MET: Blocked and Deferred remain set-level reports; executed tasks retain their own results.\nITEM 16 MET: Attempt narration and exhaustion breakdown remain; successful attempt timing follows the result.\nITEM 17 MET: Both output helpers preserve complete lines and suppress ANSI for redirected output.\nITEM 18 MET: Result lines use the existing terminal-color helper, which honors NO_COLOR.\nITEM 19 MET: Header and result helpers write output without adding journal records.\nQUALITY 4: Clear, focused implementation with useful tests; HITL, interruption, and Blocked/Deferred output integration coverage remains limited.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Header precedes the status table and names the set, resolved Runtime path, and binding kind."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Whole-set setup prints the header regardless of invocation location."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Canonical invocation and Runtime paths determine whether the “invoked from” line appears."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Routing carries BoundDefault into the binding-recorded announcement."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The old conditional bound-checkout message is removed."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Single-task AFK execution prints the current-checkout path without a Drain header."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "The current-checkout line prints before the single-task HITL branch."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Successful whole-set execution prints one green done result."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Commit SHA or verified no-op detail prints beneath the done result."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The old completion printer is removed, with mutually exclusive result-printing branches."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Retry exhaustion that fails the task prints one red failed result."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Provider exhaustion preserves the open task and prints the distinct red left-open result."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Quota parking prints a yellow quota-paused result naming the selected preset."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Interrupted execution maps to the yellow interrupted result."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Blocked and Deferred remain set-level reports; executed tasks retain their own results."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Attempt narration and exhaustion breakdown remain; successful attempt timing follows the result."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Both output helpers preserve complete lines and suppress ANSI for redirected output."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Result lines use the existing terminal-color helper, which honors NO_COLOR."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Header and result helpers write output without adding journal records."
+            }
+          ],
+          "list_ratio": 1,
+          "quality": 4,
+          "rationale": "Clear, focused implementation with useful tests; HITL, interruption, and Blocked/Deferred output integration coverage remains limited."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "0ba88c5c-1a2a-47cc-93f9-3f4c523e024a",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 448444,
+              "Output": 1625,
+              "CacheRead": 383744,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 9,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 75731,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Header precedes the status table and names the set, resolved runtime, and binding kind.\nITEM 2 MET: Header emission is unconditional during whole-set setup, including inside the bound checkout.\nITEM 3 MET: Canonical invocation and runtime paths determine whether the invoked-from line appears.\nITEM 4 MET: Routing propagates BoundDefault to the binding-recorded announcement.\nITEM 5 MET: The old conditional bound-checkout message is removed.\nITEM 6 MET: Single-task AFK execution prints the current-checkout path without a Drain header.\nITEM 7 MET: The current-checkout line prints before the single-task HITL branch.\nITEM 8 MET: Completed tasks emit one green done result through printTaskDone.\nITEM 9 MET: Commit SHA or verified-no-op detail prints beneath the done line.\nITEM 10 MET: The old completion printer is removed, with mutually exclusive result branches.\nITEM 11 MET: Exhausted retries that fail the task produce one red failed result.\nITEM 12 MET: Provider-exhausted walks retain open status and emit one red left-open result.\nITEM 13 MET: Quota parking emits a yellow quota-paused result naming the selected preset.\nITEM 14 MET: Interrupted execution errors emit the yellow interrupted result.\nITEM 15 MET: Blocked and Deferred remain set-level reporting paths without Task result lines.\nITEM 16 MET: Attempt failures, timing breakdowns, and exhausted-walk narration remain.\nITEM 17 MET: Shared output formatting preserves complete lines without ANSI for redirected output.\nITEM 18 MET: Task results use existing terminal coloring and NO_COLOR suppression.\nITEM 19 MET: Header and result helpers only write output; no journal rows are added.\nQUALITY 4: Clear, centralized rendering with useful tests; integration coverage is incomplete, and the supplied patch was not executed.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Header precedes the status table and names the set, resolved runtime, and binding kind."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Header emission is unconditional during whole-set setup, including inside the bound checkout."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Canonical invocation and runtime paths determine whether the invoked-from line appears."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Routing propagates BoundDefault to the binding-recorded announcement."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The old conditional bound-checkout message is removed."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Single-task AFK execution prints the current-checkout path without a Drain header."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "The current-checkout line prints before the single-task HITL branch."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Completed tasks emit one green done result through printTaskDone."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Commit SHA or verified-no-op detail prints beneath the done line."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The old completion printer is removed, with mutually exclusive result branches."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Exhausted retries that fail the task produce one red failed result."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Provider-exhausted walks retain open status and emit one red left-open result."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Quota parking emits a yellow quota-paused result naming the selected preset."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Interrupted execution errors emit the yellow interrupted result."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Blocked and Deferred remain set-level reporting paths without Task result lines."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Attempt failures, timing breakdowns, and exhausted-walk narration remain."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Shared output formatting preserves complete lines without ANSI for redirected output."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Task results use existing terminal coloring and NO_COLOR suppression."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Header and result helpers only write output; no journal rows are added."
+            }
+          ],
+          "list_ratio": 1,
+          "quality": 4,
+          "rationale": "Clear, centralized rendering with useful tests; integration coverage is incomplete, and the supplied patch was not executed."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "86e53bcc-7301-4450-9f4f-73445ee9da56",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 342707,
+              "Output": 1529,
+              "CacheRead": 279936,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 7,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 73988,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Header precedes the status table and includes set identifier, Runtime path, and binding kind.\nITEM 2 MET: Whole-set setup prints the header without a checkout-location condition.\nITEM 3 MET: Canonical invocation and Runtime paths determine whether the invoked-from line appears.\nITEM 4 MET: Routing propagates BoundDefault to the binding-recorded announcement.\nITEM 5 MET: The old conditional bound-checkout message is removed.\nITEM 6 MET: Single-task AFK execution prints the current-checkout path without a Drain header.\nITEM 7 MET: The current-checkout line prints before the single-task HITL branch.\nITEM 8 MET: Successful whole-set execution prints one green done result.\nITEM 9 MET: Commit SHA or verified no-op detail follows the green result.\nITEM 10 MET: The old completion printer is removed; mutually exclusive ending branches print results once.\nITEM 11 MET: Retry exhaustion that fails the task prints one red failed result.\nITEM 12 MET: Provider exhaustion preserves the open task and prints the distinct red left-open result.\nITEM 13 MET: Quota parking prints the yellow quota-paused result with the selected preset.\nITEM 14 MET: Interrupted execution maps to the yellow interrupted result.\nITEM 15 MET: Blocked and Deferred retain set-level reporting without generating task results.\nITEM 16 MET: Attempt failure narration, timing breakdowns, and exhausted-walk narration remain.\nITEM 17 MET: Shared output handling preserves complete lines and omits ANSI for redirected output.\nITEM 18 MET: Shared output handling enables terminal color and honors NO_COLOR.\nITEM 19 MET: Header and result printers add no journal writes.\nQUALITY 4: Clear, localized implementation with useful regression coverage; HITL, interruption, and terminal-color integration coverage could be stronger.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Header precedes the status table and includes set identifier, Runtime path, and binding kind."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Whole-set setup prints the header without a checkout-location condition."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Canonical invocation and Runtime paths determine whether the invoked-from line appears."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Routing propagates BoundDefault to the binding-recorded announcement."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The old conditional bound-checkout message is removed."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Single-task AFK execution prints the current-checkout path without a Drain header."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "The current-checkout line prints before the single-task HITL branch."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Successful whole-set execution prints one green done result."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Commit SHA or verified no-op detail follows the green result."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The old completion printer is removed; mutually exclusive ending branches print results once."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Retry exhaustion that fails the task prints one red failed result."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Provider exhaustion preserves the open task and prints the distinct red left-open result."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Quota parking prints the yellow quota-paused result with the selected preset."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Interrupted execution maps to the yellow interrupted result."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Blocked and Deferred retain set-level reporting without generating task results."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Attempt failure narration, timing breakdowns, and exhausted-walk narration remain."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Shared output handling preserves complete lines and omits ANSI for redirected output."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Shared output handling enables terminal color and honors NO_COLOR."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Header and result printers add no journal writes."
+            }
+          ],
+          "list_ratio": 1,
+          "quality": 4,
+          "rationale": "Clear, localized implementation with useful regression coverage; HITL, interruption, and terminal-color integration coverage could be stronger."
+        }
+      }
+    ]
+  },
+  "case": "2026-08-21-drain-rendering",
+  "arm": "bare",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "parent_commit": "7a2e65178433f3360e6482194fabb8ee2e3c42d2",
+  "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+  "actual_model": "claude-opus-5-5",
+  "started_at": "2026-10-04T00:38:45.148887Z",
+  "ended_at": "2026-10-04T00:47:06.72828Z",
+  "outcome": "completed",
+  "agent_outcome": "completed",
+  "run_id": "da599d50-f522-45fb-8c9f-b3bd889ed9b2",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-1958079602",
+  "spend": {
+    "Tokens": {
+      "Input": 80,
+      "Output": 33802,
+      "CacheRead": 4160399,
+      "CacheWrite": 145447,
+      "HasInput": true,
+      "HasOutput": true,
+      "HasCacheRead": true,
+      "HasCacheWrite": true
+    },
+    "Cost": {
+      "Dollars": 2.6720158000000005,
+      "HasCost": true
+    },
+    "Turns": {
+      "Count": 40,
+      "HasTurn": true
+    },
+    "PeakInput": {
+      "Tokens": 156148,
+      "HasPeak": true
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 2.6720158000000005,
+      "HasCost": true
+    },
+    "RateSource": "",
+    "ModelKey": "anthropic/claude-opus-5-5",
+    "ModelKeySource": "actual"
+  }
+}

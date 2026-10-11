@@ -1,0 +1,883 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "50b86322c7d3560934ad633824e2795780065db5bb4b5e2bf7b36c826b46b344",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t74.541s\nok  \tgithub.com/glebglazov/pop/config\t2.775s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.902s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t93.986s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.713s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.266s\nok  \tgithub.com/glebglazov/pop/integrate\t59.311s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.317s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.592s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.814s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t5.105s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t5.206s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.320s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t4.279s\nok  \tgithub.com/glebglazov/pop/layout\t3.202s\nok  \tgithub.com/glebglazov/pop/monitor\t4.703s\nok  \tgithub.com/glebglazov/pop/project\t3.365s\nok  \tgithub.com/glebglazov/pop/release\t2.196s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.213s\nok  \tgithub.com/glebglazov/pop/routine\t17.554s\nok  \tgithub.com/glebglazov/pop/store\t5.764s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t34.504s\nok  \tgithub.com/glebglazov/pop/tasks\t143.115s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t30.587s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.532s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t42.017s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t5.250s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.787s\nok  \tgithub.com/glebglazov/pop/ui\t6.785s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.495s\nok  \tgithub.com/glebglazov/pop/work\t1.179s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.010s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t77.518s\nok  \tgithub.com/glebglazov/pop/config\t1.619s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t6.471s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t93.573s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.258s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t2.823s\nok  \tgithub.com/glebglazov/pop/integrate\t57.284s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t9.380s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t4.840s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t5.536s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t5.736s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t5.865s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.866s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.751s\nok  \tgithub.com/glebglazov/pop/layout\t3.625s\nok  \tgithub.com/glebglazov/pop/monitor\t4.585s\nok  \tgithub.com/glebglazov/pop/project\t3.077s\nok  \tgithub.com/glebglazov/pop/release\t2.010s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.423s\nok  \tgithub.com/glebglazov/pop/routine\t20.647s\nok  \tgithub.com/glebglazov/pop/store\t5.091s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t35.047s\nok  \tgithub.com/glebglazov/pop/tasks\t142.609s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t32.041s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.453s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t45.300s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.841s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.925s\nok  \tgithub.com/glebglazov/pop/ui\t6.949s\nok  \tgithub.com/glebglazov/pop/wayfinder\t3.222s\nok  \tgithub.com/glebglazov/pop/work\t1.825s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.078s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Detail status menus use the container’s own status actions through the shared opener."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Detail `y` opens the container’s Copy menu without copying immediately."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "Detail `m` opens the Mute menu for the detail’s container."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Both views dispatch `I` through the shared runFlatI helper."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "The drain picker renders in the detail’s reserved modal block."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Direct `y` and `p` handlers are removed from document peeks."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Neither detail list handles flat `p`."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Existing item and artifact `r` menu routes remain intact, including peeks."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "The shared status refusal reaches the detail hint line through detailFlash."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "The shared copy refusal reaches the detail hint line through detailFlash."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "The shared mute refusal reaches the detail hint line through detailFlash."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Container menus occupy a Frame Block included in the list’s height budget."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Detail menus delegate navigation and dispatch to the existing row-menu handlers."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Menu Escape clears the menu while retaining the detail."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Detail openers bypass Selection and create singular container menus."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "Detail search narrows its lists, and Enter restores the detail keymap."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Shared filtering implements case-insensitive substring matching with AND across terms."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Item search fields contain only id, title and type."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Artifact filtering uses the shared grammar over name and type."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Escape discards the edit and reapplies the previously applied term."
+        },
+        {
+          "item": 21,
+          "met": true,
+          "reason": "Opening search initializes an empty buffer; applying it clears filtering."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "The typing handler forwards ordinary keys, including j, k, v and r, to TextField."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Detail refresh reapplies its active query to rebuilt items and artifacts."
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "The applied term appears in the detail’s persistent subheader."
+        },
+        {
+          "item": 25,
+          "met": true,
+          "reason": "Search-hidden lists display an empty-state message naming the query and clearing sequence.",
+          "split": true
+        },
+        {
+          "item": 26,
+          "met": true,
+          "reason": "Artifact availability uses the unfiltered collection, preserving switching after filtering."
+        },
+        {
+          "item": 27,
+          "met": true,
+          "reason": "Detail search state is separately owned and discarded when the detail closes."
+        },
+        {
+          "item": 28,
+          "met": true,
+          "reason": "Detail hints advertise r, s, y, m and / without flat copy bindings."
+        },
+        {
+          "item": 29,
+          "met": false,
+          "reason": "Unchanged documentPeekChrome still advertises “y copy name” and artifact “p copy path”."
+        },
+        {
+          "item": 30,
+          "met": true,
+          "reason": "Typing hints name only apply, cancel and help."
+        },
+        {
+          "item": 31,
+          "met": true,
+          "reason": "Detail help lists the required menus, I and search; peek help removes flat copy entries."
+        },
+        {
+          "item": 32,
+          "met": true,
+          "reason": "Help handles container menus over details and has a dedicated detail-search branch."
+        }
+      ],
+      "list_ratio": 0.96875,
+      "quality": 4,
+      "rationale": "Shared handlers and filtering keep the implementation coherent, with broad supplied tests; stale peek hints expose a missing rendering check."
+    },
+    "samples": [
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "3a7b4474-9c79-44d1-8557-65ccb1a76f63",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 607206,
+              "Output": 2236,
+              "CacheRead": 538112,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 11,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 85546,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Detail status menus use the container’s own status actions through the shared opener.\nITEM 2 MET: Detail `y` opens the container’s Copy menu without copying immediately.\nITEM 3 MET: Detail `m` opens the Mute menu for the detail’s container.\nITEM 4 MET: Both views dispatch `I` through the shared runFlatI helper.\nITEM 5 MET: The drain picker renders in the detail’s reserved modal block.\nITEM 6 MET: Direct `y` and `p` handlers are removed from document peeks.\nITEM 7 MET: Neither detail list handles flat `p`.\nITEM 8 MET: Existing item and artifact `r` menu routes remain intact, including peeks.\nITEM 9 MET: The shared status refusal reaches the detail hint line through detailFlash.\nITEM 10 MET: The shared copy refusal reaches the detail hint line through detailFlash.\nITEM 11 MET: The shared mute refusal reaches the detail hint line through detailFlash.\nITEM 12 MET: Container menus occupy a Frame Block included in the list’s height budget.\nITEM 13 MET: Detail menus delegate navigation and dispatch to the existing row-menu handlers.\nITEM 14 MET: Menu Escape clears the menu while retaining the detail.\nITEM 15 MET: Detail openers bypass Selection and create singular container menus.\nITEM 16 MET: Detail search narrows its lists, and Enter restores the detail keymap.\nITEM 17 MET: Shared filtering implements case-insensitive substring matching with AND across terms.\nITEM 18 MET: Item search fields contain only id, title and type.\nITEM 19 MET: Artifact filtering uses the shared grammar over name and type.\nITEM 20 MET: Escape discards the edit and reapplies the previously applied term.\nITEM 21 MET: Opening search initializes an empty buffer; applying it clears filtering.\nITEM 22 MET: The typing handler forwards ordinary keys, including j, k, v and r, to TextField.\nITEM 23 MET: Detail refresh reapplies its active query to rebuilt items and artifacts.\nITEM 24 MET: The applied term appears in the detail’s persistent subheader.\nITEM 25 MET: Search-hidden lists display an empty-state message naming the query and clearing sequence.\nITEM 26 MET: Artifact availability uses the unfiltered collection, preserving switching after filtering.\nITEM 27 MET: Detail search state is separately owned and discarded when the detail closes.\nITEM 28 MET: Detail hints advertise r, s, y, m and / without flat copy bindings.\nITEM 29 NOT_MET: Unchanged documentPeekChrome still advertises “y copy name” and artifact “p copy path”.\nITEM 30 MET: Typing hints name only apply, cancel and help.\nITEM 31 MET: Detail help lists the required menus, I and search; peek help removes flat copy entries.\nITEM 32 MET: Help handles container menus over details and has a dedicated detail-search branch.\nQUALITY 4: Shared handlers and filtering keep the implementation coherent, with broad supplied tests; stale peek hints expose a missing rendering check.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Detail status menus use the container’s own status actions through the shared opener."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Detail `y` opens the container’s Copy menu without copying immediately."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Detail `m` opens the Mute menu for the detail’s container."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Both views dispatch `I` through the shared runFlatI helper."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The drain picker renders in the detail’s reserved modal block."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Direct `y` and `p` handlers are removed from document peeks."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Neither detail list handles flat `p`."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Existing item and artifact `r` menu routes remain intact, including peeks."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The shared status refusal reaches the detail hint line through detailFlash."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The shared copy refusal reaches the detail hint line through detailFlash."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "The shared mute refusal reaches the detail hint line through detailFlash."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Container menus occupy a Frame Block included in the list’s height budget."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Detail menus delegate navigation and dispatch to the existing row-menu handlers."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Menu Escape clears the menu while retaining the detail."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Detail openers bypass Selection and create singular container menus."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Detail search narrows its lists, and Enter restores the detail keymap."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Shared filtering implements case-insensitive substring matching with AND across terms."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Item search fields contain only id, title and type."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Artifact filtering uses the shared grammar over name and type."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Escape discards the edit and reapplies the previously applied term."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Opening search initializes an empty buffer; applying it clears filtering."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "The typing handler forwards ordinary keys, including j, k, v and r, to TextField."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Detail refresh reapplies its active query to rebuilt items and artifacts."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "The applied term appears in the detail’s persistent subheader."
+            },
+            {
+              "item": 25,
+              "met": true,
+              "reason": "Search-hidden lists display an empty-state message naming the query and clearing sequence."
+            },
+            {
+              "item": 26,
+              "met": true,
+              "reason": "Artifact availability uses the unfiltered collection, preserving switching after filtering."
+            },
+            {
+              "item": 27,
+              "met": true,
+              "reason": "Detail search state is separately owned and discarded when the detail closes."
+            },
+            {
+              "item": 28,
+              "met": true,
+              "reason": "Detail hints advertise r, s, y, m and / without flat copy bindings."
+            },
+            {
+              "item": 29,
+              "met": false,
+              "reason": "Unchanged documentPeekChrome still advertises “y copy name” and artifact “p copy path”."
+            },
+            {
+              "item": 30,
+              "met": true,
+              "reason": "Typing hints name only apply, cancel and help."
+            },
+            {
+              "item": 31,
+              "met": true,
+              "reason": "Detail help lists the required menus, I and search; peek help removes flat copy entries."
+            },
+            {
+              "item": 32,
+              "met": true,
+              "reason": "Help handles container menus over details and has a dedicated detail-search branch."
+            }
+          ],
+          "list_ratio": 0.96875,
+          "quality": 4,
+          "rationale": "Shared handlers and filtering keep the implementation coherent, with broad supplied tests; stale peek hints expose a missing rendering check."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "33ce35a8-cbc3-4f01-911b-0192b502158d",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 491979,
+              "Output": 2429,
+              "CacheRead": 411904,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 9,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 85866,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Detail status menus use the same container actions as row menus.\nITEM 2 MET: Detail y opens the container Copy menu without copying.\nITEM 3 MET: Detail m opens the container Mute menu.\nITEM 4 MET: Both surfaces dispatch I through runFlatI.\nITEM 5 MET: The drain picker renders in the detail’s reserved block.\nITEM 6 MET: Direct y and p handlers are removed from peeks.\nITEM 7 MET: Neither detail list handles p directly.\nITEM 8 MET: Existing item and artifact r menu paths remain intact.\nITEM 9 MET: The shared status refusal reaches the detail hint line.\nITEM 10 MET: The shared copy refusal reaches the detail hint line.\nITEM 11 MET: The shared mute refusal reaches the detail hint line.\nITEM 12 MET: Container menus use Frame.Block and its body-height budgeting.\nITEM 13 MET: Detail menus reuse the row-menu navigation and dispatch handlers.\nITEM 14 MET: Menu Escape clears the menu without closing the detail.\nITEM 15 MET: Detail openers bypass Selection and create singular menus.\nITEM 16 MET: Search narrows the displayed list; Enter restores detail controls.\nITEM 17 MET: Shared matching implements case-insensitive substring AND across item fields.\nITEM 18 MET: Item search fields exclude status.\nITEM 19 MET: Artifact search uses the same grammar over name and type.\nITEM 20 MET: Escape restores the previously applied term and filtering.\nITEM 21 MET: Reopening search creates an empty buffer; applying it clears filtering.\nITEM 22 MET: Typing routes printable keys into TextField before detail actions.\nITEM 23 MET: Poll synchronization reapplies the detail’s active query.\nITEM 24 MET: The applied term appears in the detail subheader.\nITEM 25 NOT_MET: An initially empty item list suppresses the search-empty message, omitting the term and clearing instructions.\nITEM 26 MET: Artifact availability depends on unfiltered artifacts, preserving v switching.\nITEM 27 MET: Detail search state is separate and discarded when detail closes.\nITEM 28 MET: Detail hints advertise r, s, y, m and / without flat copy shortcuts.\nITEM 29 NOT_MET: documentPeekChrome still advertises y copy name and artifact p copy path.\nITEM 30 MET: Typing hints name only apply, cancel and help.\nITEM 31 MET: Detail and peek help reflect the menus and remove flat copy shortcuts.\nITEM 32 MET: Menu help adapts to detail context, and detail typing has dedicated help.\nQUALITY 4: Clear reuse and substantial focused tests, but stale peek hints and empty-container search feedback remain unaddressed.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Detail status menus use the same container actions as row menus."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Detail y opens the container Copy menu without copying."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Detail m opens the container Mute menu."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Both surfaces dispatch I through runFlatI."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The drain picker renders in the detail’s reserved block."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Direct y and p handlers are removed from peeks."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Neither detail list handles p directly."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Existing item and artifact r menu paths remain intact."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The shared status refusal reaches the detail hint line."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The shared copy refusal reaches the detail hint line."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "The shared mute refusal reaches the detail hint line."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Container menus use Frame.Block and its body-height budgeting."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Detail menus reuse the row-menu navigation and dispatch handlers."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Menu Escape clears the menu without closing the detail."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Detail openers bypass Selection and create singular menus."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Search narrows the displayed list; Enter restores detail controls."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Shared matching implements case-insensitive substring AND across item fields."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Item search fields exclude status."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Artifact search uses the same grammar over name and type."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Escape restores the previously applied term and filtering."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Reopening search creates an empty buffer; applying it clears filtering."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Typing routes printable keys into TextField before detail actions."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Poll synchronization reapplies the detail’s active query."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "The applied term appears in the detail subheader."
+            },
+            {
+              "item": 25,
+              "met": false,
+              "reason": "An initially empty item list suppresses the search-empty message, omitting the term and clearing instructions."
+            },
+            {
+              "item": 26,
+              "met": true,
+              "reason": "Artifact availability depends on unfiltered artifacts, preserving v switching."
+            },
+            {
+              "item": 27,
+              "met": true,
+              "reason": "Detail search state is separate and discarded when detail closes."
+            },
+            {
+              "item": 28,
+              "met": true,
+              "reason": "Detail hints advertise r, s, y, m and / without flat copy shortcuts."
+            },
+            {
+              "item": 29,
+              "met": false,
+              "reason": "documentPeekChrome still advertises y copy name and artifact p copy path."
+            },
+            {
+              "item": 30,
+              "met": true,
+              "reason": "Typing hints name only apply, cancel and help."
+            },
+            {
+              "item": 31,
+              "met": true,
+              "reason": "Detail and peek help reflect the menus and remove flat copy shortcuts."
+            },
+            {
+              "item": 32,
+              "met": true,
+              "reason": "Menu help adapts to detail context, and detail typing has dedicated help."
+            }
+          ],
+          "list_ratio": 0.9375,
+          "quality": 4,
+          "rationale": "Clear reuse and substantial focused tests, but stale peek hints and empty-container search feedback remain unaddressed."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "d24d3e08-986e-477d-8213-685a9565e393",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 556800,
+              "Output": 2160,
+              "CacheRead": 472960,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 10,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 89326,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Detail status opens the shared menu over the detail’s container.\nITEM 2 MET: Detail y opens the container’s Copy menu without copying.\nITEM 3 MET: Detail m opens the container’s Mute menu.\nITEM 4 MET: Both surfaces dispatch I through runFlatI.\nITEM 5 MET: The drain picker renders in the detail’s reserved block.\nITEM 6 MET: Direct y and p dispatch is removed from document peeks.\nITEM 7 MET: Neither detail list handles p directly.\nITEM 8 MET: Existing item and artifact r-menu routes remain intact.\nITEM 9 MET: The shared status refusal reaches the detail through detailFlash.\nITEM 10 MET: The shared copy refusal reaches the detail through detailFlash.\nITEM 11 MET: The shared mute refusal reaches the detail through detailFlash.\nITEM 12 MET: Container menus use Frame.Block and its body-height reservation.\nITEM 13 MET: Detail menus use the existing menu navigation and dispatch handlers.\nITEM 14 MET: Menu escape clears the menu while retaining the detail.\nITEM 15 MET: Detail openers bypass Selection and create singular menus.\nITEM 16 MET: Slash starts detail search; Enter applies it and restores detail controls.\nITEM 17 MET: Shared filtering implements case-insensitive substring matching with AND-ed terms across id, title and type.\nITEM 18 MET: Item search fields exclude status.\nITEM 19 MET: Artifact filtering uses the same grammar over name and type.\nITEM 20 MET: Escape restores the previously applied term and filtering.\nITEM 21 MET: Reopening search creates an empty buffer; applying it clears filtering.\nITEM 22 MET: Typing routes printable keys, including j, k, v and r, into the text field.\nITEM 23 MET: Detail synchronization reapplies the active query after polling.\nITEM 24 MET: The applied term renders in the detail’s subheader.\nITEM 25 MET: Search-empty lists display the term and instructions for clearing it.\nITEM 26 MET: Artifact availability depends on the full artifact collection, preserving v after filtering.\nITEM 27 MET: Detail search state is separate and discarded when the detail closes.\nITEM 28 MET: Detail hints advertise r, s, y, m and / without flat copy keys.\nITEM 29 NOT_MET: Unchanged documentPeekChrome still advertises y copy name and, for artifacts, p copy path.\nITEM 30 MET: Typing hints name only apply, cancel and help.\nITEM 31 MET: Detail help includes the required menus, I and search controls; peek help removes flat copy entries.\nITEM 32 MET: Menu help adapts to detail context, and detail typing has a dedicated help branch.\nQUALITY 4: Shared dispatch and filtering keep the change maintainable, with broad behavioral tests; stale peek hints remain uncovered.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Detail status opens the shared menu over the detail’s container."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Detail y opens the container’s Copy menu without copying."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "Detail m opens the container’s Mute menu."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Both surfaces dispatch I through runFlatI."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The drain picker renders in the detail’s reserved block."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Direct y and p dispatch is removed from document peeks."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Neither detail list handles p directly."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Existing item and artifact r-menu routes remain intact."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The shared status refusal reaches the detail through detailFlash."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The shared copy refusal reaches the detail through detailFlash."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "The shared mute refusal reaches the detail through detailFlash."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Container menus use Frame.Block and its body-height reservation."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Detail menus use the existing menu navigation and dispatch handlers."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Menu escape clears the menu while retaining the detail."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Detail openers bypass Selection and create singular menus."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Slash starts detail search; Enter applies it and restores detail controls."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Shared filtering implements case-insensitive substring matching with AND-ed terms across id, title and type."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Item search fields exclude status."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Artifact filtering uses the same grammar over name and type."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Escape restores the previously applied term and filtering."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Reopening search creates an empty buffer; applying it clears filtering."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Typing routes printable keys, including j, k, v and r, into the text field."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Detail synchronization reapplies the active query after polling."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "The applied term renders in the detail’s subheader."
+            },
+            {
+              "item": 25,
+              "met": true,
+              "reason": "Search-empty lists display the term and instructions for clearing it."
+            },
+            {
+              "item": 26,
+              "met": true,
+              "reason": "Artifact availability depends on the full artifact collection, preserving v after filtering."
+            },
+            {
+              "item": 27,
+              "met": true,
+              "reason": "Detail search state is separate and discarded when the detail closes."
+            },
+            {
+              "item": 28,
+              "met": true,
+              "reason": "Detail hints advertise r, s, y, m and / without flat copy keys."
+            },
+            {
+              "item": 29,
+              "met": false,
+              "reason": "Unchanged documentPeekChrome still advertises y copy name and, for artifacts, p copy path."
+            },
+            {
+              "item": 30,
+              "met": true,
+              "reason": "Typing hints name only apply, cancel and help."
+            },
+            {
+              "item": 31,
+              "met": true,
+              "reason": "Detail help includes the required menus, I and search controls; peek help removes flat copy entries."
+            },
+            {
+              "item": 32,
+              "met": true,
+              "reason": "Menu help adapts to detail context, and detail typing has a dedicated help branch."
+            }
+          ],
+          "list_ratio": 0.96875,
+          "quality": 4,
+          "rationale": "Shared dispatch and filtering keep the change maintainable, with broad behavioral tests; stale peek hints remain uncovered."
+        }
+      }
+    ]
+  },
+  "case": "2026-09-06-detail-keymap",
+  "arm": "bare",
+  "repeat": 3,
+  "attempts": 1,
+  "model": "opus",
+  "parent_commit": "801845fe685a54e78573094658717bb6e82e22c2",
+  "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+  "actual_model": "claude-opus-5-5",
+  "started_at": "2026-10-10T14:54:05.342436Z",
+  "ended_at": "2026-10-10T15:06:51.821307Z",
+  "outcome": "completed",
+  "agent_outcome": "completed",
+  "run_id": "b93007aa-21d4-4332-86b4-9724fa3b265f",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-3738562722",
+  "spend": {
+    "Tokens": {
+      "Input": 102,
+      "Output": 47929,
+      "CacheRead": 5765142,
+      "CacheWrite": 167626,
+      "HasInput": true,
+      "HasOutput": true,
+      "HasCacheRead": true,
+      "HasCacheWrite": true
+    },
+    "Cost": {
+      "Dollars": 3.4530244000000008,
+      "HasCost": true
+    },
+    "Turns": {
+      "Count": 50,
+      "HasTurn": true
+    },
+    "PeakInput": {
+      "Tokens": 179494,
+      "HasPeak": true
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 3.4530244000000008,
+      "HasCost": true
+    },
+    "RateSource": "",
+    "ModelKey": "anthropic/claude-opus-5-5",
+    "ModelKeySource": "actual"
+  }
+}

@@ -1,0 +1,1657 @@
+diff --git a/CONTEXT.md b/CONTEXT.md
+index 034324df..ae29adb2 100644
+--- a/CONTEXT.md
++++ b/CONTEXT.md
+@@ -637,12 +637,16 @@ _Avoid_: reviewer, checker, judge agent
+ The cached result of **Agent verification** for a **Task set**, held in the **Drain** store: PASS (proceed to approval or Done), FIXABLE (findings an agent can resolve), or NEEDS-HUMAN (only a human can resolve). Rows are keyed by `(repo, set, work_sha)`; a PASS in the current **verification episode** immunizes terminal status against later commits — HEAD moving past the verified SHA does not regress DONE or AWAITING-APPROVAL, only surfaces **Verified-at SHA**. Leaving the terminal zone (**Verification invalidation**) clears the cache so a new episode needs fresh verification. Distinct from the **Captured verify run** audit trail.
+ _Avoid_: verify result, verification status
+ 
++**Verify report**:
++The readable document one **Verifier** invocation leaves under the set's `verify/` directory, stamped with the instant in its name, the newest being current (ADR-0245). Its header records the verdict, commit range, work SHA and author; its body is the Verifier's reply with the `VERDICT:` line lifted off. Written on every verdict, PASS included, and by a human Accept (pop renders that one, naming the verdict it overrode and the human's note). A cached **Verify verdict** read back without an agent writes none. Unlike the verdict cache it survives **Verification invalidation**, so a remediation lap leaves its whole trail. It answers *why*, never *whether*: whether a judgment still holds at HEAD stays the **Verified-at SHA** badge's question. Reaches humans as a pointer (gate preamble and paging entry, detail view, Artifact list above the **Refine report**) and never rides an agent prompt.
++_Avoid_: verify log, verdict document
++
+ **Verification episode**:
+ One contiguous stretch during which a **Task set**'s done-AFK work composition is unchanged: AFK work complete, Agent verification, then DONE or AWAITING-APPROVAL. A PASS within the episode immunizes against post-PASS commits. The episode ends when the done-AFK composition changes — an AFK task re-opens or newly becomes done (including **Remediation task** spawn) — not on mere terminal-zone exit: HITL-only movement (skip, complete, or reopen of a HITL task) never ends it, even when the set detours out of the terminal zone (e.g. skip-HITL→DEFERRED and back). The next terminal arrival after an episode end requires fresh verification.
+ _Avoid_: verify generation, verification epoch, verify cycle
+ 
+ **Verification invalidation**:
+-Clearing every cached **Verify verdict** row for a `(repo, set)` in the Drain store — ending the current **verification episode** so the next completion requires fresh Agent verification. Triggered whenever a **Task transition** moves an AFK task into open or into done (a reopen restarts the episode; a manually completed AFK body was never judged), and on **Remediation task** spawn. HITL-task transitions never invalidate — the **Verifier** judges only done-AFK work. Implemented as `DELETE` of all `verify_verdicts` rows for that key (not a soft epoch). The table is a cache, not the audit trail; **Captured verify run**s remain on disk.
++Clearing every cached **Verify verdict** row for a `(repo, set)` in the Drain store — ending the current **verification episode** so the next completion requires fresh Agent verification. Triggered whenever a **Task transition** moves an AFK task into open or into done (a reopen restarts the episode; a manually completed AFK body was never judged), and on **Remediation task** spawn. HITL-task transitions never invalidate — the **Verifier** judges only done-AFK work. Implemented as `DELETE` of all `verify_verdicts` rows for that key (not a soft epoch). The table is a cache, not the audit trail; **Captured verify run**s and **Verify report**s remain on disk.
+ _Avoid_: verdict expiry, SHA staleness, verify reset, verify epoch
+ 
+ **Verified-at SHA**:
+diff --git a/docs/agents/navigation.md b/docs/agents/navigation.md
+index 5e5a0599..89f87bbd 100644
+--- a/docs/agents/navigation.md
++++ b/docs/agents/navigation.md
+@@ -23,7 +23,7 @@ AGENTS="…"`) are opt-in and not part of ordinary verification.
+ | Package | Owns |
+ | --- | --- |
+ | `cmd/` | Cobra commands, one file per family; thin over the packages below |
+-| `tasks/` | Task sets: manifests, runner, attempt streams, prompts, spend. `authoring_guide.go` is the `pop tasks authoring-guide` text — layout, templates, manifest fields and the judgment rules, generated from the constants `validateManifest` reads (ADR-0183); `validateManifest` also owns the orphan-markdown check — every `.md` in a set folder but `spec.md` (and the retired `prd.md`) needs a manifest entry, or the set reads MALFORMED. `commit_convention.go` is `RecordCommitConvention`: `pop tasks register` writes a newly activated set's `commit_convention` from the resolved `commits` stack through the `CommitConventionSource` seam `cmd` wires beside the Verifier's and Refiner's (ADR-0228), so the key is pop's projection of the stack rather than a planning agent's retyped copy — an authored value is overwritten, a re-register rewrites nothing, and the per-task **Planned commit subject** stays frozen at planning time. `verified_status.go` is the one read-side resolution answering both a set's status and its **Verification mark** (`verify_mark.go`), which is what keeps a **Human completion** (`human_completed` in the manifest, written at the `transition.go` chokepoint) from being demoted by a verdict — ADR-0179. A generated prompt never rides in argv: `agent_prompt_spill.go` spills it to a file at the `runAgentAttempt` seam (`attempts.go`) for the length of one attempt, and `verify.go`'s `workDiffView` hands the **Verifier** a commit range plus a complete `git diff --stat` instead of the diff bodies. The Verifier's prompt is an envelope (ADR-0227): the resolved `verification` convention is its body, reaching it through the `VerificationConvention` seam (`cmd` wires it, like the Refiner's), and pop owns only the role framing before it and the reply format after it — the `commits` convention stays a labelled block beside them. `refine.go` is **Refine** (`pop tasks refine`, ADR-0240): the same range and stat handed to a **Refiner** that is told to open the files itself and fixes what it may in place (ADR-0240 retired its read-only posture; `refinerRole` carries no `ReadOnly`, while the capability stays declared on every preset in `agent.go`), and its prompt is an envelope like the Verifier's (ADR-0227) — the resolved `refine` convention is the body, reaching it through the `RefineConvention` seam (the `conventions` package sits *above* `tasks`, so `cmd` wires it), with pop owning only the role framing (the fix licence — fix in place what the convention names where safe and local, report the rest — and no verdict) before it and the output expectation after it; the answer is written as a **Refine report** under `<set>/refine/`, latest by timestamp. `refine_commit.go` is the **Refine commit** (ADR-0240): both pass paths end in `commitRefinePass`, which captures whatever the Refiner left in the working tree as exactly one commit and commits nothing when the pass fixed nothing. Its subject is the `COMMIT-SUBJECT:` line the Refiner rendered under the set's recorded `commit_convention` — `splitRefinerReply` lifts it out of the reply before the rest becomes the report, and a missing or unusable one falls back to `RefineCommitSubject` (`tasks(<set-slug>): refine`) — and its body is the `Pop-Refine: <set-id>` trailer (`assess.go`), the set's own key rather than `Pop-Task` with the task half left off. Nothing on the path invalidates a cached verdict: a refine commit drifts a PASS's **Verified-at** SHA like any other commit past it. `refine_phase.go` is the drain's own refine step, the *first* directive of the `run_tasks.go` loop's quiescence branch, sitting before `verify_phase.go` so a pass's edits are judged by the same verification as the work they refine rather than costing a second one (ADR-0240), and gating nothing — the only directive it hands back besides falling through is the human's interrupt. It also skips a **Human completion** outright (`m.HumanCompleted`, the same bit the verify phase reads before declining to park or remediate): the drain does not edit code a human declared done, while `pop tasks refine` still refines such a set on request. Its **Refine episode** (`refine_episode.go` over the `refine_episodes` store table) is keyed on the fingerprint of the set's done-AFK task ids *minus its Remediation tasks*, so a commit that only moves the work SHA does not re-refine, a completed Remediation task does not either — a verify→remediate→re-verify lap re-verifies without re-refining — and planned work finishing does; every pass records one, the drain's and `pop tasks refine`'s alike. `implement_refine_convention.go` is upfront adherence (ADR-0240): with `[work.implement].include_refine_convention` set, the resolved `refine` convention rides *every* implement prompt as a labelled, notice-free block — planned and Remediation tasks alike, since both drain through `agent.tmpl.md` — through the same `RefineConvention` seam, resolved once per run beside `turnCap` (`implement_run.go`) and once per single-task run in `executor.go`; the toggle is independent of `[work.refine].enabled`, so a repository can hold its builders to the standard before the pass is ever switched on. The Assist prompt gets a hint rather than a mechanism: it names `pop conventions get refine` for quality work and lists `pop tasks refine` beside `implement` and `verify` on its do-not-invoke list. `refine_pointer.go` is how the report reaches a human: one `RefinePointer` (path plus the commit the report's own header records) that the HITL sign-off gate's preamble and paging entry, `render.go`'s detail-view section and the Assist prompt all render — a pointer and a verb on every surface, never the body. Both roles walk their agent list through one shared `agent_fallback_walk.go`, which differs between them only in an `agentRole`, and both file Captured runs — phase `verify` and phase `refine`, which `spend.go`, `stream.go` and `stream_tracer.go` each give a set-level row of its own |
++| `tasks/` | Task sets: manifests, runner, attempt streams, prompts, spend. `authoring_guide.go` is the `pop tasks authoring-guide` text — layout, templates, manifest fields and the judgment rules, generated from the constants `validateManifest` reads (ADR-0183); `validateManifest` also owns the orphan-markdown check — every `.md` in a set folder but `spec.md` (and the retired `prd.md`) needs a manifest entry, or the set reads MALFORMED. `commit_convention.go` is `RecordCommitConvention`: `pop tasks register` writes a newly activated set's `commit_convention` from the resolved `commits` stack through the `CommitConventionSource` seam `cmd` wires beside the Verifier's and Refiner's (ADR-0228), so the key is pop's projection of the stack rather than a planning agent's retyped copy — an authored value is overwritten, a re-register rewrites nothing, and the per-task **Planned commit subject** stays frozen at planning time. `verified_status.go` is the one read-side resolution answering both a set's status and its **Verification mark** (`verify_mark.go`), which is what keeps a **Human completion** (`human_completed` in the manifest, written at the `transition.go` chokepoint) from being demoted by a verdict — ADR-0179. A generated prompt never rides in argv: `agent_prompt_spill.go` spills it to a file at the `runAgentAttempt` seam (`attempts.go`) for the length of one attempt, and `verify.go`'s `workDiffView` hands the **Verifier** a commit range plus a complete `git diff --stat` instead of the diff bodies. The Verifier's prompt is an envelope (ADR-0227): the resolved `verification` convention is its body, reaching it through the `VerificationConvention` seam (`cmd` wires it, like the Refiner's), and pop owns only the role framing before it and the reply format after it — the `commits` convention stays a labelled block beside them. `refine.go` is **Refine** (`pop tasks refine`, ADR-0240): the same range and stat handed to a **Refiner** that is told to open the files itself and fixes what it may in place (ADR-0240 retired its read-only posture; `refinerRole` carries no `ReadOnly`, while the capability stays declared on every preset in `agent.go`), and its prompt is an envelope like the Verifier's (ADR-0227) — the resolved `refine` convention is the body, reaching it through the `RefineConvention` seam (the `conventions` package sits *above* `tasks`, so `cmd` wires it), with pop owning only the role framing (the fix licence — fix in place what the convention names where safe and local, report the rest — and no verdict) before it and the output expectation after it; the answer is written as a **Refine report** under `<set>/refine/`, latest by timestamp. `refine_commit.go` is the **Refine commit** (ADR-0240): both pass paths end in `commitRefinePass`, which captures whatever the Refiner left in the working tree as exactly one commit and commits nothing when the pass fixed nothing. Its subject is the `COMMIT-SUBJECT:` line the Refiner rendered under the set's recorded `commit_convention` — `splitRefinerReply` lifts it out of the reply before the rest becomes the report, and a missing or unusable one falls back to `RefineCommitSubject` (`tasks(<set-slug>): refine`) — and its body is the `Pop-Refine: <set-id>` trailer (`assess.go`), the set's own key rather than `Pop-Task` with the task half left off. Nothing on the path invalidates a cached verdict: a refine commit drifts a PASS's **Verified-at** SHA like any other commit past it. `refine_phase.go` is the drain's own refine step, the *first* directive of the `run_tasks.go` loop's quiescence branch, sitting before `verify_phase.go` so a pass's edits are judged by the same verification as the work they refine rather than costing a second one (ADR-0240), and gating nothing — the only directive it hands back besides falling through is the human's interrupt. It also skips a **Human completion** outright (`m.HumanCompleted`, the same bit the verify phase reads before declining to park or remediate): the drain does not edit code a human declared done, while `pop tasks refine` still refines such a set on request. Its **Refine episode** (`refine_episode.go` over the `refine_episodes` store table) is keyed on the fingerprint of the set's done-AFK task ids *minus its Remediation tasks*, so a commit that only moves the work SHA does not re-refine, a completed Remediation task does not either — a verify→remediate→re-verify lap re-verifies without re-refining — and planned work finishing does; every pass records one, the drain's and `pop tasks refine`'s alike. `implement_refine_convention.go` is upfront adherence (ADR-0240): with `[work.implement].include_refine_convention` set, the resolved `refine` convention rides *every* implement prompt as a labelled, notice-free block — planned and Remediation tasks alike, since both drain through `agent.tmpl.md` — through the same `RefineConvention` seam, resolved once per run beside `turnCap` (`implement_run.go`) and once per single-task run in `executor.go`; the toggle is independent of `[work.refine].enabled`, so a repository can hold its builders to the standard before the pass is ever switched on. The Assist prompt gets a hint rather than a mechanism: it names `pop conventions get refine` for quality work and lists `pop tasks refine` beside `implement` and `verify` on its do-not-invoke list. The report mechanics are not Refine's own: `report.go` is the one `reportKind` shape both passes file through — render with a header of facts, write under the set's own sub-directory with the instant in the name, find the newest, read a header fact back — and `report_pointer.go` the one `ReportPointer` (path plus the commit the report's own header records). `refine_pointer.go` is how the Refine report reaches a human and the attended prompts; `verify_report.go` is the **Verify report** (ADR-0245): one per Verifier invocation and per human Accept under `<set>/verify/`, surfaced on the HITL gate's preamble and paging entry, `render.go`'s detail view and the Artifact list (above refine), and on no agent prompt — a pointer and a verb on every surface, never the body. Both roles walk their agent list through one shared `agent_fallback_walk.go`, which differs between them only in an `agentRole`, and both file Captured runs — phase `verify` and phase `refine`, which `spend.go`, `stream.go` and `stream_tracer.go` each give a set-level row of its own |
+ | `tasks/binding/` | Binding a Task set to a checkout or worktree, plus the managed-worktree root: `binding.go` owns the root list (current + pre-cut) and `worktree_root_move.go` the gated read-path fold that relocates the pre-cut root, repoints every recorded `runtime_path` in one transaction and repairs each repository (ADR-0174 decision 8) |
+ | `tasks/setkind/` | The Task-set `work.Kind` adapter: loads containers per repo group, the ADR-0121 comparator, the set's verbs. One level down from `tasks` because it needs `tasks/binding` |
+ | `tasks/drain/` | Task-set drain control and the supervisor's dependency bag (`queue.go`: `Deps`, the project scan, the `Decision` a scan produces, the tmux spawn). Everything a drain does to a Task set is here — routing to a checkout (`worktree.go`), bind/unbind/abandon/fold, deferrals, the status snapshot (`status.go`) and the run view (`run_output.go`) both read surfaces render. It also holds the kind wiring (`kinds.go`: `WorkKinds` and the unmemoized `AdvanceKinds` the supervisor drives, `WithGitMemo` scoping the **Git fact memo** and `project.ShapeMemo` (the per-load repository-shape probe memo) to one load, `SetKindDeps`, `MapKindDeps`, `RoutinePageKinds`; `advance.go` composes the advance half onto the Task-set kind; `routines.go` projects the bag onto the Routine kind), because that wiring needs `tasks/setkind`, `wayfinder` and `routine`, all of which sit above `tasks` |
+diff --git a/store/verify.go b/store/verify.go
+index c9828779..029563d1 100644
+--- a/store/verify.go
++++ b/store/verify.go
+@@ -11,7 +11,7 @@ import (
+ // AFK work. Verdict is "PASS", "FIXABLE", or "NEEDS-HUMAN"; WorkSHA is the
+ // runtime HEAD the verdict was computed from, so a reader gates on a SHA change
+ // (a verdict at a different SHA is stale). Findings carries the Verifier's
+-// human-facing reasons (empty for PASS). Repo is the repository's git common
++// human-facing reasons — for a PASS, what it checked (ADR-0245). Repo is the repository's git common
+ // dir, the same identity the drains table keys by. Scope is the count of AFK
+ // tasks the verdict certified (ADR-0101): a reader compares the set's current
+ // AFK count against it to tell an incidental SHA move (coast on the immunizing
+@@ -19,6 +19,10 @@ import (
+ // A zero Scope means unknown (legacy rows, or a verdict written before the
+ // scope was recorded) and disables the growth check.
+ //
++// The row is a cache, not a record: Verification invalidation deletes it. The
++// durable account of each judgment is the Verify report under the set's
++// verify/ directory, which no invalidation touches (ADR-0245).
++//
+ // HumanAuthored marks an Accepted verdict (ADR-0103): a human overriding a
+ // non-PASS Verifier judgment by recording a PASS themselves. Note carries the
+ // human's rationale — fed forward as context into later Verifier prompts so the
+diff --git a/tasks/artifacts.go b/tasks/artifacts.go
+index 28f46256..e5bcbd40 100644
+--- a/tasks/artifacts.go
++++ b/tasks/artifacts.go
+@@ -2,20 +2,36 @@ package tasks
+ 
+ import (
+ 	"fmt"
+-	"os"
+ 	"path/filepath"
+ 	"sort"
+ 	"time"
+ )
+ 
+ const (
++	ArtifactTypeVerify   = "verify"
+ 	ArtifactTypeRefine   = "refine"
+ 	ArtifactTypeSpec     = "spec"
+ 	ArtifactTypeProgress = "progress"
+ 	ProgressFileName     = "progress.txt"
++	VerifyDirName        = "verify"
+ 	RefineDirName        = "refine"
+ )
+ 
++// artifactTierOrder is the closed list of artifact types, highest first. A type's
++// tier is its position here, so a new member takes its place by being listed
++// where it belongs rather than by renumbering the others. A verdict outranks a
++// polish note, so the Verify reports lead (ADR-0245).
++var artifactTierOrder = []string{
++	ArtifactTypeVerify,
++	ArtifactTypeRefine,
++	ArtifactTypeSpec,
++	ArtifactTypeProgress,
++}
++
++// publishedReports are the report kinds whose documents the Artifact list
++// carries, each from its own sub-directory of the set's folder.
++var publishedReports = []reportKind{verifyReport, refineReport}
++
+ // ArtifactSectionTitle is shared by the CLI and dashboard detail surfaces so
+ // both name the same summary block.
+ const ArtifactSectionTitle = "Artifacts"
+@@ -29,9 +45,10 @@ type Artifact struct {
+ }
+ 
+ // Artifacts returns the closed list of Task-set artifacts in type-tier order:
+-// every refine report first, newest-first among themselves, then the spec, then the
+-// progress record (ADR-0220). Recency orders only the family that grows, so a
+-// drain rewriting progress.txt cannot move the row under a reader's cursor.
++// every verify report first, then every refine report, each family newest-first
++// among themselves, then the spec, then the progress record (ADR-0220, ADR-0245).
++// Recency orders only the families that grow, so a drain rewriting progress.txt
++// cannot move the row under a reader's cursor.
+ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
+ 	if d == nil {
+ 		d = defaultDeps
+@@ -67,22 +84,12 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
+ 		})
+ 	}
+ 
+-	refineDir := filepath.Join(setDir, RefineDirName)
+-	refines, err := d.FS.ReadDir(refineDir)
+-	if err != nil && !os.IsNotExist(err) {
+-		return nil, err
+-	}
+-	for _, entry := range refines {
+-		at, ok := RefineFileInstant(entry.Name())
+-		if entry.IsDir() || !ok {
+-			continue
++	for _, kind := range publishedReports {
++		reports, err := kind.listed(d, setDir)
++		if err != nil {
++			return nil, err
+ 		}
+-		artifacts = append(artifacts, Artifact{
+-			Type: ArtifactTypeRefine,
+-			Name: entry.Name(),
+-			Path: filepath.Join(refineDir, entry.Name()),
+-			At:   at,
+-		})
++		artifacts = append(artifacts, reports...)
+ 	}
+ 
+ 	sort.Slice(artifacts, func(i, j int) bool {
+@@ -98,18 +105,15 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
+ }
+ 
+ // artifactTier ranks one artifact type within the tier order. An unrecognised
+-// type sorts after every known one rather than jumping the refine reports, since the
++// type sorts after every known one rather than jumping the reports, since the
+ // list is closed and a new member has not earned a position yet.
+ func artifactTier(artifactType string) int {
+-	switch artifactType {
+-	case ArtifactTypeRefine:
+-		return 0
+-	case ArtifactTypeSpec:
+-		return 1
+-	case ArtifactTypeProgress:
+-		return 2
++	for tier, known := range artifactTierOrder {
++		if known == artifactType {
++			return tier
++		}
+ 	}
+-	return 3
++	return len(artifactTierOrder)
+ }
+ 
+ // ArtifactSummary gives detail surfaces enough information to show that the
+diff --git a/tasks/gate_menu.go b/tasks/gate_menu.go
+index cf04ab23..64abcca3 100644
+--- a/tasks/gate_menu.go
++++ b/tasks/gate_menu.go
+@@ -104,15 +104,15 @@ func gateRemediationPreamble(d *Deps, taskSetID string, m *Manifest) []string {
+ 	return strings.Split(text, "\n")
+ }
+ 
+-// gateRefinePreamble tells the human deciding on a set that a Refine report of
+-// it exists, and against which commit — a pointer, never the document, which is
+-// long enough to bury the menu it would be printed above (ADR-0240). Returns no
+-// lines for a set that has never been refined.
+-func gateRefinePreamble(p RefinePointer, ok bool) []string {
++// gateReportPreamble tells the human deciding on a set that a report of it
++// exists, and against which commit — a pointer, never the document, which is
++// long enough to bury the menu it would be printed above (ADR-0240, ADR-0245).
++// Returns no lines for a set that has no report of the kind.
++func gateReportPreamble(icon string, p ReportPointer, ok bool) []string {
+ 	if !ok {
+ 		return nil
+ 	}
+-	return []string{"📝 " + p.Summary()}
++	return []string{icon + p.Summary()}
+ }
+ 
+ func joinPreamble(parts ...[]string) []string {
+diff --git a/tasks/gates.go b/tasks/gates.go
+index f48081e0..4acd5956 100644
+--- a/tasks/gates.go
++++ b/tasks/gates.go
+@@ -101,9 +101,30 @@ const (
+ 	hitlGateDefer
+ 	hitlGateShell
+ 	hitlGateReverify
++	hitlGateReadVerify
+ 	hitlGateReadRefine
+ )
+ 
++// gateReports are the pointers a sign-off gate carries to the set's latest
++// reports: the Verify report that says why verification judged as it did, and
++// the Refine report. Only the pointers ride the gate — each document is paged on
++// request, never printed above the menu (ADR-0240, ADR-0245).
++type gateReports struct {
++	Verify    ReportPointer
++	HasVerify bool
++	Refine    ReportPointer
++	HasRefine bool
++}
++
++// latestGateReports resolves both pointers for a set; a set never verified or
++// never refined has the matching half empty.
++func latestGateReports(d *Deps, m *Manifest) gateReports {
++	var r gateReports
++	r.Verify, r.HasVerify = latestVerifyPointer(d, m)
++	r.Refine, r.HasRefine = latestRefinePointer(d, m)
++	return r
++}
++
+ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverifyGateContext) (bool, error) {
+ 	d := env.d
+ 	out := env.out
+@@ -140,15 +161,17 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
+ 		showReverify := gateReverifyEnabled(rv, m)
+ 		// Re-resolved each time round the menu: a Re-verify may land a Remediation
+ 		// task and a report written since the gate opened is still the one to point at.
+-		refine, hasRefine := latestRefinePointer(d, m)
+-		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, refine, hasRefine)
++		reports := latestGateReports(d, m)
++		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, reports)
+ 		if err != nil {
+ 			return true, err
+ 		}
+ 		switch action {
+-		case hitlGateReadRefine:
+-			pageRefineDocument(d, in, runtimePath, out, refine)
++		case hitlGateReadVerify:
++			pageReportDocument(d, in, runtimePath, out, reports.Verify)
+ 			// A read changes nothing — loop back to the menu with the set as it was.
++		case hitlGateReadRefine:
++			pageReportDocument(d, in, runtimePath, out, reports.Refine)
+ 		case hitlGateReverify:
+ 			repo := ""
+ 			if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
+@@ -283,12 +306,12 @@ func spawnRuntimeShell(d *Deps, stdin io.Reader, runtimePath string, out io.Writ
+ 	return err
+ }
+ 
+-// pageRefineDocument shows the set's Refine report to the human at the gate.
++// pageReportDocument shows one of the set's reports to the human at the gate.
+ // It spawns no agent: the document is already written, and this entry is a read
+-// of it, not a second opinion (ADR-0240). The human's pager runs attended in the
++// of it, not a second opinion (ADR-0240, ADR-0245). The human's pager runs attended in the
+ // runtime checkout; when none will run, the document is printed instead, because
+ // the whole point of the entry is that the human sees it.
+-func pageRefineDocument(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, p RefinePointer) {
++func pageReportDocument(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, p ReportPointer) {
+ 	if p.Path == "" {
+ 		return
+ 	}
+@@ -309,7 +332,7 @@ func pageRefineDocument(d *Deps, stdin io.Reader, runtimePath string, out io.Wri
+ 	}
+ 	data, readErr := fs.ReadFile(p.Path)
+ 	if readErr != nil {
+-		fmt.Fprintf(outputFor(out), "Could not read the refine report: %v\n", readErr)
++		fmt.Fprintf(outputFor(out), "Could not read the %s report: %v\n", strings.ToLower(p.Label), readErr)
+ 		return
+ 	}
+ 	fmt.Fprintln(outputFor(out), strings.TrimRight(string(data), "\n"))
+@@ -371,7 +394,7 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
+ 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
+ }
+ 
+-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine RefinePointer, hasRefine bool) (hitlGateAction, error) {
++func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, reports gateReports) (hitlGateAction, error) {
+ 	items := []ui.GateMenuItem{
+ 		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
+ 		{Key: "2", Label: "Complete task"},
+@@ -390,8 +413,11 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
+ 	if showReverify {
+ 		add(hitlGateReverify, "Re-verify (re-run the Verifier against the current work)")
+ 	}
+-	if hasRefine {
+-		add(hitlGateReadRefine, "Read the refine report (no agent runs)", refine.Path)
++	if reports.HasVerify {
++		add(hitlGateReadVerify, "Read the verify report (no agent runs)", reports.Verify.Path)
++	}
++	if reports.HasRefine {
++		add(hitlGateReadRefine, "Read the refine report (no agent runs)", reports.Refine.Path)
+ 	}
+ 	items = append(items, ui.GateMenuItem{Key: "0", Label: "Exit"})
+ 
+@@ -402,7 +428,8 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
+ 			gateWaiterPreamble(d, runtimePath),
+ 			gateTaskBodyPreamble(hitl.File, body),
+ 			gateRemediationPreamble(d, taskSetID, m),
+-			gateRefinePreamble(refine, hasRefine),
++			gateReportPreamble("🔎 ", reports.Verify, reports.HasVerify),
++			gateReportPreamble("📝 ", reports.Refine, reports.HasRefine),
+ 		),
+ 		Items: items,
+ 	}
+diff --git a/tasks/prompts/verifier.tmpl.md b/tasks/prompts/verifier.tmpl.md
+index 8f4425c5..0b70314e 100644
+--- a/tasks/prompts/verifier.tmpl.md
++++ b/tasks/prompts/verifier.tmpl.md
+@@ -46,7 +46,9 @@ VERDICT: NEEDS-HUMAN
+ Then, on the following lines:
+ SUMMARY: <in one line, what needs fixing — optional; omit for PASS>
+ {{if .ConventionRecorded}}COMMIT-SUBJECT: <one line — the commit subject the fix should be committed under>
+-{{end}}FINDINGS: <what fails a criterion and why — leave empty for PASS>
++{{end}}FINDINGS: <for FIXABLE or NEEDS-HUMAN, what fails a criterion and why; for PASS, what you checked and why each criterion is met>
++
++Everything after the VERDICT line is kept as this verification's report, which a human reads later to learn why you judged as you did — so write FINDINGS for that reader, a PASS included.
+ 
+ PASS = every acceptance criterion is met. FIXABLE = criteria are unmet but an agent could resolve the findings. NEEDS-HUMAN = the findings need a human decision. SUMMARY names, in one line, what needs fixing when remediation is warranted — it is optional and must not affect the verdict.
+ {{if .ConventionRecorded}}COMMIT-SUBJECT is the final, literal subject line the fix work will be committed under, written in the convention above — a real message describing the fix, not a template or a placeholder. Write it only when remediation is warranted; it is optional, must not affect the verdict, and must be a single line with no surrounding quotes or backticks.
+diff --git a/tasks/refine.go b/tasks/refine.go
+index 5dbf360f..53494960 100644
+--- a/tasks/refine.go
++++ b/tasks/refine.go
+@@ -3,7 +3,6 @@ package tasks
+ import (
+ 	"fmt"
+ 	"io"
+-	"path/filepath"
+ 	"strings"
+ 	"time"
+ 
+@@ -18,20 +17,14 @@ import (
+ // work, so refine defaults where verification does.
+ const DefaultRefineEffort = "heavy"
+ 
+-// refineDirName is the sub-directory of a set's folder where Refine reports
+-// accumulate. It sits under the Task-set directory, which lives in pop's Work
+-// store rather than in the repository, so no report can ever be staged into a
+-// commit (ADR-0214).
+-const refineDirName = "refine"
+-
+-// refineFilePrefix and refineFileTimeLayout spell a Refine report's name. The
+-// instant is in the file name rather than only in the document, because "the
+-// latest" is resolved by timestamp and a directory listing must be able to
+-// answer that without opening every file.
+-const (
+-	refineFilePrefix     = "refine-"
+-	refineFileTimeLayout = "20060102T150405Z"
+-)
++// refineReport is the Refine report's place among the reports a set's folder
++// accumulates: one document per pass under <set>/refine/, the newest current.
++var refineReport = reportKind{
++	Label:        "Refine",
++	Dir:          RefineDirName,
++	FilePrefix:   "refine-",
++	ArtifactType: ArtifactTypeRefine,
++}
+ 
+ // RefineConvention resolves this repository's `refine` Convention stack as
+ // the prose a Refiner is handed. It is a seam rather than a direct call: the
+@@ -182,7 +175,7 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	previous, hasPrevious := latestRefineDocument(d, m.Dir)
++	previous, hasPrevious := refineReport.latest(d, m.Dir)
+ 	convention := resolveRefineConvention(opts)
+ 	// The work SHA is read before the Refiner runs: it is the commit the report
+ 	// describes, and the Refiner that moved it would be doing something a refine
+@@ -198,7 +191,7 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
+ 	rendered, report := splitRefinerReply(body)
+ 	at := d.Now().UTC()
+ 	doc := renderRefineDocument(at, opts.SetID, workSHA, work.Range, agent, report)
+-	path, err := writeRefineDocument(d, m.Dir, at, doc)
++	path, err := refineReport.write(d, m.Dir, at, doc)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -218,7 +211,7 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
+ // verbatim — no chrome, no ANSI — because the whole point of `--show` is that
+ // its stdout is pasteable into a pull request.
+ func showLatestRefine(d *Deps, opts refineCoreOptions, m *Manifest) (*RefineResult, error) {
+-	doc, ok := latestRefineDocument(d, m.Dir)
++	doc, ok := refineReport.latest(d, m.Dir)
+ 	if !ok {
+ 		return nil, exitErr(ExitSetup, "task set %q has no refine report yet; run `pop tasks refine %s` first", opts.SetID, opts.SetID)
+ 	}
+@@ -443,94 +436,8 @@ func refineEnabled(cfg *config.Config) bool {
+ 	return cfg.RefineSettings() != nil && cfg.RefineSettings().Enabled
+ }
+ 
+-// refineDocument is one Refine report on disk: where it is, when it was
+-// written, and what it says.
+-type refineDocument struct {
+-	Path string
+-	At   time.Time
+-	Body string
+-}
+-
+-// latestRefineDocument returns the set's current report — the one with the
+-// newest timestamp in its name — and false when the set has never been refined.
+-// Every earlier document stays where it is; superseding is a matter of which one
+-// the readers take, not of deleting the ones before it (ADR-0214).
+-func latestRefineDocument(d *Deps, setDir string) (refineDocument, bool) {
+-	dir := filepath.Join(setDir, refineDirName)
+-	entries, err := d.FS.ReadDir(dir)
+-	if err != nil {
+-		return refineDocument{}, false
+-	}
+-	var found refineDocument
+-	ok := false
+-	for _, entry := range entries {
+-		at, isRefine := RefineFileInstant(entry.Name())
+-		if entry.IsDir() || !isRefine {
+-			continue
+-		}
+-		if ok && !at.After(found.At) {
+-			continue
+-		}
+-		found, ok = refineDocument{Path: filepath.Join(dir, entry.Name()), At: at}, true
+-	}
+-	if !ok {
+-		return refineDocument{}, false
+-	}
+-	body, err := d.FS.ReadFile(found.Path)
+-	if err != nil {
+-		return refineDocument{}, false
+-	}
+-	found.Body = strings.TrimSpace(string(body))
+-	return found, true
+-}
+-
+-// RefineFileInstant reads a Refine report's name back as the instant it was
+-// written, and false for anything else in the directory. It is exported so the
+-// Task-set Work kind can use the report's own timestamp as its Artifact
+-// ordering key instead of duplicating the filename contract.
+-func RefineFileInstant(name string) (time.Time, bool) {
+-	stamp, ok := strings.CutPrefix(name, refineFilePrefix)
+-	if !ok {
+-		return time.Time{}, false
+-	}
+-	stamp, ok = strings.CutSuffix(stamp, ".md")
+-	if !ok {
+-		return time.Time{}, false
+-	}
+-	at, err := time.Parse(refineFileTimeLayout, stamp)
+-	if err != nil {
+-		return time.Time{}, false
+-	}
+-	return at, true
+-}
+-
+-// writeRefineDocument files a new Refine report under the set's refine/
+-// directory and returns its path. A name already taken (two reports inside one
+-// second) advances the instant rather than overwriting: retention is the whole
+-// point of the directory, and the names are also the ordering.
+-func writeRefineDocument(d *Deps, setDir string, at time.Time, body string) (string, error) {
+-	dir := filepath.Join(setDir, refineDirName)
+-	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
+-		return "", exitErr(ExitOperational, "create refine directory: %v", err)
+-	}
+-	at = at.UTC().Truncate(time.Second)
+-	taken := map[string]bool{}
+-	if entries, err := d.FS.ReadDir(dir); err == nil {
+-		for _, entry := range entries {
+-			taken[entry.Name()] = true
+-		}
+-	}
+-	name := refineFilePrefix + at.Format(refineFileTimeLayout) + ".md"
+-	for taken[name] {
+-		at = at.Add(time.Second)
+-		name = refineFilePrefix + at.Format(refineFileTimeLayout) + ".md"
+-	}
+-	path := filepath.Join(dir, name)
+-	if err := d.FS.WriteFile(path, []byte(ensureTrailingNewline(body)), 0o644); err != nil {
+-		return "", exitErr(ExitOperational, "write refine report: %v", err)
+-	}
+-	return path, nil
+-}
++// refineDocument is one Refine report on disk.
++type refineDocument = reportDocument
+ 
+ // renderRefineDocument wraps the Refiner's prose in the four facts a reader
+ // needs to know what was refined: which set, at which commits, by whom and
+@@ -543,27 +450,12 @@ func writeRefineDocument(d *Deps, setDir string, at time.Time, body string) (str
+ // stamped here rather than asked of the Refiner, because pop read it before the
+ // pass began and the Refiner would only be copying it back.
+ func renderRefineDocument(at time.Time, setID, workSHA, commitRange, agent, body string) string {
+-	var b strings.Builder
+-	fmt.Fprintf(&b, "# Refine report — %s\n\n", setID)
+-	fmt.Fprintf(&b, "- Refined: %s\n", at.UTC().Format(time.RFC3339))
+-	if commitRange != "" {
+-		fmt.Fprintf(&b, "- Commit range: %s\n", commitRange)
+-	}
+-	if workSHA != "" {
+-		fmt.Fprintf(&b, "- Work SHA: %s\n", ShortSHA(workSHA))
+-	}
+-	if strings.TrimSpace(agent) != "" {
+-		fmt.Fprintf(&b, "- Refiner: %s\n", strings.TrimSpace(agent))
+-	}
+-	fmt.Fprintf(&b, "\n%s", ensureTrailingNewline(strings.TrimSpace(body)))
+-	return b.String()
+-}
+-
+-func ensureTrailingNewline(s string) string {
+-	if strings.HasSuffix(s, "\n") {
+-		return s
+-	}
+-	return s + "\n"
++	return refineReport.render(setID, []reportFact{
++		{Name: "Refined", Value: at.UTC().Format(time.RFC3339)},
++		{Name: reportFactCommitRange, Value: commitRange},
++		{Name: reportFactWorkSHA, Value: ShortSHA(workSHA)},
++		{Name: "Refiner", Value: agent},
++	}, body)
+ }
+ 
+ // printRefineWritten tells the operator where the report went and how to read
+diff --git a/tasks/refine_pointer.go b/tasks/refine_pointer.go
+index 98b546e3..2cc80930 100644
+--- a/tasks/refine_pointer.go
++++ b/tasks/refine_pointer.go
+@@ -1,112 +1,13 @@
+ package tasks
+ 
+-import (
+-	"fmt"
+-	"strings"
+-)
+-
+-// RefinePointer is a set's current Refine report as the HITL gate and Assist
+-// prompt carry it: where the document is and which commit it was written
+-// against, never what it says (ADR-0240, narrowed by ADR-0217).
+-type RefinePointer struct {
+-	// Path is the absolute path of the latest Refine report.
+-	Path string
+-	// WorkSHA is the short work SHA the report was written against, empty when
+-	// the document records none.
+-	WorkSHA string
+-	// CommitRange is the range the Refiner read, empty when the document
+-	// records none.
+-	CommitRange string
+-	// Written is the instant in the report's name, RFC3339 in UTC.
+-	Written string
+-}
++// RefinePointer is the pointer to a set's current Refine report, which the HITL
++// gate and Assist prompt carry (ADR-0240, narrowed by ADR-0217).
++type RefinePointer = ReportPointer
+ 
+ // latestRefinePointer resolves the pointer for a set, and false when the set has
+ // never been refined.
+ func latestRefinePointer(d *Deps, m *Manifest) (RefinePointer, bool) {
+-	if d == nil {
+-		d = defaultDeps
+-	}
+-	if d == nil || d.FS == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
+-		return RefinePointer{}, false
+-	}
+-	doc, ok := latestRefineDocument(d, m.Dir)
+-	if !ok {
+-		return RefinePointer{}, false
+-	}
+-	p := RefinePointer{Path: doc.Path, Written: doc.At.UTC().Format("2006-01-02 15:04Z")}
+-	p.WorkSHA = refineHeaderField(doc.Body, "Work SHA")
+-	p.CommitRange = refineHeaderField(doc.Body, "Commit range")
+-	return p, true
+-}
+-
+-// refineHeaderField reads one of the "- Field: value" facts renderRefineDocument
+-// stamps at the top of every report. The header is the document's own record
+-// of what it describes, so reading it back beats keeping a side-car that a
+-// document copied out of pop would leave behind.
+-func refineHeaderField(body, field string) string {
+-	prefix := "- " + field + ": "
+-	inHeader := false
+-	for _, line := range strings.Split(body, "\n") {
+-		line = strings.TrimSpace(line)
+-		if !strings.HasPrefix(line, "- ") {
+-			// The header is the report's first bullet list; anything after it is
+-			// the Refiner's prose, which may say anything at all.
+-			if inHeader {
+-				return ""
+-			}
+-			continue
+-		}
+-		inHeader = true
+-		if rest, ok := strings.CutPrefix(line, prefix); ok {
+-			return strings.TrimSpace(rest)
+-		}
+-	}
+-	return ""
+-}
+-
+-// CommitPhrase names the commit the document was written against, in the one
+-// form every surface prints it. Empty when the report recorded neither a work
+-// SHA nor a range — an old or hand-edited document still shows its path.
+-func (p RefinePointer) CommitPhrase() string {
+-	switch {
+-	case p.WorkSHA != "" && p.CommitRange != "":
+-		return fmt.Sprintf("%s (%s)", p.WorkSHA, p.CommitRange)
+-	case p.WorkSHA != "":
+-		return p.WorkSHA
+-	default:
+-		return p.CommitRange
+-	}
+-}
+-
+-// Summary is the single line the gate preamble uses: the commit refined, when,
+-// and where to read it.
+-func (p RefinePointer) Summary() string {
+-	var b strings.Builder
+-	b.WriteString("Refine")
+-	if phrase := p.CommitPhrase(); phrase != "" {
+-		fmt.Fprintf(&b, " of %s", phrase)
+-	}
+-	if p.Written != "" {
+-		fmt.Fprintf(&b, ", written %s", p.Written)
+-	}
+-	fmt.Fprintf(&b, ": %s", p.Path)
+-	return b.String()
+-}
+-
+-// StaleAgainst reports whether the checkout has moved past the commit this
+-// report was written against. Unknown on either side is not staleness: a
+-// document recording no work SHA, or a checkout whose HEAD pop cannot read, says
+-// nothing about whether the report still describes today's files.
+-func (p RefinePointer) StaleAgainst(workSHA string) bool {
+-	written, current := p.WorkSHA, ShortSHA(workSHA)
+-	if written == "" || current == "" {
+-		return false
+-	}
+-	// Either side may be the shorter abbreviation — a hand-edited header, or a
+-	// document written when the shortening differed — so a common prefix counts
+-	// as the same commit.
+-	return !strings.HasPrefix(current, written) && !strings.HasPrefix(written, current)
++	return latestReportPointer(d, refineReport, m)
+ }
+ 
+ // refineBlockView is the pointer as the five attended prompts render it: the
+diff --git a/tasks/refine_surfaces_test.go b/tasks/refine_surfaces_test.go
+index 81ba6981..f1643a29 100644
+--- a/tasks/refine_surfaces_test.go
++++ b/tasks/refine_surfaces_test.go
+@@ -18,9 +18,9 @@ func seedRefineReport(t *testing.T, d *Deps, m *Manifest) string {
+ 	t.Helper()
+ 	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+ 	body := renderRefineDocument(at, "demo", "abc123abc123", "aaa111^..HEAD", "claude", "## Naming\n\n"+refineProse)
+-	path, err := writeRefineDocument(d, m.Dir, at, body)
++	path, err := refineReport.write(d, m.Dir, at, body)
+ 	if err != nil {
+-		t.Fatalf("writeRefineDocument: %v", err)
++		t.Fatalf("write refine report: %v", err)
+ 	}
+ 	return path
+ }
+@@ -37,9 +37,8 @@ func hitlGateOutput(t *testing.T, d *Deps, m *Manifest, input string) (string, h
+ 	t.Helper()
+ 	var out strings.Builder
+ 	in := strings.NewReader(input)
+-	refine, hasRefine := latestRefinePointer(d, m)
+ 	action, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[1],
+-		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, refine, hasRefine)
++		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, latestGateReports(d, m))
+ 	if err != nil {
+ 		t.Fatalf("promptHITLGateAction: %v", err)
+ 	}
+@@ -137,7 +136,7 @@ func TestHITLGateReadRefineEntryPagesAndSpawnsNoAgent(t *testing.T) {
+ 		t.Fatal("expected a refine pointer")
+ 	}
+ 	var out bytes.Buffer
+-	pageRefineDocument(d, strings.NewReader(""), "/rt", &out, refine)
++	pageReportDocument(d, strings.NewReader(""), "/rt", &out, refine)
+ 
+ 	if runner.attendedCalls != 1 {
+ 		t.Fatalf("expected exactly one attended launch (the pager), got %d", runner.attendedCalls)
+diff --git a/tasks/refine_test.go b/tasks/refine_test.go
+index 63950d6d..1a4c256a 100644
+--- a/tasks/refine_test.go
++++ b/tasks/refine_test.go
+@@ -42,7 +42,7 @@ func refineOpts(defPath string, out *bytes.Buffer, run func(prompt string) (stri
+ 
+ func listRefineFiles(t *testing.T, setDir string) []string {
+ 	t.Helper()
+-	entries, err := os.ReadDir(filepath.Join(setDir, refineDirName))
++	entries, err := os.ReadDir(filepath.Join(setDir, RefineDirName))
+ 	if err != nil {
+ 		return nil
+ 	}
+@@ -95,7 +95,7 @@ func TestRefineWritesReportFromAPromptCarryingEverything(t *testing.T) {
+ 
+ 	// The report is written under the set's own refine/ directory — task
+ 	// storage, never the checkout it describes.
+-	wantPath := filepath.Join(setDir, refineDirName, "refine-20260816T120000Z.md")
++	wantPath := filepath.Join(setDir, RefineDirName, "refine-20260816T120000Z.md")
+ 	if res.Path != wantPath {
+ 		t.Fatalf("path = %q, want %q", res.Path, wantPath)
+ 	}
+diff --git a/tasks/remediation_history_test.go b/tasks/remediation_history_test.go
+index 5104b118..811499e1 100644
+--- a/tasks/remediation_history_test.go
++++ b/tasks/remediation_history_test.go
+@@ -311,7 +311,7 @@ func TestHITLGatePrintsRemediationReviewBlock(t *testing.T) {
+ 
+ 	var out strings.Builder
+ 	in := strings.NewReader("0\n")
+-	_, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[2], "## Acceptance criteria\n\n- [ ] ok\n", nil, false, RefinePointer{}, false)
++	_, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[2], "## Acceptance criteria\n\n- [ ] ok\n", nil, false, gateReports{})
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/tasks/render.go b/tasks/render.go
+index c8d52526..872eec68 100644
+--- a/tasks/render.go
++++ b/tasks/render.go
+@@ -777,9 +777,30 @@ func renderTaskSetDetail(d *Deps, out *output, taskSetID string, row *Row, m *Ma
+ 		fmt.Fprintln(out, out.styled(taskStyle(m, task), line))
+ 	}
+ 
++	renderVerifyReportSection(d, out, m)
+ 	renderArtifactSummarySection(d, out, taskSetID, m)
+ }
+ 
++// renderVerifyReportSection points at the document that says why verification
++// judged the set as it did, beside the one-line findings a status row has room
++// for (ADR-0245). It names the report and the commit it was written against and
++// nothing more: whether that judgment still holds at HEAD is the Verified-at
++// badge's answer, not this section's. A set never verified shows no section.
++func renderVerifyReportSection(d *Deps, out *output, m *Manifest) {
++	p, ok := latestVerifyPointer(d, m)
++	if !ok {
++		return
++	}
++	fmt.Fprintln(out)
++	out.line(ansiCyan, "VERIFY REPORT")
++	fmt.Fprintf(out, "  %s\n", p.Path)
++	if phrase := p.CommitPhrase(); phrase != "" {
++		fmt.Fprintf(out, "  written against %s, %s\n", phrase, p.Written)
++	} else {
++		fmt.Fprintf(out, "  written %s\n", p.Written)
++	}
++}
++
+ // renderArtifactSummarySection points terminal users to the Artifact list while
+ // giving the same summary facts as the dashboard detail surface (ADR-0217).
+ func renderArtifactSummarySection(d *Deps, out *output, setID string, m *Manifest) {
+diff --git a/tasks/report.go b/tasks/report.go
+new file mode 100644
+index 00000000..7023625c
+--- /dev/null
++++ b/tasks/report.go
+@@ -0,0 +1,214 @@
++package tasks
++
++import (
++	"fmt"
++	"os"
++	"path/filepath"
++	"strings"
++	"time"
++)
++
++// reportKind is one pass that publishes a report into a set's folder: Refine and
++// verification today (ADR-0240, ADR-0245). The mechanics are the same for every
++// kind — a timestamped document per run under the set's own sub-directory, the
++// newest one being current, its header of facts read back from the document
++// itself — so a kind is only the names that keep one pass's documents apart
++// from another's.
++type reportKind struct {
++	// Label opens the document's heading ("<Label> report — <set>") and the
++	// pointer's one-line summary.
++	Label string
++	// Dir is the sub-directory of the set's folder the documents accumulate in.
++	// It sits under the Task-set directory, which lives in pop's Work store
++	// rather than in the repository, so no report can ever be staged into a
++	// commit (ADR-0214).
++	Dir string
++	// FilePrefix and the shared reportFileTimeLayout spell a document's name.
++	FilePrefix string
++	// ArtifactType is the type the set's Artifact list files the documents under.
++	ArtifactType string
++}
++
++// reportFileTimeLayout is the instant in every report's name. It is in the file
++// name rather than only in the document, because "the latest" is resolved by
++// timestamp and a directory listing must be able to answer that without opening
++// every file.
++const reportFileTimeLayout = "20060102T150405Z"
++
++// reportDocument is one report on disk: where it is, when it was written, and
++// what it says.
++type reportDocument struct {
++	Path string
++	At   time.Time
++	Body string
++}
++
++// reportFact is one "- Name: value" line of a report's header. A fact with an
++// empty value is left out of the document rather than printed blank.
++type reportFact struct {
++	Name  string
++	Value string
++}
++
++// FileInstant reads a report's name back as the instant it was written, and
++// false for anything else in the directory.
++func (k reportKind) FileInstant(name string) (time.Time, bool) {
++	stamp, ok := strings.CutPrefix(name, k.FilePrefix)
++	if !ok {
++		return time.Time{}, false
++	}
++	stamp, ok = strings.CutSuffix(stamp, ".md")
++	if !ok {
++		return time.Time{}, false
++	}
++	at, err := time.Parse(reportFileTimeLayout, stamp)
++	if err != nil {
++		return time.Time{}, false
++	}
++	return at, true
++}
++
++// fileName spells the document written at the instant.
++func (k reportKind) fileName(at time.Time) string {
++	return k.FilePrefix + at.Format(reportFileTimeLayout) + ".md"
++}
++
++// noun is the kind as operator messages name it ("refine", "verify").
++func (k reportKind) noun() string {
++	return strings.ToLower(k.Label)
++}
++
++// render wraps a pass's prose in the facts a reader needs to know what the
++// document describes. They ride the document rather than a side-car because the
++// document leaves pop the moment a human pipes it somewhere.
++func (k reportKind) render(setID string, facts []reportFact, body string) string {
++	var b strings.Builder
++	fmt.Fprintf(&b, "# %s report — %s\n\n", k.Label, setID)
++	for _, f := range facts {
++		if value := strings.TrimSpace(f.Value); value != "" {
++			fmt.Fprintf(&b, "- %s: %s\n", f.Name, value)
++		}
++	}
++	fmt.Fprintf(&b, "\n%s", ensureTrailingNewline(strings.TrimSpace(body)))
++	return b.String()
++}
++
++// write files a new document under the set's directory for the kind and
++// returns its path. A name already taken (two reports inside one second)
++// advances the instant rather than overwriting: retention is the whole point of
++// the directory, and the names are also the ordering.
++func (k reportKind) write(d *Deps, setDir string, at time.Time, body string) (string, error) {
++	dir := filepath.Join(setDir, k.Dir)
++	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
++		return "", exitErr(ExitOperational, "create %s directory: %v", k.Dir, err)
++	}
++	at = at.UTC().Truncate(time.Second)
++	taken := map[string]bool{}
++	if entries, err := d.FS.ReadDir(dir); err == nil {
++		for _, entry := range entries {
++			taken[entry.Name()] = true
++		}
++	}
++	name := k.fileName(at)
++	for taken[name] {
++		at = at.Add(time.Second)
++		name = k.fileName(at)
++	}
++	path := filepath.Join(dir, name)
++	if err := d.FS.WriteFile(path, []byte(ensureTrailingNewline(body)), 0o644); err != nil {
++		return "", exitErr(ExitOperational, "write %s report: %v", k.noun(), err)
++	}
++	return path, nil
++}
++
++// latest returns the set's current document of the kind — the one with the
++// newest timestamp in its name — and false when the set has none. Every earlier
++// document stays where it is; superseding is a matter of which one the readers
++// take, not of deleting the ones before it (ADR-0214).
++func (k reportKind) latest(d *Deps, setDir string) (reportDocument, bool) {
++	dir := filepath.Join(setDir, k.Dir)
++	entries, err := d.FS.ReadDir(dir)
++	if err != nil {
++		return reportDocument{}, false
++	}
++	var found reportDocument
++	ok := false
++	for _, entry := range entries {
++		at, isReport := k.FileInstant(entry.Name())
++		if entry.IsDir() || !isReport {
++			continue
++		}
++		if ok && !at.After(found.At) {
++			continue
++		}
++		found, ok = reportDocument{Path: filepath.Join(dir, entry.Name()), At: at}, true
++	}
++	if !ok {
++		return reportDocument{}, false
++	}
++	body, err := d.FS.ReadFile(found.Path)
++	if err != nil {
++		return reportDocument{}, false
++	}
++	found.Body = strings.TrimSpace(string(body))
++	return found, true
++}
++
++// listed is every document of the kind in the set's folder as Artifact rows,
++// each dated by the instant in its own name. A missing directory lists nothing.
++func (k reportKind) listed(d *Deps, setDir string) ([]Artifact, error) {
++	dir := filepath.Join(setDir, k.Dir)
++	entries, err := d.FS.ReadDir(dir)
++	if err != nil {
++		if os.IsNotExist(err) {
++			return nil, nil
++		}
++		return nil, err
++	}
++	var artifacts []Artifact
++	for _, entry := range entries {
++		at, ok := k.FileInstant(entry.Name())
++		if entry.IsDir() || !ok {
++			continue
++		}
++		artifacts = append(artifacts, Artifact{
++			Type: k.ArtifactType,
++			Name: entry.Name(),
++			Path: filepath.Join(dir, entry.Name()),
++			At:   at,
++		})
++	}
++	return artifacts, nil
++}
++
++// reportHeaderField reads one of the "- Field: value" facts render stamps at the
++// top of every report. The header is the document's own record of what it
++// describes, so reading it back beats keeping a side-car that a document copied
++// out of pop would leave behind.
++func reportHeaderField(body, field string) string {
++	prefix := "- " + field + ": "
++	inHeader := false
++	for _, line := range strings.Split(body, "\n") {
++		line = strings.TrimSpace(line)
++		if !strings.HasPrefix(line, "- ") {
++			// The header is the report's first bullet list; anything after it is
++			// the pass's prose, which may say anything at all.
++			if inHeader {
++				return ""
++			}
++			continue
++		}
++		inHeader = true
++		if rest, ok := strings.CutPrefix(line, prefix); ok {
++			return strings.TrimSpace(rest)
++		}
++	}
++	return ""
++}
++
++func ensureTrailingNewline(s string) string {
++	if strings.HasSuffix(s, "\n") {
++		return s
++	}
++	return s + "\n"
++}
+diff --git a/tasks/report_pointer.go b/tasks/report_pointer.go
+new file mode 100644
+index 00000000..382170d3
+--- /dev/null
++++ b/tasks/report_pointer.go
+@@ -0,0 +1,101 @@
++package tasks
++
++import (
++	"fmt"
++	"strings"
++)
++
++// ReportPointer is a set's current report of one kind as the surfaces a human
++// reads carry it: where the document is and which commit it was written
++// against, never what it says (ADR-0240, ADR-0245).
++type ReportPointer struct {
++	// Label names the kind the pointer leads to, as Summary opens with it.
++	Label string
++	// Path is the absolute path of the latest report.
++	Path string
++	// WorkSHA is the short work SHA the report was written against, empty when
++	// the document records none.
++	WorkSHA string
++	// CommitRange is the range the pass read, empty when the document records
++	// none.
++	CommitRange string
++	// Written is the instant in the report's name, RFC3339 in UTC.
++	Written string
++}
++
++// latestReportPointer resolves the pointer to a set's current report of the
++// kind, and false when the set has none.
++func latestReportPointer(d *Deps, k reportKind, m *Manifest) (ReportPointer, bool) {
++	if d == nil {
++		d = defaultDeps
++	}
++	if d == nil || d.FS == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
++		return ReportPointer{}, false
++	}
++	doc, ok := k.latest(d, m.Dir)
++	if !ok {
++		return ReportPointer{}, false
++	}
++	return ReportPointer{
++		Label:       k.Label,
++		Path:        doc.Path,
++		Written:     doc.At.UTC().Format("2006-01-02 15:04Z"),
++		WorkSHA:     reportHeaderField(doc.Body, reportFactWorkSHA),
++		CommitRange: reportHeaderField(doc.Body, reportFactCommitRange),
++	}, true
++}
++
++// The two header facts a pointer reads back: every kind stamps them under these
++// names, so one reader serves them all.
++const (
++	reportFactWorkSHA     = "Work SHA"
++	reportFactCommitRange = "Commit range"
++)
++
++// CommitPhrase names the commit the document was written against, in the one
++// form every surface prints it. Empty when the report recorded neither a work
++// SHA nor a range — an old or hand-edited document still shows its path.
++func (p ReportPointer) CommitPhrase() string {
++	switch {
++	case p.WorkSHA != "" && p.CommitRange != "":
++		return fmt.Sprintf("%s (%s)", p.WorkSHA, p.CommitRange)
++	case p.WorkSHA != "":
++		return p.WorkSHA
++	default:
++		return p.CommitRange
++	}
++}
++
++// Summary is the single line a gate preamble uses: which kind, the commit it
++// describes, when, and where to read it.
++func (p ReportPointer) Summary() string {
++	var b strings.Builder
++	b.WriteString(p.Label)
++	if phrase := p.CommitPhrase(); phrase != "" {
++		fmt.Fprintf(&b, " of %s", phrase)
++	}
++	if p.Written != "" {
++		fmt.Fprintf(&b, ", written %s", p.Written)
++	}
++	fmt.Fprintf(&b, ": %s", p.Path)
++	return b.String()
++}
++
++// StaleAgainst reports whether the checkout has moved past the commit this
++// report was written against. Unknown on either side is not staleness: a
++// document recording no work SHA, or a checkout whose HEAD pop cannot read, says
++// nothing about whether the report still describes today's files.
++//
++// Only the Refine pointer asks it. A Verify report answers why, never whether:
++// whether a judgment still holds at HEAD is the Verified-at badge's question
++// (ADR-0245).
++func (p ReportPointer) StaleAgainst(workSHA string) bool {
++	written, current := p.WorkSHA, ShortSHA(workSHA)
++	if written == "" || current == "" {
++		return false
++	}
++	// Either side may be the shorter abbreviation — a hand-edited header, or a
++	// document written when the shortening differed — so a common prefix counts
++	// as the same commit.
++	return !strings.HasPrefix(current, written) && !strings.HasPrefix(written, current)
++}
+diff --git a/tasks/run_tasks.go b/tasks/run_tasks.go
+index 4081f945..a21077df 100644
+--- a/tasks/run_tasks.go
++++ b/tasks/run_tasks.go
+@@ -97,6 +97,9 @@ type RunTaskSetResult struct {
+ 	// parked the drain. VerifyFindings carries the Verifier's human-facing reasons.
+ 	TaskSetVerifyFailed bool
+ 	VerifyFindings      string
++	// VerifyReport is the path of the set's latest Verify report, the full account
++	// the one-line findings above it are cut from (ADR-0245).
++	VerifyReport string
+ 	// VerifyRerunCmd is a copy-pasteable `pop tasks verify …` when verification failed.
+ 	VerifyRerunCmd string
+ 	SkippedTasks   []string
+@@ -293,6 +296,9 @@ func printTaskSetSummary(w io.Writer, result *RunTaskSetResult) {
+ 		if reason := firstFindingsLine(result.VerifyFindings); reason != "" {
+ 			out.line(ansiDim, "  %s", reason)
+ 		}
++		if result.VerifyReport != "" {
++			out.line(ansiDim, "  Report: %s", result.VerifyReport)
++		}
+ 		if result.VerifyRerunCmd != "" {
+ 			out.line(ansiDim, "  Re-run: %s", result.VerifyRerunCmd)
+ 		}
+diff --git a/tasks/testdata/prompts/verifier.bare.md b/tasks/testdata/prompts/verifier.bare.md
+index 6eb5609b..309cfa56 100644
+--- a/tasks/testdata/prompts/verifier.bare.md
++++ b/tasks/testdata/prompts/verifier.bare.md
+@@ -16,6 +16,8 @@ VERDICT: FIXABLE
+ VERDICT: NEEDS-HUMAN
+ Then, on the following lines:
+ SUMMARY: <in one line, what needs fixing — optional; omit for PASS>
+-FINDINGS: <what fails a criterion and why — leave empty for PASS>
++FINDINGS: <for FIXABLE or NEEDS-HUMAN, what fails a criterion and why; for PASS, what you checked and why each criterion is met>
++
++Everything after the VERDICT line is kept as this verification's report, which a human reads later to learn why you judged as you did — so write FINDINGS for that reader, a PASS included.
+ 
+ PASS = every acceptance criterion is met. FIXABLE = criteria are unmet but an agent could resolve the findings. NEEDS-HUMAN = the findings need a human decision. SUMMARY names, in one line, what needs fixing when remediation is warranted — it is optional and must not affect the verdict.
+diff --git a/tasks/testdata/prompts/verifier.full.md b/tasks/testdata/prompts/verifier.full.md
+index b7cb08bc..68be7d8e 100644
+--- a/tasks/testdata/prompts/verifier.full.md
++++ b/tasks/testdata/prompts/verifier.full.md
+@@ -69,7 +69,9 @@ VERDICT: NEEDS-HUMAN
+ Then, on the following lines:
+ SUMMARY: <in one line, what needs fixing — optional; omit for PASS>
+ COMMIT-SUBJECT: <one line — the commit subject the fix should be committed under>
+-FINDINGS: <what fails a criterion and why — leave empty for PASS>
++FINDINGS: <for FIXABLE or NEEDS-HUMAN, what fails a criterion and why; for PASS, what you checked and why each criterion is met>
++
++Everything after the VERDICT line is kept as this verification's report, which a human reads later to learn why you judged as you did — so write FINDINGS for that reader, a PASS included.
+ 
+ PASS = every acceptance criterion is met. FIXABLE = criteria are unmet but an agent could resolve the findings. NEEDS-HUMAN = the findings need a human decision. SUMMARY names, in one line, what needs fixing when remediation is warranted — it is optional and must not affect the verdict.
+ COMMIT-SUBJECT is the final, literal subject line the fix work will be committed under, written in the convention above — a real message describing the fix, not a template or a placeholder. Write it only when remediation is warranted; it is optional, must not affect the verdict, and must be a single line with no surrounding quotes or backticks.
+diff --git a/tasks/verify.go b/tasks/verify.go
+index 67ede6cb..db48f81b 100644
+--- a/tasks/verify.go
++++ b/tasks/verify.go
+@@ -284,11 +284,20 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	// Read before the upsert overwrites it: the verdict at this commit is the one
++	// the human is overriding, and the report names it.
++	overridden := ""
++	if prior := latestVerdict(d, opts.Repo, opts.SetID, workSHA); prior != nil && Verdict(prior.Verdict) != VerdictPass {
++		overridden = prior.Verdict
++	}
+ 	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
+ 		return store.PutVerifyVerdictExec(ctx, ex, v)
+ 	}); err != nil {
+ 		return nil, err
+ 	}
++	at := d.Now().UTC()
++	fileVerifyReport(d, opts.Output, m, opts.SetID, at,
++		renderAcceptedReport(at, opts.SetID, workSHA, verifyWorkDiff(d, opts.RuntimePath, opts.SetID, m).Range, overridden, note))
+ 	printAcceptedVerdict(opts.Output, opts.SetID, workSHA, note)
+ 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: VerdictPass}, nil
+ }
+@@ -522,13 +531,16 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
+ 	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote, resolveVerificationConvention(opts))
+ 
+ 	run := opts.runVerifier
++	agent := ""
+ 	if run == nil {
+ 		sel, err := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		run = func(prompt string) (string, error) {
+-			return runConfiguredVerifier(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout, opts.probeMemo)
++			raw, wrote, err := walkVerifierAgents(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout, opts.probeMemo)
++			agent = wrote
++			return raw, err
+ 		}
+ 	}
+ 	raw, err := run(prompt)
+@@ -554,8 +566,16 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
+ 		Scope:         afkTaskCount(m),
+ 		ComputedAt:    time.Now().UTC(),
+ 	}
+-
+-	return storeVerdict(d, v)
++	stored, err := storeVerdict(d, v)
++	if err != nil {
++		return nil, err
++	}
++	// Only a real invocation reaches here — a cached verdict returns before the
++	// Verifier runs — so every report on disk is one Verifier's answer (ADR-0245).
++	at := d.Now().UTC()
++	fileVerifyReport(d, opts.Output, m, opts.SetID, at,
++		renderVerifierReport(at, opts.SetID, workSHA, work.Range, agent, verdict, findings, raw))
++	return stored, nil
+ }
+ 
+ // storeVerdict upserts one verdict into the Drain store and hands back the
+@@ -818,20 +838,27 @@ func nonEmptyStrings(specs []string) []string {
+ // persisted without a verdict; the parsed invocation is persisted with its
+ // verdict. Persistence is best-effort and never fails the verify command.
+ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out, errOut io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, error) {
++	raw, _, err := walkVerifierAgents(d, cfg, sel, taskSetDir, setID, workSHA, runtimePath, prompt, out, errOut, timeout, probeMemo)
++	return raw, err
++}
++
++// walkVerifierAgents is runConfiguredVerifier that also names the agent whose
++// answer it returns, which the Verify report records as its author.
++func walkVerifierAgents(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out, errOut io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, string, error) {
+ 	if timeout <= 0 {
+ 		timeout = DefaultAttemptTimeout
+ 	}
+ 	maxTries, err := resolveVerifyMaxTries(cfg)
+ 	if err != nil {
+-		return "", exitErr(ExitSetup, "%v", err)
++		return "", "", exitErr(ExitSetup, "%v", err)
+ 	}
+ 	retryDelays, err := resolveVerifyAttemptRetryDelays(cfg)
+ 	if err != nil {
+-		return "", exitErr(ExitSetup, "%v", err)
++		return "", "", exitErr(ExitSetup, "%v", err)
+ 	}
+ 	quotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
+ 	if err != nil {
+-		return "", exitErr(ExitSetup, "%v", err)
++		return "", "", exitErr(ExitSetup, "%v", err)
+ 	}
+ 
+ 	walked, err := runAgentFallbackWalk(d, agentFallbackWalk{
+@@ -850,9 +877,10 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
+ 		probeMemo:       probeMemo,
+ 	})
+ 	if err != nil {
+-		return "", err
++		return "", "", err
+ 	}
+-	return resolveVerifierAgentExhaustion(walked.Answer, walked.Unavailable)
++	raw, err := resolveVerifierAgentExhaustion(walked.Answer, walked.Unavailable)
++	return raw, walked.Agent, err
+ }
+ 
+ // verifierRole is what the shared fallback walk calls the Verifier: its name in
+diff --git a/tasks/verify_phase.go b/tasks/verify_phase.go
+index dc304889..b218a2cb 100644
+--- a/tasks/verify_phase.go
++++ b/tasks/verify_phase.go
+@@ -155,6 +155,9 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
+ 		if verdict != nil {
+ 			result.VerifyFindings = verdict.Findings
+ 		}
++		if report, ok := latestVerifyPointer(d, m); ok {
++			result.VerifyReport = report.Path
++		}
+ 		result.VerifyRerunCmd = FormatVerifyCommand(taskSetID, opts.VerifyAgents, opts.VerifyEffort)
+ 		// Overlay the verdict-derived disposition on the display row so the
+ 		// rendered table reads VERIFY-FAILED, matching `pop tasks status`.
+@@ -196,6 +199,7 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
+ 			// the deferred finalize does not record verify_failed, and resume.
+ 			result.TaskSetVerifyFailed = false
+ 			result.VerifyFindings = ""
++			result.VerifyReport = ""
+ 			return verifyContinue, nil
+ 		}
+ 		if opts.Yes {
+diff --git a/tasks/verify_report.go b/tasks/verify_report.go
+new file mode 100644
+index 00000000..5849b108
+--- /dev/null
++++ b/tasks/verify_report.go
+@@ -0,0 +1,109 @@
++package tasks
++
++import (
++	"io"
++	"strings"
++	"time"
++)
++
++// verifyReport is the Verify report's place among the reports a set's folder
++// accumulates (ADR-0245): one document per Verifier invocation — and per human
++// Accept — under <set>/verify/, the newest current. Unlike the verdict cache it
++// is never deleted by Verification invalidation, so a verify→remediate→verify
++// lap leaves its whole trail.
++var verifyReport = reportKind{
++	Label:        "Verify",
++	Dir:          VerifyDirName,
++	FilePrefix:   "verify-",
++	ArtifactType: ArtifactTypeVerify,
++}
++
++// latestVerifyPointer resolves the pointer to a set's current Verify report,
++// and false when the set has never been verified.
++func latestVerifyPointer(d *Deps, m *Manifest) (ReportPointer, bool) {
++	return latestReportPointer(d, verifyReport, m)
++}
++
++// splitVerifierReply lifts the machine-read VERDICT line off the Verifier's
++// reply and returns the prose that stays, which becomes the report body. The
++// line removed is the one ParseVerdict reads, so the report and the cached
++// verdict never disagree about which line was the enum. A reply with no verdict
++// line is returned whole: a malformed answer is exactly the one a human must be
++// able to read in full.
++func splitVerifierReply(raw string) string {
++	lines := strings.Split(strings.TrimSpace(raw), "\n")
++	for i, line := range lines {
++		if _, ok := verdictLabelValue(line); !ok {
++			continue
++		}
++		return strings.TrimSpace(strings.Join(append(append([]string{}, lines[:i]...), lines[i+1:]...), "\n"))
++	}
++	return strings.TrimSpace(raw)
++}
++
++// verifyReportFacts is the header every Verify report carries, whoever wrote
++// it: when, which verdict, and against which commits. The author fact differs
++// by path and is appended by the caller.
++func verifyReportFacts(at time.Time, verdict, workSHA, commitRange string) []reportFact {
++	return []reportFact{
++		{Name: "Verified", Value: at.UTC().Format(time.RFC3339)},
++		{Name: "Verdict", Value: verdict},
++		{Name: reportFactCommitRange, Value: commitRange},
++		{Name: reportFactWorkSHA, Value: ShortSHA(workSHA)},
++	}
++}
++
++// renderVerifierReport is the document one Verifier invocation leaves: its
++// reply with the verdict line lifted off. A reply that says nothing past the
++// verdict still gets a document, carrying the findings pop parsed from it, so
++// every invocation is on record.
++func renderVerifierReport(at time.Time, setID, workSHA, commitRange, agent string, verdict Verdict, findings, raw string) string {
++	body := splitVerifierReply(raw)
++	if body == "" {
++		body = strings.TrimSpace(findings)
++	}
++	if body == "" {
++		body = "The Verifier gave no reasons beyond its verdict."
++	}
++	facts := append(verifyReportFacts(at, string(verdict), workSHA, commitRange),
++		reportFact{Name: "Verifier", Value: agent})
++	return verifyReport.render(setID, facts, body)
++}
++
++// renderAcceptedReport is the document a human Accept leaves (ADR-0103,
++// ADR-0245): no agent ran, so pop writes it from the human's own note and the
++// verdict it overrode. The author fact says so plainly, because this is the
++// report a later reader is most likely to find puzzling.
++func renderAcceptedReport(at time.Time, setID, workSHA, commitRange, overridden, note string) string {
++	if overridden == "" {
++		overridden = "no non-PASS verdict recorded at this commit"
++	}
++	facts := append(verifyReportFacts(at, string(VerdictPass)+" (human-authored)", workSHA, commitRange),
++		reportFact{Name: "Overrode", Value: overridden},
++		reportFact{Name: "Author", Value: "a human (Accept); no Verifier ran"})
++	var b strings.Builder
++	b.WriteString("## Why a human accepted this set\n\n")
++	if note = strings.TrimSpace(note); note != "" {
++		b.WriteString(note)
++	} else {
++		b.WriteString("The human recorded no rationale.")
++	}
++	return verifyReport.render(setID, facts, b.String())
++}
++
++// fileVerifyReport writes one Verify report for the set. The verdict is already
++// in the cache by the time this runs, and it is what gates the drain, so a
++// report that cannot be written is a warning rather than a failed verification.
++func fileVerifyReport(d *Deps, out io.Writer, m *Manifest, setID string, at time.Time, doc string) string {
++	if d == nil || d.FS == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
++		return ""
++	}
++	path, err := verifyReport.write(d, m.Dir, at, doc)
++	if err != nil {
++		if out != nil {
++			outputFor(out).line(ansiYellow, "   warning: write verify report for %s: %v", setID, err)
++		}
++		return ""
++	}
++	return path
++}
+diff --git a/tasks/verify_report_test.go b/tasks/verify_report_test.go
+new file mode 100644
+index 00000000..9fb0ed5d
+--- /dev/null
++++ b/tasks/verify_report_test.go
+@@ -0,0 +1,278 @@
++package tasks
++
++import (
++	"bytes"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/glebglazov/pop/store"
++)
++
++// verifyProse is the one string no agent-facing prompt may carry: the body of a
++// Verify report (ADR-0245).
++const verifyProse = "SECRET-VERIFY-PROSE"
++
++// verifyReports lists the set's Verify reports, oldest first, with their bodies.
++func verifyReports(t *testing.T, setDir string) []string {
++	t.Helper()
++	entries, err := os.ReadDir(filepath.Join(setDir, VerifyDirName))
++	if os.IsNotExist(err) {
++		return nil
++	}
++	if err != nil {
++		t.Fatalf("read verify dir: %v", err)
++	}
++	var bodies []string
++	for _, entry := range entries {
++		data, err := os.ReadFile(filepath.Join(setDir, VerifyDirName, entry.Name()))
++		if err != nil {
++			t.Fatalf("read report: %v", err)
++		}
++		bodies = append(bodies, string(data))
++	}
++	return bodies
++}
++
++func runVerifyWithReply(t *testing.T, d *Deps, defPath, reply string, gotPrompt *string) {
++	t.Helper()
++	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
++		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
++		Output: &bytes.Buffer{},
++		runVerifier: func(prompt string) (string, error) {
++			if gotPrompt != nil {
++				*gotPrompt = prompt
++			}
++			return reply, nil
++		},
++	}); err != nil {
++		t.Fatalf("verifyResolvedSet: %v", err)
++	}
++}
++
++// TestVerifierWritesAReportOnEveryVerdict: each verdict, PASS included, leaves a
++// document whose header records the verdict and commit and whose body is the
++// reply with the verdict line lifted off.
++func TestVerifierWritesAReportOnEveryVerdict(t *testing.T) {
++	t.Parallel()
++	for _, verdict := range []Verdict{VerdictPass, VerdictFixable, VerdictNeedsHuman} {
++		t.Run(string(verdict), func(t *testing.T) {
++			t.Parallel()
++			d, defPath := setupVerifyFixture(t, stubGit("shaV\n", "", ""))
++			runVerifyWithReply(t, d, defPath, "VERDICT: "+string(verdict)+"\nFINDINGS: checked criterion 1 because "+verifyProse+"\n", nil)
++
++			reports := verifyReports(t, filepath.Join(defPath, "demo"))
++			if len(reports) != 1 {
++				t.Fatalf("expected one report, got %d", len(reports))
++			}
++			doc := reports[0]
++			for _, want := range []string{"# Verify report — demo", "- Verdict: " + string(verdict), "- Work SHA: shaV", "FINDINGS: checked criterion 1 because " + verifyProse} {
++				if !strings.Contains(doc, want) {
++					t.Fatalf("report missing %q:\n%s", want, doc)
++				}
++			}
++			if strings.Contains(doc, "VERDICT:") {
++				t.Fatalf("the verdict line must be lifted off the report body:\n%s", doc)
++			}
++			if got := readStoredVerdict(t, d, "/repo/.git", "demo", "shaV"); got == nil || got.Verdict != string(verdict) {
++				t.Fatalf("verdict must still parse as %s, got %+v", verdict, got)
++			}
++		})
++	}
++}
++
++// TestMalformedReplyKeepsItsVerdictAndRawText: a reply without a verdict line
++// still parks as NEEDS-HUMAN, and its report keeps every word of it.
++func TestMalformedReplyKeepsItsVerdictAndRawText(t *testing.T) {
++	t.Parallel()
++	d, defPath := setupVerifyFixture(t, stubGit("shaM\n", "", ""))
++	runVerifyWithReply(t, d, defPath, "I looked around and "+verifyProse+" seemed fine.", nil)
++
++	if got := readStoredVerdict(t, d, "/repo/.git", "demo", "shaM"); got == nil || got.Verdict != string(VerdictNeedsHuman) {
++		t.Fatalf("malformed reply must resolve to NEEDS-HUMAN, got %+v", got)
++	}
++	reports := verifyReports(t, filepath.Join(defPath, "demo"))
++	if len(reports) != 1 || !strings.Contains(reports[0], "I looked around and "+verifyProse+" seemed fine.") {
++		t.Fatalf("report must keep the raw reply, got %q", reports)
++	}
++}
++
++// TestEachInvocationFilesItsOwnReport: a second invocation adds a document
++// rather than rewriting the first, and the Verifier's prompt never carries the
++// report its predecessor wrote.
++func TestEachInvocationFilesItsOwnReport(t *testing.T) {
++	t.Parallel()
++	d, defPath := setupVerifyFixture(t, stubGit("shaL\n", "", ""))
++	runVerifyWithReply(t, d, defPath, "VERDICT: FIXABLE\nFINDINGS: "+verifyProse+"\n", nil)
++	var second string
++	runVerifyWithReply(t, d, defPath, "VERDICT: PASS\nFINDINGS: all met\n", &second)
++
++	if got := len(verifyReports(t, filepath.Join(defPath, "demo"))); got != 2 {
++		t.Fatalf("expected two reports after two invocations, got %d", got)
++	}
++	if strings.Contains(second, verifyProse) || strings.Contains(second, VerifyDirName+"/verify-") {
++		t.Fatalf("the Verifier prompt must carry no previous report:\n%s", second)
++	}
++}
++
++// TestCachedVerdictWritesNoReport: a verdict served from the cache invokes no
++// agent and so leaves no document behind.
++func TestCachedVerdictWritesNoReport(t *testing.T) {
++	t.Parallel()
++	d, m := setupDrainVerifyFixture(t, stubGit("shaC\n", "", ""), doneAFKSet(), nil)
++	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaC", Verdict: "FIXABLE", Findings: "x"})
++
++	if _, err := ensureVerifyVerdict(d, nil, verifyCoreOptions{
++		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
++		runVerifier: func(string) (string, error) { t.Fatal("a cached verdict must not invoke the Verifier"); return "", nil },
++	}, m, "shaC"); err != nil {
++		t.Fatalf("ensureVerifyVerdict: %v", err)
++	}
++	if reports := verifyReports(t, m.Dir); len(reports) != 0 {
++		t.Fatalf("a cached verdict must write no report, got %d", len(reports))
++	}
++}
++
++// TestReportsSurviveVerificationInvalidation: invalidation deletes the cached
++// verdict and leaves the report where it is.
++func TestReportsSurviveVerificationInvalidation(t *testing.T) {
++	t.Parallel()
++	d, defPath := setupVerifyFixture(t, stubGit("shaI\n", "", ""))
++	runVerifyWithReply(t, d, defPath, "VERDICT: FIXABLE\nFINDINGS: criterion 2 unmet\n", nil)
++
++	invalidateVerifyVerdicts(d, "/repo/.git", "demo")
++
++	if got := readStoredVerdict(t, d, "/repo/.git", "demo", "shaI"); got != nil {
++		t.Fatalf("invalidation must still delete the cached verdict, got %+v", got)
++	}
++	if got := len(verifyReports(t, filepath.Join(defPath, "demo"))); got != 1 {
++		t.Fatalf("the report must survive invalidation, got %d", got)
++	}
++}
++
++// TestAcceptWritesAHumanAuthoredReport: a human PASS over a FIXABLE leaves a
++// report carrying the note and the overridden verdict, says a human wrote it,
++// runs no agent, and is what the latest-report readers then find.
++func TestAcceptWritesAHumanAuthoredReport(t *testing.T) {
++	t.Parallel()
++	d, defPath := setupVerifyFixture(t, stubGit("shaH\n", "", ""))
++	runVerifyWithReply(t, d, defPath, "VERDICT: FIXABLE\nFINDINGS: the widget gap\n", nil)
++
++	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
++		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
++		Output: &bytes.Buffer{}, Accept: true, AcceptNote: "the widget gap is deliberate",
++		runVerifier: func(string) (string, error) { t.Fatal("Accept must not invoke the Verifier"); return "", nil },
++	}); err != nil {
++		t.Fatalf("accept: %v", err)
++	}
++
++	m := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
++	p, ok := latestVerifyPointer(d, m)
++	if !ok {
++		t.Fatal("expected a Verify report pointer after Accept")
++	}
++	data, err := os.ReadFile(p.Path)
++	if err != nil {
++		t.Fatalf("read accepted report: %v", err)
++	}
++	doc := string(data)
++	for _, want := range []string{"# Verify report — demo", "- Verdict: PASS (human-authored)", "- Overrode: FIXABLE", "- Author: a human", "- Work SHA: shaH", "the widget gap is deliberate"} {
++		if !strings.Contains(doc, want) {
++			t.Fatalf("accepted report missing %q:\n%s", want, doc)
++		}
++	}
++	if p.WorkSHA != "shaH" {
++		t.Fatalf("pointer must read the accepted report's header, got %+v", p)
++	}
++}
++
++// seedVerifyReport files one Verifier-authored report for the fixture set.
++func seedVerifyReport(t *testing.T, d *Deps, m *Manifest) string {
++	t.Helper()
++	at := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
++	doc := renderVerifierReport(at, "demo", "fed456fed456", "aaa111^..HEAD", "claude", VerdictPass, "", "VERDICT: PASS\nFINDINGS: "+verifyProse)
++	path, err := verifyReport.write(d, m.Dir, at, doc)
++	if err != nil {
++		t.Fatalf("write verify report: %v", err)
++	}
++	return path
++}
++
++// TestVerifyPointerReachesHumanSurfacesOnly: the gate preamble, its paging
++// entry, the detail view and the Artifact list carry the pointer, the
++// agent-facing prompts do not, and none of them prints the document.
++func TestVerifyPointerReachesHumanSurfacesOnly(t *testing.T) {
++	t.Parallel()
++	d, m := hitlFixture(t)
++	refinePath := seedRefineReport(t, d, m)
++	verifyPath := seedVerifyReport(t, d, m)
++
++	// Re-verify is not offered here, so the verify entry takes key 5 and the
++	// refine entry the next one.
++	gate, action := hitlGateOutput(t, d, m, "5\n")
++	if action != hitlGateReadVerify {
++		t.Fatalf("expected the verify entry at key 5, got action %d", action)
++	}
++	for _, want := range []string{verifyPath, "fed456fed456", "Read the verify report", "Read the refine report"} {
++		if !strings.Contains(gate, want) {
++			t.Fatalf("gate missing %q:\n%s", want, gate)
++		}
++	}
++	if _, action := hitlGateOutput(t, d, m, "6\n"); action != hitlGateReadRefine {
++		t.Fatalf("expected the refine entry at key 6, got action %d", action)
++	}
++
++	var detail bytes.Buffer
++	RenderTaskSetDetail(d, &detail, "demo", nil, m)
++	for _, want := range []string{"VERIFY REPORT", verifyPath, "fed456fed456"} {
++		if !strings.Contains(detail.String(), want) {
++			t.Fatalf("detail view missing %q:\n%s", want, detail.String())
++		}
++	}
++
++	artifacts, err := Artifacts(d, m.Dir)
++	if err != nil {
++		t.Fatalf("Artifacts: %v", err)
++	}
++	if len(artifacts) < 2 || artifacts[0].Path != verifyPath || artifacts[1].Path != refinePath {
++		t.Fatalf("the verify report must rank above the refine report, got %+v", artifacts)
++	}
++
++	agentPrompts := map[string]string{
++		"hitl assistance":          BuildHITLAssistancePrompt(d, "demo", m, m.Tasks[1], "/rt"),
++		"failed assistance":        BuildFailedAssistancePrompt(d, "demo", m, m.Tasks[0], "/rt"),
++		"verify-failed assistance": BuildVerifyFailedAssistancePrompt(d, "demo", m, "sha1", "x", "/rt"),
++		"interrupt assistance":     BuildInterruptAssistancePrompt(d, "demo", m, m.Tasks[0], "/rt"),
++		"assist":                   BuildAssistPrompt(d, "demo", m, StatusAwaitingApproval, "/rt", ""),
++	}
++	for name, text := range agentPrompts {
++		if strings.Contains(text, verifyPath) {
++			t.Fatalf("%s prompt gained the verify pointer:\n%s", name, text)
++		}
++	}
++	for name, text := range map[string]string{"gate": gate, "detail view": detail.String()} {
++		if strings.Contains(text, verifyProse) {
++			t.Fatalf("%s inlined the verify report:\n%s", name, text)
++		}
++	}
++}
++
++// TestNeverVerifiedSetShowsNoVerifyReport: with no report on disk, no surface
++// mentions one.
++func TestNeverVerifiedSetShowsNoVerifyReport(t *testing.T) {
++	t.Parallel()
++	d, m := hitlFixture(t)
++
++	gate, _ := hitlGateOutput(t, d, m, "0\n")
++	var detail bytes.Buffer
++	RenderTaskSetDetail(d, &detail, "demo", nil, m)
++
++	if strings.Contains(strings.ToLower(gate), "verify report") {
++		t.Fatalf("gate mentions a verify report the set does not have:\n%s", gate)
++	}
++	if strings.Contains(detail.String(), "VERIFY REPORT") {
++		t.Fatalf("detail view mentions a verify report the set does not have:\n%s", detail.String())
++	}
++}

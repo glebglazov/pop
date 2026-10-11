@@ -1,0 +1,1557 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "cfc8ae2f128335fc6af5c0825484fe814178b2729633525a39800412bcd0232c",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t74.904s\nok  \tgithub.com/glebglazov/pop/config\t3.878s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t4.399s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t91.881s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.260s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.694s\nok  \tgithub.com/glebglazov/pop/integrate\t59.443s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.809s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.777s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.039s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.403s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.531s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.232s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.563s\nok  \tgithub.com/glebglazov/pop/layout\t1.912s\nok  \tgithub.com/glebglazov/pop/monitor\t3.937s\nok  \tgithub.com/glebglazov/pop/project\t3.133s\nok  \tgithub.com/glebglazov/pop/release\t2.203s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.300s\nok  \tgithub.com/glebglazov/pop/routine\t20.347s\nok  \tgithub.com/glebglazov/pop/store\t5.902s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t36.363s\nok  \tgithub.com/glebglazov/pop/tasks\t142.830s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t32.127s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.569s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t43.960s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.775s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.494s\nok  \tgithub.com/glebglazov/pop/ui\t6.737s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.530s\nok  \tgithub.com/glebglazov/pop/work\t1.677s\nok  \tgithub.com/glebglazov/pop/work/ref\t0.437s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t73.973s\nok  \tgithub.com/glebglazov/pop/config\t2.799s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.762s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t90.039s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.426s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t2.547s\nok  \tgithub.com/glebglazov/pop/integrate\t57.526s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.239s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.551s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.803s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.072s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.206s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t7.776s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t1.721s\nok  \tgithub.com/glebglazov/pop/layout\t1.884s\nok  \tgithub.com/glebglazov/pop/monitor\t4.255s\nok  \tgithub.com/glebglazov/pop/project\t3.519s\nok  \tgithub.com/glebglazov/pop/release\t2.403s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.420s\nok  \tgithub.com/glebglazov/pop/routine\t16.796s\nok  \tgithub.com/glebglazov/pop/store\t5.515s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t33.328s\nok  \tgithub.com/glebglazov/pop/tasks\t139.957s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t31.725s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.860s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t43.544s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.138s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t1.234s\nok  \tgithub.com/glebglazov/pop/ui\t6.662s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.092s\nok  \tgithub.com/glebglazov/pop/work\t1.009s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.024s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Artifacts assigns exploration its own type and orders it between spec and progress."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Dashboard artifacts consume the same ordered artifact list."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "The orphan check explicitly exempts ExplorationFileName."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Other manifest validation and orphan rejection remain intact."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "ExploreRequested reads the set-level explore boolean."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Missing or false explore values disable automatic exploration."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "ExplorerOverride parses the shared AgentDirective shape."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "The guide explicitly distinguishes exploration’s opt-in from verify/refine’s opt-out."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "The guide states the shared-seam and dependent-later-task rule."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Shared constants generate the guide, with a manifest-loading consistency test."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "The command launches an Explorer with the task listing, task bodies and optional spec."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "The prompt requests locations, ownership, invariants, test shape and ranged reads."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "The prompt requires path-or-symbol claims, approximately one page and the observed tree."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "The requested report structure contains no prior-art section."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Successful passes atomically replace the flat exploration.md file."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "Explore has its own captured-run phase, spend accounting and retry-cap attribution."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Manual exploration bypasses both participation and automatic-exploration gates."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Failed, timed-out and interrupted runs return without replacing the report."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "The command test drives agent output through report creation and captured-run replay."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Both implementation entry points conditionally include the report path and explanation."
+        },
+        {
+          "item": 21,
+          "met": true,
+          "reason": "Implementation prompts receive only the report path, with a long-body exclusion test."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "The prompt limits edits to lines this attempt falsified."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "The edit boundary explicitly permits the exploration report beside the task file."
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "The prior-art block remains unchanged, with comparison coverage."
+        },
+        {
+          "item": 25,
+          "met": true,
+          "reason": "Assist includes the exploration pointer beside refinement and recent progress."
+        },
+        {
+          "item": 26,
+          "met": true,
+          "reason": "Implement and assist goldens cover report-present and report-absent cases."
+        },
+        {
+          "item": 27,
+          "met": true,
+          "reason": "The drain invokes exploration before executing its first selected task."
+        },
+        {
+          "item": 28,
+          "met": true,
+          "reason": "An existing report bypasses the Explorer and its spending."
+        },
+        {
+          "item": 29,
+          "met": true,
+          "reason": "Undeclared sets bypass automatic exploration."
+        },
+        {
+          "item": 30,
+          "met": true,
+          "reason": "The dedicated work.explore gate defaults on when its group or key is absent."
+        },
+        {
+          "item": 31,
+          "met": true,
+          "reason": "Disabling the machine gate suppresses automatic passes without disabling manual exploration."
+        },
+        {
+          "item": 32,
+          "met": true,
+          "reason": "Resolution applies CLI overrides before manifest directives, configuration and defaults."
+        },
+        {
+          "item": 33,
+          "met": true,
+          "reason": "HumanCompleted explicitly bypasses the automatic explore phase."
+        },
+        {
+          "item": 34,
+          "met": true,
+          "reason": "Existing reports are reused without comparing their recorded tree to the checkout."
+        },
+        {
+          "item": 35,
+          "met": true,
+          "reason": "Whole-drain tests assert exploration runs without a report and skips with one."
+        },
+        {
+          "item": 36,
+          "met": true,
+          "reason": "The shared fallback walker applies the standard retry cap and delays."
+        },
+        {
+          "item": 37,
+          "met": true,
+          "reason": "Exhausted exploration without a report derives EXPLORE-FAILED and stops the drain."
+        },
+        {
+          "item": 38,
+          "met": true,
+          "reason": "Parking derives from captured-run metadata and report absence without schema changes."
+        },
+        {
+          "item": 39,
+          "met": true,
+          "reason": "EXPLORE-FAILED is separate from the unchanged BLOCKED status."
+        },
+        {
+          "item": 40,
+          "met": true,
+          "reason": "Daemon and automatic READY selection exclude EXPLORE-FAILED rows."
+        },
+        {
+          "item": 41,
+          "met": false,
+          "reason": "attendableHITLTaskSets ignores row status, so a parked set with an eligible HITL task remains selectable."
+        },
+        {
+          "item": 42,
+          "met": false,
+          "reason": "A failed manual explore can derive a park without a progress record; only the drain phase appends one."
+        },
+        {
+          "item": 43,
+          "met": true,
+          "reason": "--skip-explore bypasses both automatic exploration and the existing park for that drain."
+        },
+        {
+          "item": 44,
+          "met": true,
+          "reason": "Writing a report or retracting explore clears the derived park."
+        },
+        {
+          "item": 45,
+          "met": true,
+          "reason": "CONTEXT.md lists EXPLORE-FAILED among drain stops and automatic-selection exclusions."
+        },
+        {
+          "item": 46,
+          "met": true,
+          "reason": "Unexplored sets carry separate mark and reason fields."
+        },
+        {
+          "item": 47,
+          "met": true,
+          "reason": "Undeclared sets receive no exploration mark."
+        },
+        {
+          "item": 48,
+          "met": true,
+          "reason": "Refresh resolves exploration once into fields shared by the four requested surfaces."
+        },
+        {
+          "item": 49,
+          "met": true,
+          "reason": "Shared status segments render parked sets’ exploration marks on dashboard rows and work status."
+        },
+        {
+          "item": 50,
+          "met": false,
+          "reason": "Reports on undeclared sets lack the path-and-tree detail pointer because ResolveExploreMark returns before reading them.",
+          "split": true
+        },
+        {
+          "item": 51,
+          "met": false,
+          "reason": "The sign-off gate omits existing exploration reports when explore is absent or false.",
+          "split": true
+        },
+        {
+          "item": 52,
+          "met": false,
+          "reason": "After report deletion, a completed captured run falls through to the failed reason, parking instead of re-exploring."
+        }
+      ],
+      "list_ratio": 0.9038461538461539,
+      "quality": 3,
+      "rationale": "Good reuse and broad tests, but recovery, HITL selection, progress recording and manually generated report visibility have correctness gaps."
+    },
+    "samples": [
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "09835427-8f63-4b0d-bf4d-773dc49aa2d9",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 1450004,
+              "Output": 3686,
+              "CacheRead": 1324288,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 18,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 134843,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Artifacts assigns exploration its own type and orders it between spec and progress.\nITEM 2 MET: Dashboard artifacts consume the same ordered artifact list.\nITEM 3 MET: The orphan check explicitly exempts ExplorationFileName.\nITEM 4 MET: Other manifest validation and orphan rejection remain intact.\nITEM 5 MET: ExploreRequested reads the set-level explore boolean.\nITEM 6 MET: Missing or false explore values disable automatic exploration.\nITEM 7 MET: ExplorerOverride parses the shared AgentDirective shape.\nITEM 8 MET: The guide explicitly distinguishes exploration’s opt-in from verify/refine’s opt-out.\nITEM 9 MET: The guide states the shared-seam and dependent-later-task rule.\nITEM 10 MET: Shared constants generate the guide, with a manifest-loading consistency test.\nITEM 11 MET: The command launches an Explorer with the task listing, task bodies and optional spec.\nITEM 12 MET: The prompt requests locations, ownership, invariants, test shape and ranged reads.\nITEM 13 MET: The prompt requires path-or-symbol claims, approximately one page and the observed tree.\nITEM 14 MET: The requested report structure contains no prior-art section.\nITEM 15 MET: Successful passes atomically replace the flat exploration.md file.\nITEM 16 MET: Explore has its own captured-run phase, spend accounting and retry-cap attribution.\nITEM 17 MET: Manual exploration bypasses both participation and automatic-exploration gates.\nITEM 18 MET: Failed, timed-out and interrupted runs return without replacing the report.\nITEM 19 MET: The command test drives agent output through report creation and captured-run replay.\nITEM 20 MET: Both implementation entry points conditionally include the report path and explanation.\nITEM 21 MET: Implementation prompts receive only the report path, with a long-body exclusion test.\nITEM 22 MET: The prompt limits edits to lines this attempt falsified.\nITEM 23 MET: The edit boundary explicitly permits the exploration report beside the task file.\nITEM 24 MET: The prior-art block remains unchanged, with comparison coverage.\nITEM 25 MET: Assist includes the exploration pointer beside refinement and recent progress.\nITEM 26 MET: Implement and assist goldens cover report-present and report-absent cases.\nITEM 27 MET: The drain invokes exploration before executing its first selected task.\nITEM 28 MET: An existing report bypasses the Explorer and its spending.\nITEM 29 MET: Undeclared sets bypass automatic exploration.\nITEM 30 MET: The dedicated work.explore gate defaults on when its group or key is absent.\nITEM 31 MET: Disabling the machine gate suppresses automatic passes without disabling manual exploration.\nITEM 32 MET: Resolution applies CLI overrides before manifest directives, configuration and defaults.\nITEM 33 MET: HumanCompleted explicitly bypasses the automatic explore phase.\nITEM 34 MET: Existing reports are reused without comparing their recorded tree to the checkout.\nITEM 35 MET: Whole-drain tests assert exploration runs without a report and skips with one.\nITEM 36 MET: The shared fallback walker applies the standard retry cap and delays.\nITEM 37 MET: Exhausted exploration without a report derives EXPLORE-FAILED and stops the drain.\nITEM 38 MET: Parking derives from captured-run metadata and report absence without schema changes.\nITEM 39 MET: EXPLORE-FAILED is separate from the unchanged BLOCKED status.\nITEM 40 MET: Daemon and automatic READY selection exclude EXPLORE-FAILED rows.\nITEM 41 NOT_MET: attendableHITLTaskSets ignores row status, so a parked set with an eligible HITL task remains selectable.\nITEM 42 NOT_MET: A failed manual explore can derive a park without a progress record; only the drain phase appends one.\nITEM 43 MET: --skip-explore bypasses both automatic exploration and the existing park for that drain.\nITEM 44 MET: Writing a report or retracting explore clears the derived park.\nITEM 45 MET: CONTEXT.md lists EXPLORE-FAILED among drain stops and automatic-selection exclusions.\nITEM 46 MET: Unexplored sets carry separate mark and reason fields.\nITEM 47 MET: Undeclared sets receive no exploration mark.\nITEM 48 MET: Refresh resolves exploration once into fields shared by the four requested surfaces.\nITEM 49 MET: Shared status segments render parked sets’ exploration marks on dashboard rows and work status.\nITEM 50 NOT_MET: Reports on undeclared sets lack the path-and-tree detail pointer because ResolveExploreMark returns before reading them.\nITEM 51 NOT_MET: The sign-off gate omits existing exploration reports when explore is absent or false.\nITEM 52 NOT_MET: After report deletion, a completed captured run falls through to the failed reason, parking instead of re-exploring.\nQUALITY 3: Good reuse and broad tests, but recovery, HITL selection, progress recording and manually generated report visibility have correctness gaps.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Artifacts assigns exploration its own type and orders it between spec and progress."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Dashboard artifacts consume the same ordered artifact list."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The orphan check explicitly exempts ExplorationFileName."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Other manifest validation and orphan rejection remain intact."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "ExploreRequested reads the set-level explore boolean."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Missing or false explore values disable automatic exploration."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "ExplorerOverride parses the shared AgentDirective shape."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "The guide explicitly distinguishes exploration’s opt-in from verify/refine’s opt-out."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The guide states the shared-seam and dependent-later-task rule."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Shared constants generate the guide, with a manifest-loading consistency test."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "The command launches an Explorer with the task listing, task bodies and optional spec."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "The prompt requests locations, ownership, invariants, test shape and ranged reads."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "The prompt requires path-or-symbol claims, approximately one page and the observed tree."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The requested report structure contains no prior-art section."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Successful passes atomically replace the flat exploration.md file."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Explore has its own captured-run phase, spend accounting and retry-cap attribution."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Manual exploration bypasses both participation and automatic-exploration gates."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Failed, timed-out and interrupted runs return without replacing the report."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "The command test drives agent output through report creation and captured-run replay."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Both implementation entry points conditionally include the report path and explanation."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Implementation prompts receive only the report path, with a long-body exclusion test."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "The prompt limits edits to lines this attempt falsified."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "The edit boundary explicitly permits the exploration report beside the task file."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "The prior-art block remains unchanged, with comparison coverage."
+            },
+            {
+              "item": 25,
+              "met": true,
+              "reason": "Assist includes the exploration pointer beside refinement and recent progress."
+            },
+            {
+              "item": 26,
+              "met": true,
+              "reason": "Implement and assist goldens cover report-present and report-absent cases."
+            },
+            {
+              "item": 27,
+              "met": true,
+              "reason": "The drain invokes exploration before executing its first selected task."
+            },
+            {
+              "item": 28,
+              "met": true,
+              "reason": "An existing report bypasses the Explorer and its spending."
+            },
+            {
+              "item": 29,
+              "met": true,
+              "reason": "Undeclared sets bypass automatic exploration."
+            },
+            {
+              "item": 30,
+              "met": true,
+              "reason": "The dedicated work.explore gate defaults on when its group or key is absent."
+            },
+            {
+              "item": 31,
+              "met": true,
+              "reason": "Disabling the machine gate suppresses automatic passes without disabling manual exploration."
+            },
+            {
+              "item": 32,
+              "met": true,
+              "reason": "Resolution applies CLI overrides before manifest directives, configuration and defaults."
+            },
+            {
+              "item": 33,
+              "met": true,
+              "reason": "HumanCompleted explicitly bypasses the automatic explore phase."
+            },
+            {
+              "item": 34,
+              "met": true,
+              "reason": "Existing reports are reused without comparing their recorded tree to the checkout."
+            },
+            {
+              "item": 35,
+              "met": true,
+              "reason": "Whole-drain tests assert exploration runs without a report and skips with one."
+            },
+            {
+              "item": 36,
+              "met": true,
+              "reason": "The shared fallback walker applies the standard retry cap and delays."
+            },
+            {
+              "item": 37,
+              "met": true,
+              "reason": "Exhausted exploration without a report derives EXPLORE-FAILED and stops the drain."
+            },
+            {
+              "item": 38,
+              "met": true,
+              "reason": "Parking derives from captured-run metadata and report absence without schema changes."
+            },
+            {
+              "item": 39,
+              "met": true,
+              "reason": "EXPLORE-FAILED is separate from the unchanged BLOCKED status."
+            },
+            {
+              "item": 40,
+              "met": true,
+              "reason": "Daemon and automatic READY selection exclude EXPLORE-FAILED rows."
+            },
+            {
+              "item": 41,
+              "met": false,
+              "reason": "attendableHITLTaskSets ignores row status, so a parked set with an eligible HITL task remains selectable."
+            },
+            {
+              "item": 42,
+              "met": false,
+              "reason": "A failed manual explore can derive a park without a progress record; only the drain phase appends one."
+            },
+            {
+              "item": 43,
+              "met": true,
+              "reason": "--skip-explore bypasses both automatic exploration and the existing park for that drain."
+            },
+            {
+              "item": 44,
+              "met": true,
+              "reason": "Writing a report or retracting explore clears the derived park."
+            },
+            {
+              "item": 45,
+              "met": true,
+              "reason": "CONTEXT.md lists EXPLORE-FAILED among drain stops and automatic-selection exclusions."
+            },
+            {
+              "item": 46,
+              "met": true,
+              "reason": "Unexplored sets carry separate mark and reason fields."
+            },
+            {
+              "item": 47,
+              "met": true,
+              "reason": "Undeclared sets receive no exploration mark."
+            },
+            {
+              "item": 48,
+              "met": true,
+              "reason": "Refresh resolves exploration once into fields shared by the four requested surfaces."
+            },
+            {
+              "item": 49,
+              "met": true,
+              "reason": "Shared status segments render parked sets’ exploration marks on dashboard rows and work status."
+            },
+            {
+              "item": 50,
+              "met": false,
+              "reason": "Reports on undeclared sets lack the path-and-tree detail pointer because ResolveExploreMark returns before reading them."
+            },
+            {
+              "item": 51,
+              "met": false,
+              "reason": "The sign-off gate omits existing exploration reports when explore is absent or false."
+            },
+            {
+              "item": 52,
+              "met": false,
+              "reason": "After report deletion, a completed captured run falls through to the failed reason, parking instead of re-exploring."
+            }
+          ],
+          "list_ratio": 0.9038461538461539,
+          "quality": 3,
+          "rationale": "Good reuse and broad tests, but recovery, HITL selection, progress recording and manually generated report visibility have correctness gaps."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "abbb3b14-ca35-45a8-89c8-2ee273780a0f",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 1510605,
+              "Output": 4486,
+              "CacheRead": 1389312,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 18,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 136495,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: The shared artifact list places type \"exploration\" after spec and before progress.\nITEM 2 MET: Dashboard artifacts consume that same ordered list.\nITEM 3 MET: The orphan-markdown validator explicitly exempts exploration.md.\nITEM 4 MET: Other validation rules and rejection of unlisted markdown remain intact.\nITEM 5 MET: ExploreRequested reads the set-level explore boolean.\nITEM 6 MET: Missing or false explore values disable automatic exploration.\nITEM 7 MET: ExplorerOverride uses the shared agents-and-effort directive parser.\nITEM 8 MET: The guide documents both keys and explicitly distinguishes opt-in from opt-out.\nITEM 9 MET: The guide states the shared-seam and dependent-later-task rule.\nITEM 10 MET: Shared constants supply the guide and manifest reader, with a consistency test.\nITEM 11 MET: The command launches an Explorer with task listings, all task bodies, and available spec.\nITEM 12 MET: The prompt requests all five required aspects of the existing code.\nITEM 13 MET: The prompt requires path or symbol evidence, approximately one page, and the observed tree.\nITEM 14 MET: Neither the prompt’s requested structure nor the report wrapper adds prior art.\nITEM 15 MET: Successful passes atomically replace the flat exploration.md file.\nITEM 16 MET: Explore has its own captured-run phase, spend bucket, and retry-cap accounting.\nITEM 17 MET: Manual exploration bypasses both manifest participation and the automatic config gate.\nITEM 18 MET: Failed, timed-out, and interrupted passes return before report replacement.\nITEM 19 MET: The command integration test checks the agent prompt, replacement report, and captured-run replay.\nITEM 20 MET: Both implement paths conditionally include the existing report’s path and description.\nITEM 21 MET: Implement prompts receive only the report path, with a large-report regression test.\nITEM 22 MET: The prompt limits edits to lines falsified by the current attempt.\nITEM 23 MET: The edit boundary explicitly permits the report beside the task file.\nITEM 24 MET: The prior-art block remains unchanged, with a byte-comparison test.\nITEM 25 MET: Assist includes the exploration pointer alongside refinement context and recent progress.\nITEM 26 MET: Implement and assist goldens cover report-present and report-absent cases.\nITEM 27 MET: The drain runs exploration at loop entry before dispatching task implementation.\nITEM 28 MET: An existing report bypasses the Explorer and its spending.\nITEM 29 MET: The automatic phase requires ExploreRequested to be true.\nITEM 30 MET: The separate work.explore group defaults enabled when its group or key is absent.\nITEM 31 MET: Disabling automatic exploration skips the drain pass without disabling manual exploration.\nITEM 32 MET: Resolution follows CLI flags, manifest directive, configuration, then defaults.\nITEM 33 MET: HumanCompleted explicitly bypasses automatic exploration.\nITEM 34 MET: Report reuse depends on presence, without comparing its recorded tree to the checkout.\nITEM 35 MET: Whole-drain tests assert exploration runs without a report and is skipped with one.\nITEM 36 MET: The shared fallback walker applies the standard retry cap and delays.\nITEM 37 MET: Exhausted failures without a report derive EXPLORE-FAILED and stop the drain.\nITEM 38 MET: Parking derives from captured-run metadata and report absence without schema changes.\nITEM 39 MET: EXPLORE-FAILED is distinct from the existing BLOCKED status.\nITEM 40 MET: Daemon and automatic ready-set selection require READY, excluding parked rows.\nITEM 41 NOT_MET: attendableHITLTaskSets ignores row status and can select a parked set containing an eligible HITL task.\nITEM 42 NOT_MET: A failed manual explore can derive a park without any progress record; recording exists only in the drain phase.\nITEM 43 MET: --skip-explore bypasses exploration and the park check for the explicit drain.\nITEM 44 MET: Writing a report or removing the declaration clears the derived park.\nITEM 45 MET: CONTEXT.md lists EXPLORE-FAILED among drain stops and automatic-selection exclusions.\nITEM 46 MET: Unexplored marks and their reasons occupy separate fields and render beside status.\nITEM 47 MET: Undeclared sets resolve to an absent exploration mark.\nITEM 48 MET: Refresh resolves the mark once and propagates it to all four read surfaces.\nITEM 49 MET: Shared Work status rendering includes exploration marks even on parked rows.\nITEM 50 NOT_MET: Reports created manually for undeclared sets lack the dashboard’s path-and-tree pointer because resolution suppresses it.\nITEM 51 NOT_MET: The sign-off gate hides existing exploration reports unless the manifest declares explore.\nITEM 52 NOT_MET: A completed captured run with a subsequently deleted report resolves as failed, parking instead of re-exploring.\nQUALITY 3: Clear shared abstractions and broad test coverage, but lifecycle, fallback-selection, and report-visibility gaps remain; assessment was static.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "The shared artifact list places type \"exploration\" after spec and before progress."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Dashboard artifacts consume that same ordered list."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The orphan-markdown validator explicitly exempts exploration.md."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Other validation rules and rejection of unlisted markdown remain intact."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "ExploreRequested reads the set-level explore boolean."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Missing or false explore values disable automatic exploration."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "ExplorerOverride uses the shared agents-and-effort directive parser."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "The guide documents both keys and explicitly distinguishes opt-in from opt-out."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The guide states the shared-seam and dependent-later-task rule."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Shared constants supply the guide and manifest reader, with a consistency test."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "The command launches an Explorer with task listings, all task bodies, and available spec."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "The prompt requests all five required aspects of the existing code."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "The prompt requires path or symbol evidence, approximately one page, and the observed tree."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Neither the prompt’s requested structure nor the report wrapper adds prior art."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Successful passes atomically replace the flat exploration.md file."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Explore has its own captured-run phase, spend bucket, and retry-cap accounting."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Manual exploration bypasses both manifest participation and the automatic config gate."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Failed, timed-out, and interrupted passes return before report replacement."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "The command integration test checks the agent prompt, replacement report, and captured-run replay."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Both implement paths conditionally include the existing report’s path and description."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Implement prompts receive only the report path, with a large-report regression test."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "The prompt limits edits to lines falsified by the current attempt."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "The edit boundary explicitly permits the report beside the task file."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "The prior-art block remains unchanged, with a byte-comparison test."
+            },
+            {
+              "item": 25,
+              "met": true,
+              "reason": "Assist includes the exploration pointer alongside refinement context and recent progress."
+            },
+            {
+              "item": 26,
+              "met": true,
+              "reason": "Implement and assist goldens cover report-present and report-absent cases."
+            },
+            {
+              "item": 27,
+              "met": true,
+              "reason": "The drain runs exploration at loop entry before dispatching task implementation."
+            },
+            {
+              "item": 28,
+              "met": true,
+              "reason": "An existing report bypasses the Explorer and its spending."
+            },
+            {
+              "item": 29,
+              "met": true,
+              "reason": "The automatic phase requires ExploreRequested to be true."
+            },
+            {
+              "item": 30,
+              "met": true,
+              "reason": "The separate work.explore group defaults enabled when its group or key is absent."
+            },
+            {
+              "item": 31,
+              "met": true,
+              "reason": "Disabling automatic exploration skips the drain pass without disabling manual exploration."
+            },
+            {
+              "item": 32,
+              "met": true,
+              "reason": "Resolution follows CLI flags, manifest directive, configuration, then defaults."
+            },
+            {
+              "item": 33,
+              "met": true,
+              "reason": "HumanCompleted explicitly bypasses automatic exploration."
+            },
+            {
+              "item": 34,
+              "met": true,
+              "reason": "Report reuse depends on presence, without comparing its recorded tree to the checkout."
+            },
+            {
+              "item": 35,
+              "met": true,
+              "reason": "Whole-drain tests assert exploration runs without a report and is skipped with one."
+            },
+            {
+              "item": 36,
+              "met": true,
+              "reason": "The shared fallback walker applies the standard retry cap and delays."
+            },
+            {
+              "item": 37,
+              "met": true,
+              "reason": "Exhausted failures without a report derive EXPLORE-FAILED and stop the drain."
+            },
+            {
+              "item": 38,
+              "met": true,
+              "reason": "Parking derives from captured-run metadata and report absence without schema changes."
+            },
+            {
+              "item": 39,
+              "met": true,
+              "reason": "EXPLORE-FAILED is distinct from the existing BLOCKED status."
+            },
+            {
+              "item": 40,
+              "met": true,
+              "reason": "Daemon and automatic ready-set selection require READY, excluding parked rows."
+            },
+            {
+              "item": 41,
+              "met": false,
+              "reason": "attendableHITLTaskSets ignores row status and can select a parked set containing an eligible HITL task."
+            },
+            {
+              "item": 42,
+              "met": false,
+              "reason": "A failed manual explore can derive a park without any progress record; recording exists only in the drain phase."
+            },
+            {
+              "item": 43,
+              "met": true,
+              "reason": "--skip-explore bypasses exploration and the park check for the explicit drain."
+            },
+            {
+              "item": 44,
+              "met": true,
+              "reason": "Writing a report or removing the declaration clears the derived park."
+            },
+            {
+              "item": 45,
+              "met": true,
+              "reason": "CONTEXT.md lists EXPLORE-FAILED among drain stops and automatic-selection exclusions."
+            },
+            {
+              "item": 46,
+              "met": true,
+              "reason": "Unexplored marks and their reasons occupy separate fields and render beside status."
+            },
+            {
+              "item": 47,
+              "met": true,
+              "reason": "Undeclared sets resolve to an absent exploration mark."
+            },
+            {
+              "item": 48,
+              "met": true,
+              "reason": "Refresh resolves the mark once and propagates it to all four read surfaces."
+            },
+            {
+              "item": 49,
+              "met": true,
+              "reason": "Shared Work status rendering includes exploration marks even on parked rows."
+            },
+            {
+              "item": 50,
+              "met": false,
+              "reason": "Reports created manually for undeclared sets lack the dashboard’s path-and-tree pointer because resolution suppresses it."
+            },
+            {
+              "item": 51,
+              "met": false,
+              "reason": "The sign-off gate hides existing exploration reports unless the manifest declares explore."
+            },
+            {
+              "item": 52,
+              "met": false,
+              "reason": "A completed captured run with a subsequently deleted report resolves as failed, parking instead of re-exploring."
+            }
+          ],
+          "list_ratio": 0.9038461538461539,
+          "quality": 3,
+          "rationale": "Clear shared abstractions and broad test coverage, but lifecycle, fallback-selection, and report-visibility gaps remain; assessment was static."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "69fbd456-f34e-4480-9967-6c7561a8275b",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 996558,
+              "Output": 3675,
+              "CacheRead": 894464,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 14,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 118028,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Artifact discovery assigns type \"exploration\" and orders it between spec and progress.\nITEM 2 MET: Dashboard artifacts use the same ordered artifact list.\nITEM 3 MET: The orphan-markdown validator explicitly exempts exploration.md.\nITEM 4 MET: Existing validation remains intact, including rejection of other unlisted markdown.\nITEM 5 MET: Manifest.ExploreRequested reads the set-level explore boolean.\nITEM 6 MET: Exploration requires explicit true; absent, false, and malformed values remain off.\nITEM 7 MET: ExplorerOverride uses the existing agents-and-effort AgentDirective shape.\nITEM 8 MET: The authoring guide explicitly distinguishes explore’s opt-in from verify/refine’s opt-out.\nITEM 9 MET: The guide states the shared-seam and later-task dependency rule.\nITEM 10 MET: Shared manifest/file constants drive the guide, with a guide-to-manifest regression test.\nITEM 11 MET: The explore command starts an agent with task listings, every task body, and optional spec.\nITEM 12 MET: The explorer template requests all five specified aspects of the existing code.\nITEM 13 MET: The template requires path/symbol evidence, about one page, and the observed tree.\nITEM 14 MET: The explorer prompt and prescribed report structure contain no prior-art section.\nITEM 15 MET: Successful passes atomically replace flat exploration.md in the set directory.\nITEM 16 MET: Captured runs and retry-cap accounting use the dedicated explore phase.\nITEM 17 MET: Manual exploration bypasses both manifest participation and the automatic config gate.\nITEM 18 MET: Failed, timed-out, and interrupted agent runs return before writing the report.\nITEM 19 MET: The command integration test exercises the agent reply, replacement report, and captured-run replay.\nITEM 20 MET: Implement prompt construction supplies an existing report’s path and description, otherwise omitting the block.\nITEM 21 MET: Implement prompts receive only the report path; a long-report test checks against inlining.\nITEM 22 MET: The builder is explicitly restricted to correcting lines its own attempt falsified.\nITEM 23 MET: The edit boundary explicitly allows the exploration report beside the task file.\nITEM 24 MET: The prior-art block remains unchanged, with a byte-comparison regression test.\nITEM 25 MET: Assist prompts include the exploration pointer alongside refine context and recent progress.\nITEM 26 MET: Implement and assist golden fixtures cover report-present and report-absent cases.\nITEM 27 MET: The drain invokes exploration at its head before entering task execution.\nITEM 28 MET: An existing report short-circuits exploration without invoking an agent.\nITEM 29 MET: Undeclared sets bypass automatic exploration.\nITEM 30 MET: The dedicated work.explore group defaults enabled when its group or enabled key is absent.\nITEM 31 MET: Disabled config skips automatic passes while manual exploration remains available.\nITEM 32 MET: Resolution applies CLI flags, manifest directives, configuration, then defaults.\nITEM 33 MET: Automatic exploration explicitly skips human-completed sets.\nITEM 34 MET: Report reuse depends on presence and performs no checkout/tree comparison.\nITEM 35 MET: Whole-drain tests assert exploration runs without a report and does not run with one.\nITEM 36 MET: Exploration uses the shared fallback walker with standard retry caps and delays.\nITEM 37 MET: Exhausted exploration failures derive EXPLORE-FAILED and stop the drain.\nITEM 38 MET: Parking derives from captured-run metadata and report absence without schema changes.\nITEM 39 MET: EXPLORE-FAILED is distinct from BLOCKED and preserves its existing meaning.\nITEM 40 MET: Daemon dispatch and automatic READY selection exclude the overlaid EXPLORE-FAILED status.\nITEM 41 NOT_MET: attendableHITLTaskSets ignores row status, so a parked set with an eligible HITL task remains selectable.\nITEM 42 NOT_MET: Failed manual exploration can derive a park without any progress record; only the drain’s explorePhase appends one.\nITEM 43 MET: The skip-explore flag bypasses both exploration and an existing park for that drain.\nITEM 44 MET: A successful manual report or removal of the declaration clears the derived park.\nITEM 45 MET: CONTEXT.md lists EXPLORE-FAILED among drain-stop and automatic-selection exclusions.\nITEM 46 MET: Unexplored sets carry separate mark and reason fields rendered beside their status.\nITEM 47 MET: The resolver returns no exploration mark for undeclared sets, even with a report present.\nITEM 48 MET: Refresh resolves Row.Explore once and propagates it to the four requested read surfaces.\nITEM 49 MET: Dashboard and work-status cells render the exploration mark independently of parked status.\nITEM 50 MET: Dashboard detail sections render the report pointer and recorded SHA without its body.\nITEM 51 MET: The sign-off gate places exploration beside refinement in its preamble and reading options.\nITEM 52 NOT_MET: ResolveExploreMark classifies a completed run with a deleted report as failed, parking the set instead of exploring again.\nQUALITY 3: Broad integration and useful tests, but parking has correctness gaps in report deletion, HITL fallback, and progress recording.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Artifact discovery assigns type \"exploration\" and orders it between spec and progress."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Dashboard artifacts use the same ordered artifact list."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The orphan-markdown validator explicitly exempts exploration.md."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Existing validation remains intact, including rejection of other unlisted markdown."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Manifest.ExploreRequested reads the set-level explore boolean."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Exploration requires explicit true; absent, false, and malformed values remain off."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "ExplorerOverride uses the existing agents-and-effort AgentDirective shape."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "The authoring guide explicitly distinguishes explore’s opt-in from verify/refine’s opt-out."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "The guide states the shared-seam and later-task dependency rule."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Shared manifest/file constants drive the guide, with a guide-to-manifest regression test."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "The explore command starts an agent with task listings, every task body, and optional spec."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "The explorer template requests all five specified aspects of the existing code."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "The template requires path/symbol evidence, about one page, and the observed tree."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The explorer prompt and prescribed report structure contain no prior-art section."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Successful passes atomically replace flat exploration.md in the set directory."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Captured runs and retry-cap accounting use the dedicated explore phase."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Manual exploration bypasses both manifest participation and the automatic config gate."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Failed, timed-out, and interrupted agent runs return before writing the report."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "The command integration test exercises the agent reply, replacement report, and captured-run replay."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Implement prompt construction supplies an existing report’s path and description, otherwise omitting the block."
+            },
+            {
+              "item": 21,
+              "met": true,
+              "reason": "Implement prompts receive only the report path; a long-report test checks against inlining."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "The builder is explicitly restricted to correcting lines its own attempt falsified."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "The edit boundary explicitly allows the exploration report beside the task file."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "The prior-art block remains unchanged, with a byte-comparison regression test."
+            },
+            {
+              "item": 25,
+              "met": true,
+              "reason": "Assist prompts include the exploration pointer alongside refine context and recent progress."
+            },
+            {
+              "item": 26,
+              "met": true,
+              "reason": "Implement and assist golden fixtures cover report-present and report-absent cases."
+            },
+            {
+              "item": 27,
+              "met": true,
+              "reason": "The drain invokes exploration at its head before entering task execution."
+            },
+            {
+              "item": 28,
+              "met": true,
+              "reason": "An existing report short-circuits exploration without invoking an agent."
+            },
+            {
+              "item": 29,
+              "met": true,
+              "reason": "Undeclared sets bypass automatic exploration."
+            },
+            {
+              "item": 30,
+              "met": true,
+              "reason": "The dedicated work.explore group defaults enabled when its group or enabled key is absent."
+            },
+            {
+              "item": 31,
+              "met": true,
+              "reason": "Disabled config skips automatic passes while manual exploration remains available."
+            },
+            {
+              "item": 32,
+              "met": true,
+              "reason": "Resolution applies CLI flags, manifest directives, configuration, then defaults."
+            },
+            {
+              "item": 33,
+              "met": true,
+              "reason": "Automatic exploration explicitly skips human-completed sets."
+            },
+            {
+              "item": 34,
+              "met": true,
+              "reason": "Report reuse depends on presence and performs no checkout/tree comparison."
+            },
+            {
+              "item": 35,
+              "met": true,
+              "reason": "Whole-drain tests assert exploration runs without a report and does not run with one."
+            },
+            {
+              "item": 36,
+              "met": true,
+              "reason": "Exploration uses the shared fallback walker with standard retry caps and delays."
+            },
+            {
+              "item": 37,
+              "met": true,
+              "reason": "Exhausted exploration failures derive EXPLORE-FAILED and stop the drain."
+            },
+            {
+              "item": 38,
+              "met": true,
+              "reason": "Parking derives from captured-run metadata and report absence without schema changes."
+            },
+            {
+              "item": 39,
+              "met": true,
+              "reason": "EXPLORE-FAILED is distinct from BLOCKED and preserves its existing meaning."
+            },
+            {
+              "item": 40,
+              "met": true,
+              "reason": "Daemon dispatch and automatic READY selection exclude the overlaid EXPLORE-FAILED status."
+            },
+            {
+              "item": 41,
+              "met": false,
+              "reason": "attendableHITLTaskSets ignores row status, so a parked set with an eligible HITL task remains selectable."
+            },
+            {
+              "item": 42,
+              "met": false,
+              "reason": "Failed manual exploration can derive a park without any progress record; only the drain’s explorePhase appends one."
+            },
+            {
+              "item": 43,
+              "met": true,
+              "reason": "The skip-explore flag bypasses both exploration and an existing park for that drain."
+            },
+            {
+              "item": 44,
+              "met": true,
+              "reason": "A successful manual report or removal of the declaration clears the derived park."
+            },
+            {
+              "item": 45,
+              "met": true,
+              "reason": "CONTEXT.md lists EXPLORE-FAILED among drain-stop and automatic-selection exclusions."
+            },
+            {
+              "item": 46,
+              "met": true,
+              "reason": "Unexplored sets carry separate mark and reason fields rendered beside their status."
+            },
+            {
+              "item": 47,
+              "met": true,
+              "reason": "The resolver returns no exploration mark for undeclared sets, even with a report present."
+            },
+            {
+              "item": 48,
+              "met": true,
+              "reason": "Refresh resolves Row.Explore once and propagates it to the four requested read surfaces."
+            },
+            {
+              "item": 49,
+              "met": true,
+              "reason": "Dashboard and work-status cells render the exploration mark independently of parked status."
+            },
+            {
+              "item": 50,
+              "met": true,
+              "reason": "Dashboard detail sections render the report pointer and recorded SHA without its body."
+            },
+            {
+              "item": 51,
+              "met": true,
+              "reason": "The sign-off gate places exploration beside refinement in its preamble and reading options."
+            },
+            {
+              "item": 52,
+              "met": false,
+              "reason": "ResolveExploreMark classifies a completed run with a deleted report as failed, parking the set instead of exploring again."
+            }
+          ],
+          "list_ratio": 0.9423076923076923,
+          "quality": 3,
+          "rationale": "Broad integration and useful tests, but parking has correctness gaps in report deletion, HITL fallback, and progress recording."
+        }
+      }
+    ]
+  },
+  "case": "2026-09-07-exploration-report",
+  "arm": "pop",
+  "repeat": 1,
+  "attempts": 1,
+  "model": "opus",
+  "parent_commit": "647143bb0a85ae9fcbfe009818a700f03cf0a05f",
+  "pop_version": "pop version 2026.7.0-886-gc3cdba5",
+  "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+  "started_at": "2026-10-04T07:35:10.974404Z",
+  "ended_at": "2026-10-04T08:56:43.734873Z",
+  "outcome": "completed",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-240906272",
+  "set_status": "DONE",
+  "set_spend": {
+    "task_set_id": "2026-09-07-exploration-report",
+    "completed_tasks": 6,
+    "tokens_per_completed_task": 3677936,
+    "implement_input_tokens": 470,
+    "implement_output_tokens": 174187,
+    "implement_cache_read_tokens": 21123325,
+    "implement_cache_write_tokens": 769635,
+    "implement_partial_cost_usd": 13.867365000000001,
+    "implement_notional_cost_usd": 13.867365000000001,
+    "implement_run_count": 7,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 34,
+    "verification_output_tokens": 11967,
+    "verification_cache_read_tokens": 1250376,
+    "verification_cache_write_tokens": 106910,
+    "verification_partial_cost_usd": 1.3448312,
+    "verification_notional_cost_usd": 1.3448312,
+    "verification_run_count": 1,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 34,
+    "refine_output_tokens": 6448,
+    "refine_cache_read_tokens": 1126983,
+    "refine_cache_write_tokens": 87304,
+    "refine_partial_cost_usd": 1.0529246,
+    "refine_notional_cost_usd": 1.0529246,
+    "refine_run_count": 1,
+    "refine_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "",
+        "title": "",
+        "input_tokens": 62,
+        "output_tokens": 13520,
+        "cache_read_tokens": 3003668,
+        "cache_write_tokens": 135930,
+        "partial_cost_usd": 1.9588216000000005,
+        "notional_cost_usd": 1.9588216000000005,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 31,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 146047,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 62,
+            "output_tokens": 13520,
+            "cache_read_tokens": 3003668,
+            "cache_write_tokens": 135930
+          }
+        }
+      },
+      {
+        "task_id": "01-report-is-an-artifact-a-set-can-ask-for",
+        "title": "The report is an artifact, and a set can ask for exploration",
+        "input_tokens": 40,
+        "output_tokens": 14683,
+        "cache_read_tokens": 1067663,
+        "cache_write_tokens": 65087,
+        "partial_cost_usd": 1.0280486,
+        "notional_cost_usd": 1.0280486,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 20,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 76729,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 40,
+            "output_tokens": 14683,
+            "cache_read_tokens": 1067663,
+            "cache_write_tokens": 65087
+          }
+        }
+      },
+      {
+        "task_id": "02-explore-a-set-by-hand",
+        "title": "Explore a set by hand",
+        "input_tokens": 112,
+        "output_tokens": 45920,
+        "cache_read_tokens": 6496894,
+        "cache_write_tokens": 153945,
+        "partial_cost_usd": 3.449786799999999,
+        "notional_cost_usd": 3.449786799999999,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 56,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 165587,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 112,
+            "output_tokens": 45920,
+            "cache_read_tokens": 6496894,
+            "cache_write_tokens": 153945
+          }
+        }
+      },
+      {
+        "task_id": "03-builder-reads-the-report",
+        "title": "A builder reads the report and corrects what it falsified",
+        "input_tokens": 32,
+        "output_tokens": 12979,
+        "cache_read_tokens": 823655,
+        "cache_write_tokens": 66668,
+        "partial_cost_usd": 0.957783,
+        "notional_cost_usd": 0.957783,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 16,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 78310,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 32,
+            "output_tokens": 12979,
+            "cache_read_tokens": 823655,
+            "cache_write_tokens": 66668
+          }
+        }
+      },
+      {
+        "task_id": "04-drain-explores-before-it-implements",
+        "title": "A drain explores before it implements",
+        "input_tokens": 66,
+        "output_tokens": 23067,
+        "cache_read_tokens": 2601455,
+        "cache_write_tokens": 100582,
+        "partial_cost_usd": 1.7865510000000007,
+        "notional_cost_usd": 1.7865510000000007,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 33,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 112224,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 66,
+            "output_tokens": 23067,
+            "cache_read_tokens": 2601455,
+            "cache_write_tokens": 100582
+          }
+        }
+      },
+      {
+        "task_id": "05-a-set-that-cannot-be-explored-parks",
+        "title": "A set that cannot be explored parks",
+        "input_tokens": 82,
+        "output_tokens": 33830,
+        "cache_read_tokens": 3828632,
+        "cache_write_tokens": 133290,
+        "partial_cost_usd": 2.5089744,
+        "notional_cost_usd": 2.5089744,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 41,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 144932,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 82,
+            "output_tokens": 33830,
+            "cache_read_tokens": 3828632,
+            "cache_write_tokens": 133290
+          }
+        }
+      },
+      {
+        "task_id": "06-the-mark-says-whether-a-set-was-explored",
+        "title": "The mark says whether a set was explored",
+        "input_tokens": 76,
+        "output_tokens": 30188,
+        "cache_read_tokens": 3301358,
+        "cache_write_tokens": 114133,
+        "partial_cost_usd": 2.1773996000000007,
+        "notional_cost_usd": 2.1773996000000007,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 38,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 125775,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 76,
+            "output_tokens": 30188,
+            "cache_read_tokens": 3301358,
+            "cache_write_tokens": 114133
+          }
+        }
+      },
+      {
+        "task_id": "refine",
+        "title": "Refine",
+        "input_tokens": 34,
+        "output_tokens": 6448,
+        "cache_read_tokens": 1126983,
+        "cache_write_tokens": 87304,
+        "partial_cost_usd": 1.0529246,
+        "notional_cost_usd": 1.0529246,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 17,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 98946,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 34,
+            "output_tokens": 6448,
+            "cache_read_tokens": 1126983,
+            "cache_write_tokens": 87304
+          }
+        }
+      },
+      {
+        "task_id": "verify",
+        "title": "Verify",
+        "input_tokens": 34,
+        "output_tokens": 11967,
+        "cache_read_tokens": 1250376,
+        "cache_write_tokens": 106910,
+        "partial_cost_usd": 1.3448312,
+        "notional_cost_usd": 1.3448312,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 17,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 118552,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 34,
+            "output_tokens": 11967,
+            "cache_read_tokens": 1250376,
+            "cache_write_tokens": 106910
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}

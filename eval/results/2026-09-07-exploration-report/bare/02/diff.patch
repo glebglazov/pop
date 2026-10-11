@@ -1,0 +1,3331 @@
+diff --git a/CONTEXT.md b/CONTEXT.md
+index c0d6c5fd..6fd924df 100644
+--- a/CONTEXT.md
++++ b/CONTEXT.md
+@@ -560,7 +560,7 @@ no open AFK work, open HITL remains ......... AWAITING-APPROVAL ← human sign-o
+ otherwise (unfinished, none eligible) ....... BLOCKED    ← Human-blocked: HITL or undone dependency
+ ```
+ 
+-(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults.) Automatic selection runs READY sets in scheduler order and passes over DONE, DEFERRED, and AWAITING-APPROVAL sets; only when no READY set exists may a no-argument implement select a single unambiguous Human-blocked Task set for attended help, and only when the block is an open HITL task rather than an unresolved AFK dependency. Multiple Human-blocked Task sets are ambiguous and require an explicit target. Draining stops when its selected set reaches DONE, FAILED, BLOCKED, AWAITING-APPROVAL, VERIFY-FAILED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output and never auto-start attended assistance.
++(`MISSING` and `MALFORMED` sit outside this derivation — they are registration and contract faults. `EXPLORE-FAILED` is layered on top of it: a READY set that declared the **Explore directive**, has no **Exploration report**, and has a **Captured run** of phase `explore` reads EXPLORE-FAILED instead, so nothing re-picks it — see **Explore phase**.) Automatic selection runs READY sets in scheduler order and passes over DONE, DEFERRED, and AWAITING-APPROVAL sets; only when no READY set exists may a no-argument implement select a single unambiguous Human-blocked Task set for attended help, and only when the block is an open HITL task rather than an unresolved AFK dependency. Multiple Human-blocked Task sets are ambiguous and require an explicit target. Draining stops when its selected set reaches DONE, FAILED, BLOCKED, AWAITING-APPROVAL, VERIFY-FAILED, EXPLORE-FAILED, or DEFERRED, or when an **Agent quota pause** interrupts draining without changing task status. At a BLOCKED HITL gate, interactive runs show a **HITL gate prompt** while non-interactive runs and `--yes` preserve stop-and-advice output and never auto-start attended assistance.
+ 
+ **Tasks readiness**:
+ The **Doctor status** of the `pop tasks` command family. Because the tasks feature is aimed at Git projects and its central workflow is agent execution from a **Runtime path**, Doctor reports `pop tasks` as Blocked when no Git runtime checkout can be resolved, even if read-only status rendering could still inspect local artifacts.
+@@ -762,6 +762,26 @@ _Avoid_: verify result, verification status
+ The **Drain** step, formerly Code review, that enforces the resolved `refine` **Convention kind** on a **Task set**'s accumulated changeset: a fresh **Refiner** researches the changeset, fixes in place what the convention licenses, and writes the **Refine report** of what it fixed and the smells it left. It runs at AFK quiescence *before* the verify phase, so its edits are judged by the same **Agent verification** pass as the work they refine — reversing the after-verify placement, which was derived from the step moving nothing. Set-scoped, gated by `[work.refine].enabled` (off by default); it reaches no verdict and spawns no tasks — its outputs are the **Refine commit** and the report. Automatic Refine skips a **Human completion** (the drain never edits code a human declared done); `pop tasks refine` runs a full pass by hand on any set with a done AFK task and a non-empty commit range, including a human-completed or DONE one — the human re-opening the question.
+ _Avoid_: Code review, code quality check, review step, polish, lint step, QA
+ 
++**Explore phase**:
++The **Drain** step that writes a **Task set**'s **Exploration report** before its first task runs (ADR-0262). It runs at the head of a drain, before task selection, for a set that carries the **Explore directive** and has no report; a set with a report reuses it and spends nothing, and nothing compares the report's recorded tree to the checkout — absent means write, present means reuse. Gated by `[work.explore].enabled`, which defaults *on*: the first agent phase that runs unasked, safe because only the set's own directive triggers it. It is also the one agent phase that gates: a pass that cannot write the report within the standard per-phase retry cap parks the set at EXPLORE-FAILED — VERIFY-FAILED's sibling, not BLOCKED, which keeps meaning a human owes a decision — and appends one set-level **Progress record** naming the phase and the reason. The park is derived from the **Captured run** of phase `explore` plus the absent report, with no store column. Three ways out: `pop tasks explore <set>` by hand, `pop tasks implement <set> --skip-explore` to drain once unexplored, or `"explore": false`. It declines a **Human completion**, and `pop tasks explore` runs on any set whatever its directive says, overwriting a report already there.
++_Avoid_: survey, discovery step, pre-flight, context pass
++
++**Explore directive**:
++The set-level `"explore": true` manifest key: the set's author declaring that two or more AFK tasks touch the same seam and a later one depends on how an earlier one shapes it. Opt-*in* — absent or false means the set never explores — where the `verify` and `refine` keys are opt-out. It sits outside the **Agent directive** family, whose members steer how a phase runs and never opt a set in; the `"explorer"` object beside it is that family's member for the **Explore phase**. Never set for a set's size or an unfamiliar area.
++_Avoid_: explore flag, interrelated flag
++
++**Exploration report**:
++The code as found in the area a **Task set**'s tasks touch, at `exploration.md` flat in the set directory, written by the **Explore phase**'s **Explorer**: where things live, which seam owns what, which invariants hold, the test shape, which files to read in ranges — every claim naming a path or a symbol, about a page, stating the tree it describes as prose and in its header. A **Task artifact** ordered spec → exploration → progress (what was decided, what exists, what happened), exempt from the orphan-markdown check like `spec.md`. Every implement attempt on the set is handed its path, never its body, with one correction duty: a builder may fix a line its own attempt falsified and change nothing else. It carries no prior-art section. An **Explore mark** beside the status says whether a declared set got one.
++_Avoid_: map, context file, survey, notes
++
++**Explore mark**:
++Whether a **Task set** that carries the **Explore directive** has its **Exploration report**: explored, or unexplored with its reason — not yet run, or the pass failed — as detail beside the mark rather than a value inside it. A set that never declared exploration carries none. Resolved once on the read side (`ResolveExploreMark`) and rendered by the dashboard row and detail view, `pop work status`, `pop tasks status` and the sign-off gate.
++_Avoid_: explore status, exploration badge
++
++**Explorer**:
++The agent that performs the **Explore phase**, fresh and chosen from `[work.explore]` / the set's `"explorer"` object / CLI flags. The one role spawned under the **Read-only agent posture**: its reply is the whole report, which pop writes.
++_Avoid_: scout, mapper
++
+ **Refiner**:
+ Formerly the Reviewer. The agent that performs **Refine**, running in a fresh context and chosen independently of the implementing agents so it does not refine its own work — the **Verifier**'s independence rule, for the same reason. Its prompt is pop's own end to end (ADR-0246, ADR-0247): pop's **Role preamble**, the **Implementation convention** as a labelled block, any **Convention overlay** on the procedure, and pop's **Response contract**, plus the previous **Refine report** where one exists. The convention states the standard; the licence is pop's and the convention cannot widen it — fix what the pass can undo, and show the search that licensed it (ADR-0248); anything it cannot prove reversible stays a finding in the report. It reads the changed files itself — the commit range and the **Work diff view** are orientation only. No longer spawned under a **Read-only agent posture**, and it never commits: the runner captures its edits as the **Refine commit**.
+ _Avoid_: Reviewer, polisher, fixer, critic, linter
+diff --git a/cmd/tasks.go b/cmd/tasks.go
+index fae58448..74017112 100644
+--- a/cmd/tasks.go
++++ b/cmd/tasks.go
+@@ -55,6 +55,14 @@ var (
+ 	taskRefineAgents          []string
+ 	taskRefineEffort          string
+ 	taskRefineShow            bool
++	taskExploreWait           bool
++	taskExploreNoWait         bool
++	taskExploreTimeout        string
++	taskExploreAgents         []string
++	taskExploreEffort         string
++	taskImplementSkipExplore  bool
++	taskExploreDrainAgents    []string
++	taskExploreDrainEffort    string
+ 	taskArtifactsShow         string
+ 	taskImplementVerifyAgents []string
+ 	taskImplementVerifyEffort string
+@@ -195,6 +203,32 @@ any time — including mid-drain, where a standards correction is worth most.`,
+ 	RunE: runTaskRefine,
+ }
+ 
++var taskExploreCmd = &cobra.Command{
++	Use:   "explore TASK_SET",
++	Short: "Run an independent Explorer agent over a task set and write its Exploration report",
++	Long: `Record the code as found in the area a task set's tasks touch.
++
++A fresh Explorer is given the set's manifest listing, its task bodies and its
++spec when there is one, and it writes about a page: where things live, which
++seam owns what, which invariants hold, the test shape, and which files to read
++in ranges. Every claim names a path or a symbol, and the report states the
++commit it describes. It changes no file in the checkout.
++
++pop writes the reply as exploration.md beside the set's spec, replacing any
++report already there; every implement attempt on the set is then handed its
++path. A pass that fails or is interrupted writes nothing and leaves an
++existing report as it was.
++
++A set that declares "explore": true is explored by its drain before the first
++task runs. This command runs on any set, whatever that key says — it is how a
++human re-opens the question, and how a set parked at EXPLORE-FAILED gets its
++report.
++
++  pop tasks artifacts my-set --show exploration.md`,
++	Args: cobra.ExactArgs(1),
++	RunE: runTaskExplore,
++}
++
+ var taskArtifactsCmd = &cobra.Command{
+ 	Use:   "artifacts TASK_SET",
+ 	Short: "List a task set's readable documents, or print one verbatim",
+@@ -361,6 +395,7 @@ func init() {
+ 	taskCmd.AddCommand(taskImplementCmd)
+ 	taskCmd.AddCommand(taskVerifyCmd)
+ 	taskCmd.AddCommand(taskRefineCmd)
++	taskCmd.AddCommand(taskExploreCmd)
+ 	taskCmd.AddCommand(taskArtifactsCmd)
+ 	taskCmd.AddCommand(taskAssistCmd)
+ 	taskCmd.AddCommand(taskResetTaskCmd)
+@@ -421,6 +456,9 @@ func init() {
+ 	taskImplementCmd.Flags().BoolVar(&taskForceRebind, "force-rebind", false, "Re-point a bound set to the current checkout (or retarget --in-worktree)")
+ 	taskImplementCmd.Flags().StringArrayVar(&taskImplementVerifyAgents, "verify-agent", nil, "Verifier agent preset for the in-drain verify phase; repeat to define an ordered fallback list (steers verification independently of --agent)")
+ 	taskImplementCmd.Flags().StringVar(&taskImplementVerifyEffort, "verify-effort", "", "Verifier model-strength tier for the in-drain verify phase: light, standard, or heavy (default heavy)")
++	taskImplementCmd.Flags().BoolVar(&taskImplementSkipExplore, "skip-explore", false, "Drain this set once without its Explore step, even when it declares \"explore\": true and has no report; a set parked at EXPLORE-FAILED drains without parking")
++	taskImplementCmd.Flags().StringArrayVar(&taskExploreDrainAgents, "explore-agent", nil, "Explorer agent preset for the in-drain explore step; repeat to define an ordered fallback list (wins over the set's explorer object)")
++	taskImplementCmd.Flags().StringVar(&taskExploreDrainEffort, "explore-effort", "", "Explorer model-strength tier for the in-drain explore step: light, standard, or heavy (default standard)")
+ 
+ 	taskVerifyCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
+ 	taskVerifyCmd.Flags().StringVar(&taskVerifyTimeout, "timeout", "45m", "Maximum duration for the Verifier attempt")
+@@ -442,6 +480,14 @@ func init() {
+ 	taskRefineCmd.Flags().BoolVar(&taskRefineShow, "show", false, "Print the set's latest refine report to stdout and run no agent")
+ 	taskArtifactsCmd.Flags().StringVar(&taskArtifactsShow, "show", "", "Print the named artifact verbatim")
+ 
++	taskExploreCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
++	taskExploreCmd.Flags().StringVar(&taskExploreTimeout, "timeout", "45m", "Maximum duration for one Explorer attempt")
++	taskExploreCmd.Flags().StringArrayVar(&taskExploreAgents, "agent", nil, "Explorer agent preset; repeat to define an ordered quota/missing-binary fallback list")
++	taskExploreCmd.Flags().StringVar(&taskExploreEffort, "effort", "", "Explorer model-strength tier: light, standard, or heavy (default standard)")
++	taskExploreCmd.Flags().BoolVar(&taskExploreWait, "wait", false, "Queue for the checkout and wait when it is held, even unattended (default: wait only at a terminal)")
++	taskExploreCmd.Flags().BoolVar(&taskExploreNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
++	taskExploreCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
++
+ 	taskAssistCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
+ 	taskAssistCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for attended assistance (claude, opencode, cursor, codex, pi, kimi), optionally followed by extra agent args")
+ 	taskAssistCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
+@@ -1056,6 +1102,34 @@ func runTaskRefineWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool)
+ 	return nil
+ }
+ 
++func runTaskExplore(cmd *cobra.Command, args []string) error {
++	return runTaskExploreWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0])
++}
++
++func runTaskExploreWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
++	timeout, err := time.ParseDuration(taskExploreTimeout)
++	if err != nil {
++		return fmt.Errorf("tasks explore: invalid --timeout %q: %w", taskExploreTimeout, err)
++	}
++	resolveInput, err := bindingFirstVerifyResolveInput(d, taskSetID)
++	if err != nil {
++		return fmt.Errorf("tasks explore: %w", err)
++	}
++	if _, err := tasks.ExploreTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.ExploreOptions{
++		ResolveInput: resolveInput,
++		TaskSetID:    taskSetID,
++		Agents:       append([]string(nil), taskExploreAgents...),
++		Effort:       taskExploreEffort,
++		Timeout:      timeout,
++		Output:       w,
++		Wait:         admissionWaitChoice(taskExploreWait, taskExploreNoWait),
++		ConfirmIn:    os.Stdin,
++	}); err != nil {
++		return fmt.Errorf("tasks explore: %w", err)
++	}
++	return nil
++}
++
+ func runTaskArtifacts(cmd *cobra.Command, args []string) error {
+ 	return runTaskArtifactsWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0], taskArtifactsShow)
+ }
+@@ -1308,7 +1382,7 @@ func runTaskImplement(cmd *cobra.Command, args []string) {
+ // terminal, refuse when a machine is driving (ADR-0239). The two flags are
+ // mutually exclusive on every command that registers them, so their order here
+ // decides nothing. Every Tree-stable operation with a CLI form — implement,
+-// verify, refine — reads its pair through this one resolution, so the three
++// verify, refine, explore — reads its pair through this one resolution, so they
+ // cannot drift.
+ func admissionWaitChoice(wait, noWait bool) tasks.AdmissionWaitChoice {
+ 	switch {
+@@ -1420,6 +1494,9 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
+ 		Timeout:                timeout,
+ 		VerifyAgents:           append([]string(nil), taskImplementVerifyAgents...),
+ 		VerifyEffort:           taskImplementVerifyEffort,
++		SkipExplore:            taskImplementSkipExplore,
++		ExploreAgents:          append([]string(nil), taskExploreDrainAgents...),
++		ExploreEffort:          taskExploreDrainEffort,
+ 		ImplementationConvention:       implementationConvention(d),
+ 		DocumentOverlay:                refineOverlay(d),
+ 		VerificationConvention: verificationConvention(d),
+diff --git a/cmd/tasks_artifacts_test.go b/cmd/tasks_artifacts_test.go
+index ca7287bf..fcff1c96 100644
+--- a/cmd/tasks_artifacts_test.go
++++ b/cmd/tasks_artifacts_test.go
+@@ -80,6 +80,7 @@ func TestTaskArtifactsListsTypeTierOrderTheDashboardAlsoReads(t *testing.T) {
+ 		filepath.Join(setDir, tasks.ManifestFileName):          `{"tasks":[]}`,
+ 		filepath.Join(setDir, tasks.SpecFileName):              "spec body\n",
+ 		filepath.Join(setDir, "progress.txt"):                  "just drained\n",
++		filepath.Join(setDir, tasks.ExplorationFileName):       "the code as found\n",
+ 		filepath.Join(refineDir, "refine-20260817T120000Z.md"): "new report\n",
+ 		filepath.Join(refineDir, "refine-20260815T120000Z.md"): "old report\n",
+ 	} {
+@@ -110,6 +111,7 @@ func TestTaskArtifactsListsTypeTierOrderTheDashboardAlsoReads(t *testing.T) {
+ 		"refine:refine-20260817T120000Z.md",
+ 		"refine:refine-20260815T120000Z.md",
+ 		"spec:spec.md",
++		"exploration:exploration.md",
+ 		"progress:progress.txt",
+ 	}
+ 	if !reflect.DeepEqual(printed, want) {
+diff --git a/cmd/tasks_shell_completion.go b/cmd/tasks_shell_completion.go
+index 0b1e7254..60fa205f 100644
+--- a/cmd/tasks_shell_completion.go
++++ b/cmd/tasks_shell_completion.go
+@@ -37,12 +37,14 @@ func registerTaskShellCompletions() {
+ 
+ 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+ 	_ = taskRefineCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
++	_ = taskExploreCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+ 	_ = taskVerifyCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+ 	_ = taskAssistCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+ 	_ = taskFoldCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+ 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
+ 	_ = taskVerifyCmd.RegisterFlagCompletionFunc("effort", completeTaskEffort)
+ 	_ = taskRefineCmd.RegisterFlagCompletionFunc("effort", completeTaskEffort)
++	_ = taskExploreCmd.RegisterFlagCompletionFunc("effort", completeTaskEffort)
+ 
+ 	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs
+ 	taskRegisterCmd.ValidArgsFunction = completeTaskStatusArgs
+@@ -53,6 +55,7 @@ func registerTaskShellCompletions() {
+ 	taskImplementCmd.ValidArgsFunction = completeTaskImplementArgs
+ 	taskVerifyCmd.ValidArgsFunction = completeTaskStatusArgs
+ 	taskRefineCmd.ValidArgsFunction = completeTaskStatusArgs
++	taskExploreCmd.ValidArgsFunction = completeTaskStatusArgs
+ 	taskAssistCmd.ValidArgsFunction = completeTaskStatusArgs
+ 	taskSpendCmd.ValidArgsFunction = completeTaskStatusArgs
+ 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
+@@ -141,6 +144,7 @@ func registerTaskPathFlagCompletions() {
+ 	_ = taskImplementCmd.MarkFlagDirname("task-runtime-path")
+ 	_ = taskVerifyCmd.MarkFlagDirname("task-runtime-path")
+ 	_ = taskRefineCmd.MarkFlagDirname("task-runtime-path")
++	_ = taskExploreCmd.MarkFlagDirname("task-runtime-path")
+ }
+ 
+ func completeTaskProjects(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+diff --git a/cmd/tasks_test.go b/cmd/tasks_test.go
+index 0e7ca455..24e29111 100644
+--- a/cmd/tasks_test.go
++++ b/cmd/tasks_test.go
+@@ -1711,3 +1711,23 @@ type nopWriteCloser struct {
+ }
+ 
+ func (nopWriteCloser) Close() error { return nil }
++
++func TestExploreCommandAndDrainFlagsRegistered(t *testing.T) {
++	if taskExploreCmd.Flags().Lookup("task-runtime-path") == nil {
++		t.Fatal("tasks explore --task-runtime-path flag not registered")
++	}
++	agent := taskExploreCmd.Flags().Lookup("agent")
++	if agent == nil || agent.Value.Type() != "stringArray" {
++		t.Fatal("tasks explore --agent must be a repeatable flag")
++	}
++	for _, name := range []string{"effort", "timeout", "wait", "no-wait"} {
++		if taskExploreCmd.Flags().Lookup(name) == nil {
++			t.Fatalf("tasks explore --%s flag not registered", name)
++		}
++	}
++	for _, name := range []string{"skip-explore", "explore-agent", "explore-effort"} {
++		if taskImplementCmd.Flags().Lookup(name) == nil {
++			t.Fatalf("tasks implement --%s flag not registered", name)
++		}
++	}
++}
+diff --git a/config/agent_list.go b/config/agent_list.go
+index df4a8a17..13d92b62 100644
+--- a/config/agent_list.go
++++ b/config/agent_list.go
+@@ -7,7 +7,7 @@ import (
+ 
+ // This file answers the one question the merged config cannot: when a Work
+ // group's agent list is empty, who wrote the emptiness. The merge keeps a key's
+-// value and forgets the layer that produced it, and for the three lists below
++// value and forgets the layer that produced it, and for the four lists below
+ // the layer is the whole meaning — an absent list walks on to the implement
+ // list, while an override of `agents = []` states the group has no agents of its
+ // own and stops resolution there (ADR-0202 decision 6).
+@@ -19,6 +19,7 @@ import (
+ const (
+ 	KeyVerifyAgents  = "work.verify.agents"
+ 	KeyRefineAgents  = "work.refine.agents"
++	KeyExploreAgents = "work.explore.agents"
+ 	KeyRoutineAgents = "work.routine.agents"
+ )
+ 
+@@ -29,6 +30,7 @@ const (
+ var fallthroughAgentLists = map[string]func(*Config) AgentEntries{
+ 	KeyVerifyAgents:  (*Config).VerifyAgentEntries,
+ 	KeyRefineAgents:  (*Config).RefineAgentEntries,
++	KeyExploreAgents: (*Config).ExploreAgentEntries,
+ 	KeyRoutineAgents: (*Config).RoutineAgentEntries,
+ }
+ 
+@@ -65,6 +67,11 @@ func (c *Config) RefineAgentList() AgentList {
+ 	return c.agentList(KeyRefineAgents)
+ }
+ 
++// ExploreAgentList returns [work.explore].agents beside who wrote its emptiness.
++func (c *Config) ExploreAgentList() AgentList {
++	return c.agentList(KeyExploreAgents)
++}
++
+ // RoutineAgentList returns [work.routine].agents beside who wrote its emptiness.
+ func (c *Config) RoutineAgentList() AgentList {
+ 	return c.agentList(KeyRoutineAgents)
+diff --git a/config/config.go b/config/config.go
+index 792eb4d3..555dcf0c 100644
+--- a/config/config.go
++++ b/config/config.go
+@@ -368,6 +368,22 @@ type RefineConfig struct {
+ 	Effort string `toml:"effort" include:"replace" desc:"Refiner model-strength tier: light, standard, or heavy (default heavy)."`
+ }
+ 
++// ExploreConfig holds the Explore phase's settings (ADR-0262). Unlike its
++// siblings the switch defaults on: what triggers a pass is the set's own
++// `"explore": true`, so an enabled group costs nothing on a set that never
++// asked, and switching it off is the machine-wide refusal.
++type ExploreConfig struct {
++	// Enabled gates the drain's Explore step for the whole machine. Absent ⇒
++	// on; `false` ⇒ no drain explores, while `pop tasks explore <set>` still
++	// runs on demand.
++	Enabled *bool `toml:"enabled" include:"replace" desc:"Explore a set that declares \"explore\": true before its drain's first task (default true)."`
++	// Agents is the ordered fallback list the Explorer walks, falling back to
++	// [work.implement].agents when omitted, exactly as [work.refine].agents does.
++	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for the Explorer, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
++	// Effort selects the Explorer's model-strength tier. Absent ⇒ standard.
++	Effort string `toml:"effort" include:"replace" desc:"Explorer model-strength tier: light, standard, or heavy (default standard)."`
++}
++
+ // TaskGitConfig holds commit-time git configuration applied to Pop's own
+ // commits during a task drain (e.g. disabling GPG signing so an unattended
+ // queue drain never hangs on a 1Password presence prompt).
+@@ -553,6 +569,8 @@ type WorkConfig struct {
+ 	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"fields" desc:"Agent-verification settings ([work.verify] table)."`
+ 	// Refine is the Refiner's group (ADR-0252).
+ 	Refine *RefineConfig `toml:"refine" merge:"fields" include:"fields" desc:"Refine settings ([work.refine] table)."`
++	// Explore is the Explorer's group (ADR-0262).
++	Explore *ExploreConfig `toml:"explore" merge:"fields" include:"fields" desc:"Explore settings ([work.explore] table)."`
+ 	// Routine is the recurring-Routine group. An absent list falls through to
+ 	// [work.implement].agents — an override of `agents = []` does not
+ 	// (agent_list.go); a Routine manifest's own agents still beats both.
+@@ -1235,6 +1253,32 @@ func (c *Config) RefineSettings() *RefineConfig {
+ 	return c.Work.Refine
+ }
+ 
++// ExploreAgentEntries returns the [work.explore].agents entries as declared.
++func (c *Config) ExploreAgentEntries() AgentEntries {
++	if e := c.ExploreSettings(); e != nil {
++		return e.Agents
++	}
++	return nil
++}
++
++// ExploreSettings returns the [work.explore] block, or nil when undeclared.
++func (c *Config) ExploreSettings() *ExploreConfig {
++	if c == nil || c.Work == nil {
++		return nil
++	}
++	return c.Work.Explore
++}
++
++// ExploreEnabled reports whether the drain's Explore step is on. It defaults
++// on, so only an explicit `enabled = false` turns it off (ADR-0262).
++func (c *Config) ExploreEnabled() bool {
++	e := c.ExploreSettings()
++	if e == nil || e.Enabled == nil {
++		return true
++	}
++	return *e.Enabled
++}
++
+ // RoutineAgents returns the commands of the [work.routine].agents list, or nil.
+ // An empty list leaves the caller to fall through to the implement group.
+ func (c *Config) RoutineAgents() []string {
+diff --git a/config/override_view.go b/config/override_view.go
+index 7dab01ee..b56d50ef 100644
+--- a/config/override_view.go
++++ b/config/override_view.go
+@@ -52,7 +52,7 @@ type overrideFallthrough struct {
+ }
+ 
+ // overrideFallthroughs records which keys fall through when empty: the three
+-// Work groups that walk on to implement's list, the same three config/agent_list.go
++// Work groups that walk on to implement's list, the same four config/agent_list.go
+ // answers provenance for. Implement and attended have nowhere to walk on to.
+ //
+ // The second half of ADR-0202 decision 6 — that an override of `agents = []`
+@@ -65,6 +65,7 @@ type overrideFallthrough struct {
+ var overrideFallthroughs = map[string]overrideFallthrough{
+ 	KeyVerifyAgents:  {Key: "work.implement.agents", Phrase: "the implement list"},
+ 	KeyRefineAgents:  {Key: "work.implement.agents", Phrase: "the implement list"},
++	KeyExploreAgents: {Key: "work.implement.agents", Phrase: "the implement list"},
+ 	KeyRoutineAgents: {Key: "work.implement.agents", Phrase: "the implement list"},
+ }
+ 
+diff --git a/dashboard/dashboard.go b/dashboard/dashboard.go
+index a3b7ea95..7e523b6b 100644
+--- a/dashboard/dashboard.go
++++ b/dashboard/dashboard.go
+@@ -705,7 +705,7 @@ const (
+ 	detailStatusW          = 10
+ 	detailTypeW            = 4
+ 	detailTitleW           = 40
+-	detailArtifactTypeW    = 8
++	detailArtifactTypeW    = len("exploration")
+ 	detailArtifactWrittenW = len("2006-01-02T15:04:05Z")
+ )
+ 
+diff --git a/dashboard/render.go b/dashboard/render.go
+index 3fbab82c..cb97508e 100644
+--- a/dashboard/render.go
++++ b/dashboard/render.go
+@@ -137,6 +137,7 @@ var dashboardStatusBucketStyle = map[string]lipgloss.Style{
+ 	string(tasks.StatusBlocked):          lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+ 	string(tasks.StatusFailed):           lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+ 	string(tasks.StatusVerifyFailed):     lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
++	string(tasks.StatusExploreFailed):    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+ 	string(tasks.StatusMalformed):        lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+ 	string(tasks.StatusMissing):          lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+ 	string(tasks.StatusDeferred):         lipgloss.NewStyle().Faint(true),
+diff --git a/docs/agents/navigation.md b/docs/agents/navigation.md
+index abfe05d5..e61acf13 100644
+--- a/docs/agents/navigation.md
++++ b/docs/agents/navigation.md
+@@ -23,7 +23,7 @@ AGENTS="…"`) are opt-in and not part of ordinary verification.
+ | Package | Owns |
+ | --- | --- |
+ | `cmd/` | Cobra commands, one file per family; thin over the packages below |
+-| `tasks/` | Task sets: manifests, runner, attempt streams, prompts, spend. `authoring_guide.go` is the `pop tasks authoring-guide` text — layout, templates, manifest fields and the judgment rules, generated from the constants `validateManifest` reads (ADR-0183); `validateManifest` also owns the orphan-markdown check — every `.md` in a set folder but `spec.md` (and the retired `prd.md`) needs a manifest entry, or the set reads MALFORMED. `commit_convention.go` is `RecordCommitConvention`: `pop tasks register` writes a newly activated set's `commit_convention` from the resolved `commits` stack through the `CommitConventionSource` seam `cmd` wires beside the Verifier's and Refiner's (ADR-0228), so the key is pop's projection of the stack rather than a planning agent's retyped copy — an authored value is overwritten, a re-register rewrites nothing, and the per-task **Planned commit subject** stays frozen at planning time. `verified_status.go` is the one read-side resolution answering both a set's status and its **Verification mark** (`verify_mark.go`), which is what keeps a **Human completion** (`human_completed` in the manifest, written at the `transition.go` chokepoint) from being demoted by a verdict — ADR-0179. A generated prompt never rides in argv: `agent_prompt_spill.go` spills it to a file at the `runAgentAttempt` seam (`attempts.go`) for the length of one attempt, and `verify.go`'s `workDiffView` hands the **Verifier** a commit range plus a complete `git diff --stat` instead of the diff bodies. The Verifier's prompt is an envelope (ADR-0227): the resolved `verification` convention is its body, reaching it through the `VerificationConvention` seam (`cmd` wires it, like the Refiner's), and pop owns only the role framing before it and the reply format after it — the `commits` convention stays a labelled block beside them. `refine.go` is **Refine** (`pop tasks refine`, ADR-0252): the same range and stat handed to a **Refiner** that is told to open the files itself and fixes what it may in place (ADR-0240 retired its read-only posture; `refinerRole` carries no `ReadOnly`, while the capability stays declared on every preset in `agent.go`), and its prompt is pop's own end to end (ADR-0246/0247), carrying the labelled `implementation` convention through the `ImplementationConvention` seam (the `conventions` package sits *above* `tasks`, so `cmd` wires it), with pop owning the role framing (the fix licence — including the "What a pass may fix" procedure moved out of the shipped answer — and no verdict) and the output expectation; the answer is written as a **Refine report** under `<set>/refine/`, latest by timestamp. `refine_commit.go` is the **Refine commit** (ADR-0240): both pass paths end in `commitRefinePass`, which captures whatever the Refiner left in the working tree as exactly one commit and commits nothing when the pass fixed nothing — or when the outcome is `gate-blocked` or `abandoned`, the latter discarding the pass's edits against a pre-invocation tree snapshot. Its subject is the `COMMIT-SUBJECT:` line the Refiner rendered under the set's recorded `commit_convention` — `splitRefinerReply` lifts `REFINE-OUTCOME:` and that subject out of the reply before the rest becomes the report, and a missing or unusable subject falls back to `RefineCommitSubject` (`tasks(<set-slug>): refine`) — and its body is the `Pop-Refine: <set-id>` trailer (`assess.go`), the set's own key rather than `Pop-Task` with the task half left off. Nothing on the path invalidates a cached verdict: a refine commit drifts a PASS's **Verified-at** SHA like any other commit past it. `refine_phase.go` is the drain's own refine step, the *first* directive of the `run_tasks.go` loop's quiescence branch, sitting before `verify_phase.go` so a pass's edits are judged by the same verification as the work they refine rather than costing a second one (ADR-0240), and gating nothing — the only directive it hands back besides falling through is the human's interrupt. It also skips a **Human completion** outright (`m.HumanCompleted`, the same bit the verify phase reads before declining to park or remediate): the drain does not edit code a human declared done, while `pop tasks refine` still refines such a set on request. Its **Refine episode** (`refine_episode.go` over the `refine_episodes` store table) is keyed on the fingerprint of the set's done-AFK task ids *minus its Remediation tasks*, so a commit that only moves the work SHA does not re-refine, a completed Remediation task does not either — a verify→remediate→re-verify lap re-verifies without re-refining — and planned work finishing does; every refined outcome records one, the drain's and `pop tasks refine`'s alike — gate-blocked and abandoned leave the episode armed. `implement_implementation_convention.go` is upfront adherence (ADR-0246): with `[work.implement].include_implementation_convention` set, the resolved `implementation` convention rides *every* implement prompt as a labelled, notice-free block — planned and Remediation tasks alike, since both drain through `agent.tmpl.md` — through the same `ImplementationConvention` seam, resolved once per run beside `turnCap` (`implement_run.go`) and once per single-task run in `executor.go`; the toggle is independent of `[work.refine].enabled`, so a repository can hold its builders to the standard before the pass is ever switched on. The Assist prompt gets a hint rather than a mechanism: it names `pop conventions get implementation` for quality work and lists `pop tasks refine` beside `implement` and `verify` on its do-not-invoke list. `pass_report.go` is the report machinery itself, one `passReport` value per pass (ADR-0245): the document render with its header of facts, the timestamped filing under the pass's own set sub-directory, the newest-by-timestamp scan, the header-field read back out of the document, and the `ReportPointer` every surface carries a report by — refine holds no private copy, only its `refineReport` value. `verify_report.go` is verification's half of it (ADR-0245): the `verifyReport` value, filing one document per Verifier invocation under `<set>/verify/`, and `splitVerifierReply`, which lifts the machine-read `VERDICT:` line off the front of the reply the way `splitRefinerReply` lifts `COMMIT-SUBJECT:` so the prose behind it becomes the document — a reply pop cannot parse into a verdict is kept whole instead. Every verdict publishes one, PASS included, and the response contract asks a PASS to say what it checked; a verdict served from the `verify_verdicts` cache invokes no agent and publishes nothing, which is why the log and the cache disagree about how many verdicts a set has had — the reports outlive the invalidation that deletes the rows. Filing is best-effort like the Captured run beside it, since the verdict is what gates the drain. `refine_pointer.go` is how the report reaches a human: one `RefinePointer` (the shared pointer: path plus the commit the report's own header records) that the HITL sign-off gate's preamble and paging entry, `render.go`'s detail-view section and the Assist prompt all render — a pointer and a verb on every surface, never the body. Both roles walk their agent list through one shared `agent_fallback_walk.go`, which differs between them only in an `agentRole`, and both file Captured runs — phase `verify` and phase `refine`, which `spend.go`, `stream.go` and `stream_tracer.go` each give a set-level row of its own |
++| `tasks/` | Task sets: manifests, runner, attempt streams, prompts, spend. `authoring_guide.go` is the `pop tasks authoring-guide` text — layout, templates, manifest fields and the judgment rules, generated from the constants `validateManifest` reads (ADR-0183); `validateManifest` also owns the orphan-markdown check — every `.md` in a set folder but `spec.md` (and the retired `prd.md`) needs a manifest entry, or the set reads MALFORMED. `commit_convention.go` is `RecordCommitConvention`: `pop tasks register` writes a newly activated set's `commit_convention` from the resolved `commits` stack through the `CommitConventionSource` seam `cmd` wires beside the Verifier's and Refiner's (ADR-0228), so the key is pop's projection of the stack rather than a planning agent's retyped copy — an authored value is overwritten, a re-register rewrites nothing, and the per-task **Planned commit subject** stays frozen at planning time. `verified_status.go` is the one read-side resolution answering both a set's status and its **Verification mark** (`verify_mark.go`), which is what keeps a **Human completion** (`human_completed` in the manifest, written at the `transition.go` chokepoint) from being demoted by a verdict — ADR-0179. A generated prompt never rides in argv: `agent_prompt_spill.go` spills it to a file at the `runAgentAttempt` seam (`attempts.go`) for the length of one attempt, and `verify.go`'s `workDiffView` hands the **Verifier** a commit range plus a complete `git diff --stat` instead of the diff bodies. The Verifier's prompt is an envelope (ADR-0227): the resolved `verification` convention is its body, reaching it through the `VerificationConvention` seam (`cmd` wires it, like the Refiner's), and pop owns only the role framing before it and the reply format after it — the `commits` convention stays a labelled block beside them. `refine.go` is **Refine** (`pop tasks refine`, ADR-0252): the same range and stat handed to a **Refiner** that is told to open the files itself and fixes what it may in place (ADR-0240 retired its read-only posture; `refinerRole` carries no `ReadOnly`, while the capability stays declared on every preset in `agent.go`), and its prompt is pop's own end to end (ADR-0246/0247), carrying the labelled `implementation` convention through the `ImplementationConvention` seam (the `conventions` package sits *above* `tasks`, so `cmd` wires it), with pop owning the role framing (the fix licence — including the "What a pass may fix" procedure moved out of the shipped answer — and no verdict) and the output expectation; the answer is written as a **Refine report** under `<set>/refine/`, latest by timestamp. `refine_commit.go` is the **Refine commit** (ADR-0240): both pass paths end in `commitRefinePass`, which captures whatever the Refiner left in the working tree as exactly one commit and commits nothing when the pass fixed nothing — or when the outcome is `gate-blocked` or `abandoned`, the latter discarding the pass's edits against a pre-invocation tree snapshot. Its subject is the `COMMIT-SUBJECT:` line the Refiner rendered under the set's recorded `commit_convention` — `splitRefinerReply` lifts `REFINE-OUTCOME:` and that subject out of the reply before the rest becomes the report, and a missing or unusable subject falls back to `RefineCommitSubject` (`tasks(<set-slug>): refine`) — and its body is the `Pop-Refine: <set-id>` trailer (`assess.go`), the set's own key rather than `Pop-Task` with the task half left off. Nothing on the path invalidates a cached verdict: a refine commit drifts a PASS's **Verified-at** SHA like any other commit past it. `refine_phase.go` is the drain's own refine step, the *first* directive of the `run_tasks.go` loop's quiescence branch, sitting before `verify_phase.go` so a pass's edits are judged by the same verification as the work they refine rather than costing a second one (ADR-0240), and gating nothing — the only directive it hands back besides falling through is the human's interrupt. It also skips a **Human completion** outright (`m.HumanCompleted`, the same bit the verify phase reads before declining to park or remediate): the drain does not edit code a human declared done, while `pop tasks refine` still refines such a set on request. Its **Refine episode** (`refine_episode.go` over the `refine_episodes` store table) is keyed on the fingerprint of the set's done-AFK task ids *minus its Remediation tasks*, so a commit that only moves the work SHA does not re-refine, a completed Remediation task does not either — a verify→remediate→re-verify lap re-verifies without re-refining — and planned work finishing does; every refined outcome records one, the drain's and `pop tasks refine`'s alike — gate-blocked and abandoned leave the episode armed. `implement_implementation_convention.go` is upfront adherence (ADR-0246): with `[work.implement].include_implementation_convention` set, the resolved `implementation` convention rides *every* implement prompt as a labelled, notice-free block — planned and Remediation tasks alike, since both drain through `agent.tmpl.md` — through the same `ImplementationConvention` seam, resolved once per run beside `turnCap` (`implement_run.go`) and once per single-task run in `executor.go`; the toggle is independent of `[work.refine].enabled`, so a repository can hold its builders to the standard before the pass is ever switched on. The Assist prompt gets a hint rather than a mechanism: it names `pop conventions get implementation` for quality work and lists `pop tasks refine` beside `implement` and `verify` on its do-not-invoke list. `pass_report.go` is the report machinery itself, one `passReport` value per pass (ADR-0245): the document render with its header of facts, the timestamped filing under the pass's own set sub-directory, the newest-by-timestamp scan, the header-field read back out of the document, and the `ReportPointer` every surface carries a report by — refine holds no private copy, only its `refineReport` value. `verify_report.go` is verification's half of it (ADR-0245): the `verifyReport` value, filing one document per Verifier invocation under `<set>/verify/`, and `splitVerifierReply`, which lifts the machine-read `VERDICT:` line off the front of the reply the way `splitRefinerReply` lifts `COMMIT-SUBJECT:` so the prose behind it becomes the document — a reply pop cannot parse into a verdict is kept whole instead. Every verdict publishes one, PASS included, and the response contract asks a PASS to say what it checked; a verdict served from the `verify_verdicts` cache invokes no agent and publishes nothing, which is why the log and the cache disagree about how many verdicts a set has had — the reports outlive the invalidation that deletes the rows. Filing is best-effort like the Captured run beside it, since the verdict is what gates the drain. `refine_pointer.go` is how the report reaches a human: one `RefinePointer` (the shared pointer: path plus the commit the report's own header records) that the HITL sign-off gate's preamble and paging entry, `render.go`'s detail-view section and the Assist prompt all render — a pointer and a verb on every surface, never the body. Both roles walk their agent list through one shared `agent_fallback_walk.go`, which differs between them only in an `agentRole`, and both file Captured runs — phase `verify` and phase `refine`, which `spend.go`, `stream.go` and `stream_tracer.go` each give a set-level row of its own. `explore.go` is the **Explore phase** (`pop tasks explore`, ADR-0262), the third role on that walk (phase `explore`, the one role under the read-only posture): it writes the flat **Exploration report** `exploration.md` beside `spec.md` through `pass_report.go`'s render and header read-back only. `explore_phase.go` runs it at the *head* of the `run_tasks.go` loop for a set declaring `"explore": true` with no report (`[work.explore].enabled`, default on), and a failed pass parks the set: `explore_mark.go`'s `ResolveExploreMark` is the one read-side resolution, applied per refresh in `render.go`'s `buildRefreshResult`, and it turns a READY declared set with an explore Captured run and no report into EXPLORE-FAILED. Builders get the report as a path in `agent.tmpl.md` |
+ | `tasks/binding/` | Binding a Task set to a checkout or worktree, plus the managed-worktree root: `binding.go` owns the root list (current + pre-cut) and `worktree_root_move.go` the gated read-path fold that relocates the pre-cut root, repoints every recorded `runtime_path` in one transaction and repairs each repository (ADR-0174 decision 8) |
+ | `tasks/setkind/` | The Task-set `work.Kind` adapter: loads containers per repo group, the ADR-0121 comparator, the set's verbs. One level down from `tasks` because it needs `tasks/binding` |
+ | `tasks/drain/` | Task-set drain control and the supervisor's dependency bag (`queue.go`: `Deps`, the project scan, the `Decision` a scan produces, the tmux spawn). Everything a drain does to a Task set is here — routing to a checkout (`worktree.go`), bind/unbind/abandon/fold, deferrals, the status snapshot (`status.go`) and the run view (`run_output.go`) both read surfaces render. It also holds the kind wiring (`kinds.go`: `WorkKinds` and the unmemoized `AdvanceKinds` the supervisor drives, `WithGitMemo` scoping the **Git fact memo** and `project.ShapeMemo` (the per-load repository-shape probe memo) to one load, `SetKindDeps`, `MapKindDeps`, `RoutinePageKinds`; `advance.go` composes the advance half onto the Task-set kind; `routines.go` projects the bag onto the Routine kind), because that wiring needs `tasks/setkind`, `wayfinder` and `routine`, all of which sit above `tasks` |
+diff --git a/tasks/agent.go b/tasks/agent.go
+index 2c8ab816..d0e8a712 100644
+--- a/tasks/agent.go
++++ b/tasks/agent.go
+@@ -148,7 +148,7 @@ type AgentHeadlessRequest struct {
+ 	// mean both (ADR-0190). An adapter that cannot be told about a cap ignores it.
+ 	TurnCap int
+ 	// ReadOnly asks the preset to run without the ability to change the checkout
+-	// it is pointed at. Only the Refiner sets it — the Verifier must run the
++	// it is pointed at. Only the Explorer sets it (ADR-0262) — the Verifier must run the
+ 	// build and the test suite, which a read-only sandbox would fail for reasons
+ 	// that have nothing to do with the code under judgment (ADR-0221). A preset
+ 	// declared blind on the posture is invoked exactly as it would be without it.
+diff --git a/tasks/agent_fallback_walk.go b/tasks/agent_fallback_walk.go
+index 2df0856d..1183d4ac 100644
+--- a/tasks/agent_fallback_walk.go
++++ b/tasks/agent_fallback_walk.go
+@@ -11,8 +11,8 @@ import (
+ 
+ // agentRole is what the shared fallback walk needs to know about the role it is
+ // running: how the role names itself to the operator, where one invocation of it
+-// is persisted, and what counts as an answer worth stopping on. Verification and
+-// Refine are the two roles today, and they differ in exactly those three
++// is persisted, and what counts as an answer worth stopping on. Verification,
++// Refine and Explore are the roles today, and they differ in exactly those
+ // things — nothing about how an agent list is walked is theirs.
+ type agentRole struct {
+ 	// Noun names the role inside a fall-through or skip message ("Verifier
+@@ -21,7 +21,7 @@ type agentRole struct {
+ 	// Gerund opens the once-per-preset heading: "━━ <Gerund> with <agent>".
+ 	Gerund string
+ 	// Phase is the Work group the role's attempts are spent in, as a Captured run
+-	// and a Spent retry cap both name it ("verify", "refine").
++	// and a Spent retry cap both name it ("verify", "refine", "explore").
+ 	Phase string
+ 	// Persist records as a Captured run one invocation that ended without the
+ 	// role answering — interrupted, quota-paused, or refused — best-effort.
+@@ -39,10 +39,9 @@ type agentRole struct {
+ 	// answer should be retried on the current preset.
+ 	RetryEligible func(outcome *attemptOutcome, raw string) bool
+ 	// ReadOnly spawns this role's agents under the read-only agent posture
+-	// (ADR-0221). No role sets it today: the Refiner was its only consumer, and
+-	// a Refiner that fixes in place cannot run without its editing tools
+-	// (ADR-0252). The posture stays declared on every preset for the next
+-	// role that wants to look without touching.
++	// (ADR-0221). The Explorer sets it: its reply is the whole report, so it has
++	// nothing to edit (ADR-0262). The Refiner, its first consumer, no longer
++	// does — a Refiner that fixes in place needs its editing tools (ADR-0252).
+ 	ReadOnly bool
+ }
+ 
+diff --git a/tasks/agent_test.go b/tasks/agent_test.go
+index 7fae6006..cc94e043 100644
+--- a/tasks/agent_test.go
++++ b/tasks/agent_test.go
+@@ -1627,7 +1627,7 @@ func TestNormalizeStructuredOutputRawFallbackUsesCompletionContract(t *testing.T
+ }
+ 
+ func TestBuildAgentPromptAbsolutePaths(t *testing.T) {
+-	prompt := BuildAgentPrompt("/abs/tasks/01-a.md", "/abs/runtime", "")
++	prompt := BuildAgentPrompt("/abs/tasks/01-a.md", "/abs/runtime", "", "")
+ 	for _, want := range []string{
+ 		"/abs/tasks/01-a.md", "/abs/runtime", "index.json", "Do NOT make git commits", "optional context references",
+ 		"single non-interactive session",
+diff --git a/tasks/artifacts.go b/tasks/artifacts.go
+index 0b42d472..65a4223a 100644
+--- a/tasks/artifacts.go
++++ b/tasks/artifacts.go
+@@ -9,13 +9,19 @@ import (
+ )
+ 
+ const (
+-	ArtifactTypeRefine   = "refine"
+-	ArtifactTypeVerify   = "verify"
+-	ArtifactTypeSpec     = "spec"
+-	ArtifactTypeProgress = "progress"
+-	ProgressFileName     = "progress.txt"
+-	RefineDirName        = "refine"
+-	VerifyDirName        = "verify"
++	ArtifactTypeRefine      = "refine"
++	ArtifactTypeVerify      = "verify"
++	ArtifactTypeSpec        = "spec"
++	ArtifactTypeExploration = "exploration"
++	ArtifactTypeProgress    = "progress"
++	ProgressFileName        = "progress.txt"
++	// ExplorationFileName is the Exploration report: the code as found, written
++	// flat in the set directory by the Explore phase (ADR-0262). It is one file
++	// rather than a directory of timestamped documents because the pass runs once
++	// and a re-run overwrites it.
++	ExplorationFileName = "exploration.md"
++	RefineDirName       = "refine"
++	VerifyDirName       = "verify"
+ )
+ 
+ // ArtifactSectionTitle is shared by the CLI and dashboard detail surfaces so
+@@ -33,7 +39,8 @@ type Artifact struct {
+ // Artifacts returns the closed list of Task-set artifacts in type-tier order:
+ // every verify report first, then every refine report — a verdict outranks a
+ // polish note (ADR-0245) — each newest-first among themselves, then the spec,
+-// then the progress record (ADR-0220). Recency orders only the family that grows, so a
++// then the Exploration report, then the progress record (ADR-0220,
++// ADR-0262): what was decided, what exists, what happened. Recency orders only the family that grows, so a
+ // drain rewriting progress.txt cannot move the row under a reader's cursor.
+ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
+ 	if d == nil {
+@@ -53,6 +60,8 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
+ 		switch entry.Name() {
+ 		case SpecFileName:
+ 			artifactType = ArtifactTypeSpec
++		case ExplorationFileName:
++			artifactType = ArtifactTypeExploration
+ 		case ProgressFileName:
+ 			artifactType = ArtifactTypeProgress
+ 		default:
+@@ -108,6 +117,7 @@ var artifactTierOrder = []string{
+ 	ArtifactTypeVerify,
+ 	ArtifactTypeRefine,
+ 	ArtifactTypeSpec,
++	ArtifactTypeExploration,
+ 	ArtifactTypeProgress,
+ }
+ 
+diff --git a/tasks/authoring_guide.go b/tasks/authoring_guide.go
+index 650a9280..d7b41233 100644
+--- a/tasks/authoring_guide.go
++++ b/tasks/authoring_guide.go
+@@ -46,7 +46,8 @@ A set is one folder in this repository's Work store; run `+"`pop work show-path`
+     ├── %s
+     ├── 01-<task-name>.md
+     ├── 02-<task-name>.md
+-    └── progress.txt    (pop's; never hand-written)
++    ├── %s  (pop's; written by the Explore phase)
++    └── %s    (pop's; never hand-written)
+ 
+ - `+"`<task-set-name>`"+` is `+"`<timestamp>-<slug>`"+`. The slug is short and
+   hyphen-delimited (e.g. `+"`user-auth`"+`); the timestamp is
+@@ -59,7 +60,7 @@ A set is one folder in this repository's Work store; run `+"`pop work show-path`
+   %s, write the task files beside it rather than minting a new folder.
+ - %s and the task markdown stay in 1:1 sync — every markdown file has
+   exactly one manifest entry, and every entry names a file that exists.
+-  %s is the only markdown in the folder with no entry.
++  %s and %s are the only markdown in the folder with no entry.
+ 
+ Write the files in dependency order (blockers first), so `+"`blocked_by`"+` names
+ ids you have already chosen.
+@@ -213,7 +214,7 @@ Set-level keys:
+   set is verified or refined: they override the configured agent fallback list
+   and effort for that phase, and CLI flags still win over them. They steer only —
+   participation stays the `+"`verify`"+` / `+"`refine`"+` keys' business.
+-- No `+"`worktree`"+` and no `+"`auto_drain`"+` (ADR-0115): binding and
++%s- No `+"`worktree`"+` and no `+"`auto_drain`"+` (ADR-0115): binding and
+   auto-drain are `+"`register`"+` flags and dashboard toggles, never manifest
+   keys. A legacy set carrying them is not malformed; they are ignored.
+ 
+@@ -233,7 +234,7 @@ item, and is re-runnable until the set reads `+"`READY`"+` (or
+ - every `+"`type`"+`, `+"`effort`"+` and `+"`status`"+` is one of the words
+   above, and no status is `+"`in_progress`"+`;
+ - every `+"`blocked_by`"+` id names a task in the manifest;
+-- every markdown file in the folder has an entry — %s aside, a file
++- every markdown file in the folder has an entry — %s and %s aside, a file
+   nothing lists is reported rather than silently ignored, because an unlisted
+   slice is one that never runs.
+ 
+@@ -242,9 +243,9 @@ checked; that is the condition `+"`pop tasks implement`"+` reads back, and it is
+ why the section is mandatory.
+ `,
+ 		ManifestFileName,
+-		SpecFileName, ManifestFileName,
++		SpecFileName, ManifestFileName, ExplorationFileName, ProgressFileName,
+ 		SpecFileName,
+-		ManifestFileName, SpecFileName,
++		ManifestFileName, SpecFileName, ExplorationFileName,
+ 		SpecFileName, SpecFileName,
+ 		taskMarkdownTemplate(),
+ 		ManifestFileName,
+@@ -254,13 +255,35 @@ why the section is mandatory.
+ 		enumList(taskTypeOrder),
+ 		enumList(ValidEfforts()), DefaultTaskEffort,
+ 		enumList(taskStatusWords()), TaskOpen,
+-		AcceptanceCriteriaHeading, SpecFileName,
++		exploreKeysGuide(),
++		AcceptanceCriteriaHeading, SpecFileName, ExplorationFileName,
+ 		AcceptanceCriteriaHeading,
+ 	)
+ 
+ 	return b.String()
+ }
+ 
++// exploreKeysGuide teaches the Explore phase's two set-level keys (ADR-0262).
++// The key names and the report's filename are the constants the manifest
++// accessors and the orphan check read, so a renamed key renames itself here.
++func exploreKeysGuide() string {
++	return fmt.Sprintf(`- `+"`%[1]s`"+` — optional boolean, and opt-**in**, the reverse of
++  `+"`verify`"+` and `+"`refine`"+`: absent or `+"`false`"+` means the set
++  never explores. Write `+"`true`"+` and the drain writes an Exploration report
++  (%[3]s — the code as found, about a page) before the set's first task,
++  and every builder is handed it. Set it when two or more AFK tasks touch the
++  same seam and a later one depends on how an earlier one shapes it. Never set
++  it for a set's size, or because the area is unfamiliar. A declared set whose
++  pass cannot produce the report parks rather than building blind; a hand-run
++  `+"`pop tasks explore`"+` runs on any set regardless of this key.
++- `+"`%[2]s`"+` — optional
++  `+"`{\"agents\": [...], \"effort\": \"...\"}`"+` object steering *how*
++  the set is explored, exactly as `+"`verifier`"+` / `+"`refiner`"+` do: it
++  overrides the configured agent list and effort, CLI flags still win over it,
++  and it steers only — participation stays the `+"`%[1]s`"+` key's business.
++`, manifestExploreKey, manifestExplorerKey, ExplorationFileName)
++}
++
+ // taskMarkdownTemplate renders the slice skeleton. Its acceptance-criteria
+ // heading and checkboxes come from the validator's own heading constant, so the
+ // template a session copies is one validateManifest accepts — the guide's test
+diff --git a/tasks/authoring_guide_test.go b/tasks/authoring_guide_test.go
+index 833acabb..c2816ebe 100644
+--- a/tasks/authoring_guide_test.go
++++ b/tasks/authoring_guide_test.go
+@@ -173,3 +173,58 @@ func fencedBlock(t *testing.T, guide, lang string, n int) string {
+ 		rest = rest[end+3:]
+ 	}
+ }
++
++// TestTaskGuideTeachesTheExploreKeysTheValidatorReads asserts the Explore keys
++// from the printed text rather than from the generator: the guide names the
++// same constants the manifest accessors read, states the opt-in rule and the
++// seam rule in words, and a set carrying both keys and an Exploration report —
++// built from the guide's own example — still registers with the keys read back.
++func TestTaskGuideTeachesTheExploreKeysTheValidatorReads(t *testing.T) {
++	t.Parallel()
++	guide := AuthoringGuide()
++	for name, want := range map[string]string{
++		"the explore key":            "- `" + manifestExploreKey + "` — ",
++		"the explorer key":           "- `" + manifestExplorerKey + "` — ",
++		"opt-in where verify is not": "opt-**in**, the reverse of",
++		"absent means never":         "absent or `false` means the set\n  never explores",
++		"the seam rule":              "two or more AFK tasks touch the\n  same seam and a later one depends on how an earlier one shapes it",
++		"the report beside the spec": SpecFileName + " and " + ExplorationFileName + " are the only markdown",
++		"the report in the layout":   "├── " + ExplorationFileName,
++	} {
++		if !strings.Contains(guide, want) {
++			t.Fatalf("guide is missing %s (%q)", name, want)
++		}
++	}
++
++	setDir := filepath.Join(t.TempDir(), "2026-08-03-demo")
++	if err := os.MkdirAll(setDir, 0o755); err != nil {
++		t.Fatal(err)
++	}
++	template := fencedBlock(t, guide, "markdown", 0)
++	for _, name := range []string{"01-login-form.md", "02-sign-off.md"} {
++		if err := os.WriteFile(filepath.Join(setDir, name), []byte(template+"\n"), 0o644); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if err := os.WriteFile(filepath.Join(setDir, ExplorationFileName), []byte("# Exploration report\n"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	example := strings.TrimSuffix(strings.TrimSpace(fencedBlock(t, guide, "json", 0)), "}")
++	manifest := example + ",\n  \"" + manifestExploreKey + "\": true,\n  \"" + manifestExplorerKey + "\": {\"agents\": [\"codex\"], \"effort\": \"light\"}\n}\n"
++	manifestPath := filepath.Join(setDir, ManifestFileName)
++	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
++		t.Fatal(err)
++	}
++
++	m := LoadManifest(&Deps{FS: deps.NewRealFileSystem()}, "2026-08-03-demo", manifestPath)
++	if !m.Valid {
++		t.Fatalf("a set carrying the explore keys and its report does not validate: %v", m.Errors)
++	}
++	if !m.ExploreDeclared() {
++		t.Fatal("the guide's explore key does not read back as declared")
++	}
++	over := m.ExplorerOverride()
++	if over == nil || strings.Join(over.Agents, ",") != "codex" || over.Effort != "light" {
++		t.Fatalf("explorer directive = %+v, want codex at light", over)
++	}
++}
+diff --git a/tasks/drain_explore_test.go b/tasks/drain_explore_test.go
+new file mode 100644
+index 00000000..2b7d3ec2
+--- /dev/null
++++ b/tasks/drain_explore_test.go
+@@ -0,0 +1,304 @@
++package tasks
++
++import (
++	"bytes"
++	"encoding/json"
++	"io"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/glebglazov/pop/config"
++)
++
++// exploreBody is the report the scripted Explorer writes. Its marker line must
++// never reach a builder's prompt: the report travels as a path.
++const exploreBody = "The tree is the fixture's HEAD.\n\n## Where things live\n\n- tasks/explore.go owns the pass.\n\nSECRET-MAP-BODY"
++
++func interrelatedSet() []Task {
++	return []Task{
++		{ID: "01-a", File: "01-a.md", Title: "Shape the seam", Type: "AFK", Status: "open"},
++		{ID: "02-b", File: "02-b.md", Title: "Build on the seam", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
++	}
++}
++
++// setupExploreDrainFixture is a registered, interrelated set carrying the given
++// set-level keys.
++func setupExploreDrainFixture(t *testing.T, setKeys map[string]any) *runTaskSetFixture {
++	t.Helper()
++	env := setupRunTaskSetFixture(t, "demo", interrelatedSet())
++	writeManifestWithSetKeys(t, filepath.Join(env.tasksDir, "demo"), interrelatedSet(), setKeys)
++	return env
++}
++
++func (e *runTaskSetFixture) setDir() string { return filepath.Join(e.tasksDir, "demo") }
++
++func exploreDisabledConfig() *config.Config {
++	off := false
++	return &config.Config{Work: &config.WorkConfig{Explore: &config.ExploreConfig{Enabled: &off}}}
++}
++
++// drainOnce drains the fixture's set with the given Explorer and config, and
++// reports the run, the Explorer calls and the prompts the builder saw.
++func drainOnce(t *testing.T, env *runTaskSetFixture, cfg *config.Config, skip bool, explore func(string) (string, string, error)) (*RunTaskSetResult, error, []string) {
++	t.Helper()
++	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
++	var buf bytes.Buffer
++	opts := env.runTaskSetOpts(true, agent, &buf)
++	opts.TaskSetOverride = "demo"
++	opts.SkipExplore = skip
++	opts.exploreRunner = explore
++	result, err := RunTaskSetWith(env.deps(), nil, func(string) (*config.Config, error) { return cfg, nil }, opts)
++	return result, err, fakeAgentPrompts(agent)
++}
++
++// TestDrainExploresADeclaredSetOnceAtItsHead drives a whole drain both ways: a
++// declared set with no report is explored before any task is selected and its
++// builders are handed the report's path; a declared set whose report is already
++// there drains with nothing spent on exploring. Absent configuration explores.
++func TestDrainExploresADeclaredSetOnceAtItsHead(t *testing.T) {
++	t.Parallel()
++
++	t.Run("declared with no report", func(t *testing.T) {
++		t.Parallel()
++		env := setupExploreDrainFixture(t, map[string]any{"explore": true})
++		calls := 0
++		var agentPromptsAtExplore int
++		var agent string
++		result, err, prompts := func() (*RunTaskSetResult, error, []string) {
++			agent = writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "ok"})
++			var buf bytes.Buffer
++			opts := env.runTaskSetOpts(true, agent, &buf)
++			opts.TaskSetOverride = "demo"
++			opts.exploreRunner = func(prompt string) (string, string, error) {
++				calls++
++				agentPromptsAtExplore = len(fakeAgentPrompts(agent))
++				if !strings.Contains(prompt, "### 01-a") || !strings.Contains(prompt, "### 02-b") {
++					t.Errorf("explorer prompt lacks the set's task bodies:\n%s", prompt)
++				}
++				return exploreBody, "claude", nil
++			}
++			res, runErr := RunTaskSetWith(env.deps(), nil, nil, opts)
++			return res, runErr, fakeAgentPrompts(agent)
++		}()
++		if err != nil {
++			t.Fatalf("drain: %v", err)
++		}
++		if calls != 1 || agentPromptsAtExplore != 0 {
++			t.Fatalf("explorer ran %d time(s), after %d task attempt(s); want once, before any", calls, agentPromptsAtExplore)
++		}
++		if !result.TaskSetDone || len(prompts) != 2 {
++			t.Fatalf("result = %+v with %d prompts, want both tasks drained", result, len(prompts))
++		}
++		report := filepath.Join(env.setDir(), ExplorationFileName)
++		if body, err := os.ReadFile(report); err != nil || !strings.Contains(string(body), "SECRET-MAP-BODY") {
++			t.Fatalf("report not written: %v %q", err, body)
++		}
++		for _, p := range prompts {
++			if !strings.Contains(p, report) || strings.Contains(p, "SECRET-MAP-BODY") {
++				t.Fatalf("builder prompt must name the report by path and never inline it:\n%s", p)
++			}
++		}
++	})
++
++	t.Run("declared with a report already there", func(t *testing.T) {
++		t.Parallel()
++		env := setupExploreDrainFixture(t, map[string]any{"explore": true})
++		if err := os.WriteFile(filepath.Join(env.setDir(), ExplorationFileName), []byte("# Exploration report — demo\n\nan earlier map\n"), 0o644); err != nil {
++			t.Fatal(err)
++		}
++		result, err, prompts := drainOnce(t, env, nil, false, func(string) (string, string, error) {
++			t.Error("a set with a report must spend nothing on exploring")
++			return "", "", nil
++		})
++		if err != nil || !result.TaskSetDone || len(prompts) != 2 {
++			t.Fatalf("drain = %+v, %v with %d prompts", result, err, len(prompts))
++		}
++		runs, _ := listSetRuns(env.deps(), env.setDir())
++		for _, run := range runs {
++			if run.meta.Phase == "explore" {
++				t.Fatalf("an explore run was filed for a set that had its report: %+v", run.meta)
++			}
++		}
++	})
++}
++
++// TestDrainDoesNotExploreUnasked: a set that never declared exploration is
++// untouched, and configuration switched off stops every drain from exploring
++// while the hand-run verb still works.
++func TestDrainDoesNotExploreUnasked(t *testing.T) {
++	t.Parallel()
++	never := func(t *testing.T) func(string) (string, string, error) {
++		return func(string) (string, string, error) {
++			t.Error("the drain explored a set it must not")
++			return "", "", nil
++		}
++	}
++
++	t.Run("undeclared", func(t *testing.T) {
++		t.Parallel()
++		env := setupRunTaskSetFixture(t, "demo", interrelatedSet())
++		result, err, _ := drainOnce(t, env, nil, false, never(t))
++		if err != nil || !result.TaskSetDone {
++			t.Fatalf("drain = %+v, %v", result, err)
++		}
++	})
++
++	t.Run("config off", func(t *testing.T) {
++		t.Parallel()
++		env := setupExploreDrainFixture(t, map[string]any{"explore": true})
++		result, err, _ := drainOnce(t, env, exploreDisabledConfig(), false, never(t))
++		if err != nil || !result.TaskSetDone {
++			t.Fatalf("drain = %+v, %v", result, err)
++		}
++		if _, err := os.Stat(filepath.Join(env.setDir(), ExplorationFileName)); !os.IsNotExist(err) {
++			t.Fatalf("config off still wrote a report: %v", err)
++		}
++		// The hand run is the human asking, and config does not gate it.
++		opts := exploreCoreOptions{DefPath: env.tasksDir, RuntimePath: env.root, SetID: "demo",
++			runExplorer: func(string) (string, string, error) { return exploreBody, "claude", nil }}
++		if _, err := exploreResolvedSet(env.deps(), exploreDisabledConfig(), opts); err != nil {
++			t.Fatalf("hand-run explore with config off: %v", err)
++		}
++	})
++}
++
++// TestExplorerPrecedence: the set's explorer object overrides configuration,
++// and CLI flags win over it.
++func TestExplorerPrecedence(t *testing.T) {
++	t.Parallel()
++	m := &Manifest{Unknown: map[string]json.RawMessage{"explorer": json.RawMessage(`{"agents":["codex"],"effort":"light"}`)}}
++	cfg := &config.Config{Work: &config.WorkConfig{Explore: &config.ExploreConfig{Agents: config.AgentEntries{{Cmd: "pi"}}, Effort: "heavy"}}}
++
++	sel, err := resolveExplorer(nil, "", m, cfg)
++	if err != nil || strings.Join(sel.Agents, ",") != "codex" || sel.Effort != "light" {
++		t.Fatalf("explorer object over config = %+v, %v; want codex at light", sel, err)
++	}
++	sel, err = resolveExplorer([]string{"claude"}, "heavy", m, cfg)
++	if err != nil || strings.Join(sel.Agents, ",") != "claude" || sel.Effort != "heavy" {
++		t.Fatalf("CLI over explorer object = %+v, %v; want claude at heavy", sel, err)
++	}
++	sel, err = resolveExplorer(nil, "", &Manifest{}, cfg)
++	if err != nil || strings.Join(sel.Agents, ",") != "pi" || sel.Effort != "heavy" {
++		t.Fatalf("config alone = %+v, %v; want pi at heavy", sel, err)
++	}
++	sel, err = resolveExplorer(nil, "", &Manifest{}, nil)
++	if err != nil || sel.Effort != DefaultExploreEffort {
++		t.Fatalf("nothing configured = %+v, %v; want the default effort", sel, err)
++	}
++}
++
++// failingExplorer stands in for an Explorer whose every attempt died: it files
++// the Captured run each attempt files, through the role the walk uses, and
++// gives up.
++func failingExplorer(t *testing.T, env *runTaskSetFixture) func(string) (string, string, error) {
++	return func(string) (string, string, error) {
++		invocation, err := ResolveAgentInvocationWithMode("claude", "", "prompt", env.root, AgentOutputAuto)
++		if err != nil {
++			t.Fatalf("resolve invocation: %v", err)
++		}
++		rec := newStreamRecorder(io.Discard, fakeClock(time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), 100*time.Millisecond))
++		explorerRole(env.deps(), io.Discard, env.setDir(), "demo", "sha1").persist(rec, invocation, 3, streamOutcomeFailed, "exit 1", 1)
++		return "", "", exitErr(ExitOperational, "the Explorer produced no report")
++	}
++}
++
++func setRow(t *testing.T, env *runTaskSetFixture) Row {
++	t.Helper()
++	refresh, err := RefreshWith(env.deps(), env.tasksDir, DefaultStatePathWith(env.deps()))
++	if err != nil {
++		t.Fatal(err)
++	}
++	row := findRow(refresh, "demo")
++	if row == nil {
++		t.Fatal("no row for demo")
++	}
++	return *row
++}
++
++func parkRecords(t *testing.T, env *runTaskSetFixture) int {
++	t.Helper()
++	data, _ := os.ReadFile(filepath.Join(env.setDir(), ProgressFileName))
++	return strings.Count(string(data), "[set] "+string(StatusExploreFailed))
++}
++
++// TestAFailedExploreParksTheSetUntilAWayOut drives the park: a declared set
++// whose pass gives up reads EXPLORE-FAILED (not BLOCKED), automatic selection
++// passes over it, one set-level Progress record says why, and the skip flag
++// drains it once without exploring and without parking again.
++func TestAFailedExploreParksTheSetUntilAWayOut(t *testing.T) {
++	t.Parallel()
++	env := setupExploreDrainFixture(t, map[string]any{"explore": true})
++
++	result, err, prompts := drainOnce(t, env, nil, false, failingExplorer(t, env))
++	if err == nil || !result.TaskSetExploreFailed || len(prompts) != 0 {
++		t.Fatalf("drain = %+v, %v with %d task prompts; want a park before any task", result, err, len(prompts))
++	}
++	if n := parkRecords(t, env); n != 1 {
++		t.Fatalf("park records = %d, want exactly one", n)
++	}
++	data, _ := os.ReadFile(filepath.Join(env.setDir(), ProgressFileName))
++	if !strings.Contains(string(data), "phase explore: ") || !strings.Contains(string(data), "produced no report") {
++		t.Fatalf("park record does not name the phase and the reason:\n%s", data)
++	}
++
++	row := setRow(t, env)
++	if row.Status != StatusExploreFailed || row.ExploreMark != ExploreMarkUnexplored || row.UnexploredReason != UnexploredFailed {
++		t.Fatalf("row = %s / %s (%s), want EXPLORE-FAILED, unexplored: failed", row.Status, row.ExploreMark, row.UnexploredReason)
++	}
++	refresh, _ := RefreshWith(env.deps(), env.tasksDir, DefaultStatePathWith(env.deps()))
++	if id, _, err := SelectTaskSet(refresh, ""); err == nil {
++		t.Fatalf("automatic selection picked %q, a parked set", id)
++	}
++
++	result, err, prompts = drainOnce(t, env, nil, true, func(string) (string, string, error) {
++		t.Error("--skip-explore must not explore")
++		return "", "", nil
++	})
++	if err != nil || !result.TaskSetDone || len(prompts) != 2 {
++		t.Fatalf("skip-explore drain = %+v, %v with %d prompts", result, err, len(prompts))
++	}
++	if n := parkRecords(t, env); n != 1 {
++		t.Fatalf("park records after the skip drain = %d, want still one", n)
++	}
++}
++
++// TestTheParkClearsByHandOrByRetraction: a successful hand run clears the park,
++// and so does the author retracting the declaration.
++func TestTheParkClearsByHandOrByRetraction(t *testing.T) {
++	t.Parallel()
++	park := func(t *testing.T) *runTaskSetFixture {
++		env := setupExploreDrainFixture(t, map[string]any{"explore": true})
++		if _, err, _ := drainOnce(t, env, nil, false, failingExplorer(t, env)); err == nil {
++			t.Fatal("expected the drain to park")
++		}
++		if row := setRow(t, env); row.Status != StatusExploreFailed {
++			t.Fatalf("status = %s, want the park", row.Status)
++		}
++		return env
++	}
++
++	t.Run("hand run", func(t *testing.T) {
++		t.Parallel()
++		env := park(t)
++		opts := exploreCoreOptions{DefPath: env.tasksDir, RuntimePath: env.root, SetID: "demo",
++			runExplorer: func(string) (string, string, error) { return exploreBody, "claude", nil }}
++		if _, err := exploreResolvedSet(env.deps(), nil, opts); err != nil {
++			t.Fatal(err)
++		}
++		if row := setRow(t, env); row.Status != StatusReady || row.ExploreMark != ExploreMarkExplored {
++			t.Fatalf("row = %s / %s, want READY and explored", row.Status, row.ExploreMark)
++		}
++	})
++
++	t.Run("retraction", func(t *testing.T) {
++		t.Parallel()
++		env := park(t)
++		writeManifestWithSetKeys(t, env.setDir(), interrelatedSet(), map[string]any{"explore": false})
++		if row := setRow(t, env); row.Status != StatusReady || row.ExploreMark != ExploreMarkNone {
++			t.Fatalf("row = %s / %q, want READY with no mark", row.Status, row.ExploreMark)
++		}
++	})
++}
+diff --git a/tasks/executor.go b/tasks/executor.go
+index 8eff16cf..ee624655 100644
+--- a/tasks/executor.go
++++ b/tasks/executor.go
+@@ -273,7 +273,8 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
+ 	}
+ 
+ 	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath,
+-		implementImplementationConvention(cfg, opts.ImplementationConvention, runtimePath))
++		implementImplementationConvention(cfg, opts.ImplementationConvention, runtimePath),
++		explorationPromptPath(d, sel.Manifest))
+ 	buildForAgent := buildAgentInvocationFactory(d, loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, resolveRepoTurnCap(d, cfg, runtimePath))
+ 
+ 	maxTries, err := plan.maxTries(opts.MaxTriesExplicit, opts.MaxTries)
+diff --git a/tasks/explore.go b/tasks/explore.go
+new file mode 100644
+index 00000000..024055ab
+--- /dev/null
++++ b/tasks/explore.go
+@@ -0,0 +1,398 @@
++package tasks
++
++import (
++	"fmt"
++	"io"
++	"path/filepath"
++	"strings"
++	"time"
++
++	"github.com/glebglazov/pop/config"
++	"github.com/glebglazov/pop/internal/prompt"
++	"github.com/glebglazov/pop/project"
++)
++
++// DefaultExploreEffort is the model-strength tier the Explorer runs at when
++// neither a CLI flag, the set's `explorer` object nor [work.explore].effort
++// names one (ADR-0262). Recording where code lives is reading, not judging, so
++// it defaults below the Verifier and the Refiner.
++const DefaultExploreEffort = "standard"
++
++// explorationReport is the Exploration report's document shape on the shared
++// pass-report machinery (ADR-0245): the header of facts and its read-back. It
++// is flat — one `exploration.md` beside the spec — so it borrows nothing of
++// the timestamped filing or the newest-by-timestamp scan the two families that
++// rerun use (ADR-0262 decision 1).
++var explorationReport = passReport{
++	ArtifactType: ArtifactTypeExploration,
++	Title:        "Exploration report",
++	WrittenLabel: "Explored",
++	AgentLabel:   "Explorer",
++	Noun:         "explore",
++	PointerLabel: "Exploration",
++}
++
++// ExploreOptions configures a `pop tasks explore <set>` run.
++type ExploreOptions struct {
++	ResolveInput ResolveInput
++	// TaskSetID is the bare Task-set identifier to explore.
++	TaskSetID string
++	// Agents is the ordered CLI Explorer fallback list (`--agent`, repeatable).
++	// Empty ⇒ the set's `explorer` object, then [work.explore].agents, then
++	// [work.implement].agents.
++	Agents []string
++	// Effort is the CLI Explorer effort override (`--effort`). Empty ⇒ the set's
++	// `explorer` object, then config, then DefaultExploreEffort.
++	Effort string
++	// Timeout bounds one Explorer attempt. Zero uses DefaultAttemptTimeout.
++	Timeout time.Duration
++	// Output receives the live agent stream and the run's chrome.
++	Output io.Writer
++	// Wait is the `--wait` / `--no-wait` tri-state for admission to the checkout
++	// (ADR-0239).
++	Wait AdmissionWaitChoice
++	// ConfirmIn is the invocation's input, read only to resolve Wait.
++	ConfirmIn io.Reader
++}
++
++// ExploreResult is the outcome of one explore pass.
++type ExploreResult struct {
++	SetID   string
++	WorkSHA string
++	// Path is the Exploration report written.
++	Path string
++	// Body is the document itself.
++	Body string
++}
++
++// exploreCoreOptions carries the already-resolved inputs to the core explore
++// routine, so the drain and tests drive it without real path resolution. The
++// runExplorer seam replaces the real agent spawn in tests.
++type exploreCoreOptions struct {
++	DefPath     string
++	RuntimePath string
++	SetID       string
++	Agents      []string
++	Effort      string
++	Timeout     time.Duration
++	Output      io.Writer
++	// runExplorer returns the Explorer's report and the agent that wrote it.
++	runExplorer func(prompt string) (string, string, error)
++	probeMemo   *agentAvailabilityProbeMemo
++	admission   AdmissionPolicy
++	// checkoutHeld says the caller already holds this checkout for this set —
++	// the drain's own explore step — so the pass takes nothing of its own.
++	checkoutHeld bool
++}
++
++// ExploreTaskSet explores a set using default dependencies.
++func ExploreTaskSet(opts ExploreOptions) (*ExploreResult, error) {
++	return ExploreTaskSetWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
++}
++
++// ExploreTaskSetWith is `pop tasks explore <set>` (ADR-0262): it hands a fresh
++// Explorer the set's manifest listing, its task bodies and its spec, and writes
++// what comes back as the set's Exploration report. A hand run is the human
++// re-opening the question, so it runs on any set whatever its `explore` key
++// says, and it overwrites a report already there.
++func ExploreTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts ExploreOptions) (*ExploreResult, error) {
++	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
++	if err != nil {
++		return nil, err
++	}
++	runtimePath, err := ResolveRuntimePathWith(d, resolved.ProjectPath, opts.ResolveInput.RuntimeOverride)
++	if err != nil {
++		return nil, err
++	}
++	cfg, _ := loadConfig(d.defaultConfigPath())
++	return exploreResolvedSet(d, cfg, exploreCoreOptions{
++		DefPath:     resolved.DefinitionPath,
++		RuntimePath: runtimePath,
++		SetID:       strings.TrimSpace(opts.TaskSetID),
++		Agents:      opts.Agents,
++		Effort:      opts.Effort,
++		Timeout:     opts.Timeout,
++		Output:      opts.Output,
++		admission:   opts.Wait.Policy(opts.ConfirmIn),
++	})
++}
++
++// exploreResolvedSet is the resolved-path core both the hand run and the drain
++// go through. It writes the report only from a pass that finished: a failed or
++// interrupted pass leaves whatever report was there untouched, and on a set
++// that declared exploration it leaves the one Progress record that says why
++// (ADR-0262 decision 6).
++func exploreResolvedSet(d *Deps, cfg *config.Config, opts exploreCoreOptions) (*ExploreResult, error) {
++	m, err := loadVerifiableManifest(d, verifyCoreOptions{SetID: opts.SetID, DefPath: opts.DefPath})
++	if err != nil {
++		return nil, err
++	}
++	// The Explorer reads the checkout it describes, so a drain rewriting files
++	// under it would have it record a tree that never existed (ADR-0238).
++	if !opts.checkoutHeld {
++		hold, err := AcquireTreeStable(d, opts.RuntimePath, opts.SetID, opts.Output, opts.admission)
++		if err != nil {
++			return nil, err
++		}
++		defer func() { _ = hold.Release() }()
++	}
++	workSHA := verifyWorkSHA(d, opts.RuntimePath)
++	body, agent, err := runExplorer(d, cfg, opts, m, workSHA)
++	if err != nil {
++		recordExploreFailure(d, opts.Output, m, err)
++		return nil, err
++	}
++	at := d.Now().UTC()
++	doc := explorationReport.renderDocument(at, opts.SetID, workSHA, "", agent, body)
++	path := explorationPath(m)
++	if err := WriteAtomicWith(d, path, []byte(ensureTrailingNewline(doc)), 0o644); err != nil {
++		writeErr := exitErr(ExitOperational, "write exploration report: %v", err)
++		recordExploreFailure(d, opts.Output, m, writeErr)
++		return nil, writeErr
++	}
++	printExploreWritten(opts.Output, opts.SetID, path)
++	return &ExploreResult{SetID: opts.SetID, WorkSHA: workSHA, Path: path, Body: doc}, nil
++}
++
++// explorationPath is where a set's Exploration report lives: flat, beside the
++// spec and the progress record.
++func explorationPath(m *Manifest) string {
++	return filepath.Join(m.Dir, ExplorationFileName)
++}
++
++// hasExplorationReport reports whether the set has its report. Presence is the
++// whole rule — absent means write it, present means reuse it — and nothing
++// compares the tree the report records to the checkout (ADR-0262 decision 3).
++func hasExplorationReport(d *Deps, m *Manifest) bool {
++	if d == nil {
++		d = defaultDeps
++	}
++	if d == nil || d.FS == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
++		return false
++	}
++	info, err := d.FS.Stat(explorationPath(m))
++	return err == nil && !info.IsDir()
++}
++
++// explorationPromptPath is the report as an implement attempt is handed it: its
++// path when the set has one, and nothing at all when it does not.
++func explorationPromptPath(d *Deps, m *Manifest) string {
++	if !hasExplorationReport(d, m) {
++		return ""
++	}
++	return explorationPath(m)
++}
++
++// explorationBlockView is the report as the Assist prompt names it: the path and
++// the tree its header records, never its body.
++type explorationBlockView struct {
++	HasReport bool
++	Path      string
++	Tree      string
++}
++
++// explorationBlock resolves that view for a set, and the empty view — which
++// renders nothing — for a set with no report.
++func explorationBlock(d *Deps, m *Manifest) explorationBlockView {
++	p, ok := explorationPointer(d, m)
++	if !ok {
++		return explorationBlockView{}
++	}
++	return explorationBlockView{HasReport: true, Path: p.Path, Tree: p.WorkSHA}
++}
++
++// recordExploreFailure appends the set-level Progress record a declared set's
++// failed pass leaves behind, so why the set stopped is readable without opening
++// a Captured run. A set that never declared exploration is not parked by a
++// failed hand run, so it gets no record either.
++func recordExploreFailure(d *Deps, out io.Writer, m *Manifest, cause error) {
++	if !m.ExploreDeclared() {
++		return
++	}
++	reason := "interrupted"
++	if !isInterrupted(cause) {
++		reason = strings.TrimSpace(cause.Error())
++	}
++	summary := fmt.Sprintf("phase %s: %s\nThe set waits rather than building without a shared map. Ways out: pop tasks explore %s; pop tasks implement %s --skip-explore; or set \"%s\": false.",
++		spendPhaseExplore, reason, m.Stem, m.Stem, manifestExploreKey)
++	if err := AppendSetProgress(d, m.Dir, string(StatusExploreFailed), summary); err != nil && out != nil {
++		fmt.Fprintf(out, "warning: record explore failure for %s: %v\n", m.Stem, err)
++	}
++}
++
++// runExplorer builds the prompt and invokes the Explorer, returning the report
++// and the agent that wrote it.
++func runExplorer(d *Deps, cfg *config.Config, opts exploreCoreOptions, m *Manifest, workSHA string) (string, string, error) {
++	text := buildExplorerPrompt(d, m, workSHA)
++	run := opts.runExplorer
++	if run == nil {
++		sel, err := resolveExplorer(opts.Agents, opts.Effort, m, cfg)
++		if err != nil {
++			return "", "", err
++		}
++		run = func(prompt string) (string, string, error) {
++			return runConfiguredExplorer(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Timeout, opts.probeMemo)
++		}
++	}
++	body, agent, err := run(text)
++	if err != nil {
++		return "", "", err
++	}
++	if strings.TrimSpace(body) == "" {
++		return "", "", exitErr(ExitOperational, "the Explorer produced no report for %q", opts.SetID)
++	}
++	return body, agent, nil
++}
++
++// resolveExplorer applies the Explorer precedence chain (ADR-0262), highest
++// first: CLI flags → the set's `explorer` object → [work.explore] →
++// [work.implement].agents / DefaultExploreEffort. It is the Refiner's chain with
++// the Explorer's keys, including the refusal an override of `agents = []`
++// earns (ADR-0202 decision 6).
++func resolveExplorer(cliAgents []string, cliEffort string, m *Manifest, cfg *config.Config) (verifierSelection, error) {
++	agents := nonEmptyStrings(cliAgents)
++	effort := strings.TrimSpace(cliEffort)
++
++	if over := m.ExplorerOverride(); over != nil {
++		if len(agents) == 0 {
++			agents = nonEmptyStrings(over.Agents)
++		}
++		if effort == "" {
++			effort = strings.TrimSpace(over.Effort)
++		}
++	}
++	if e := cfg.ExploreSettings(); e != nil && effort == "" {
++		effort = strings.TrimSpace(e.Effort)
++	}
++	if len(agents) == 0 {
++		resolved, err := ResolveAgentGroupPresets(cfg.ExploreAgentList(), cfg)
++		if err != nil {
++			return verifierSelection{}, err
++		}
++		agents = resolved
++	}
++	if effort == "" {
++		effort = DefaultExploreEffort
++	}
++	return verifierSelection{Agents: agents, Effort: effort}, nil
++}
++
++// runConfiguredExplorer walks the resolved Explorer agent list through the
++// shared fallback walk at the standard per-phase cap, so one flake cannot park
++// a declared set (ADR-0262 decision 5).
++func runConfiguredExplorer(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, string, error) {
++	if timeout <= 0 {
++		timeout = DefaultAttemptTimeout
++	}
++	quotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
++	if err != nil {
++		return "", "", exitErr(ExitSetup, "%v", err)
++	}
++	walked, err := runAgentFallbackWalk(d, agentFallbackWalk{
++		role:            explorerRole(d, out, taskSetDir, setID, workSHA),
++		sel:             sel,
++		setID:           setID,
++		runtimePath:     runtimePath,
++		prompt:          prompt,
++		out:             out,
++		errOut:          out,
++		timeout:         timeout,
++		maxTries:        config.DefaultTaskMaxTries,
++		retryDelays:     append([]time.Duration(nil), config.DefaultTaskAttemptRetryDelays...),
++		quotaRetryAfter: quotaRetryAfter,
++		cfg:             cfg,
++		probeMemo:       probeMemo,
++	})
++	if err != nil {
++		return "", "", err
++	}
++	// Prose from an attempt that died is half a map, and builders handed half a
++	// map are the inconsistency the pass exists to prevent.
++	if strings.TrimSpace(walked.Answer) != "" && !walked.AnswerRetryEligible {
++		return walked.Answer, walked.Agent, nil
++	}
++	if len(walked.Unavailable) == 0 {
++		return "", "", exitErr(ExitOperational, "the Explorer produced no report")
++	}
++	return "", "", exitErr(ExitSetup, "%s", formatHumanHealingExhaustionMessage(walked.Unavailable))
++}
++
++// explorerRole is what the shared fallback walk calls the Explorer: its name in
++// the operator's output, the Captured run each invocation is filed as under the
++// `explore` phase, and the Refiner's retry rule — a report has no format to
++// parse, so any prose from a run that reached its own ending is the answer.
++//
++// It is the one role that runs under the read-only agent posture (ADR-0221):
++// the Explorer's whole output is its reply, which pop writes as the report, so
++// it has no edit to make and the posture withholds the tools for one.
++func explorerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) agentRole {
++	return agentRole{
++		Noun:   "Explorer agent",
++		Gerund: "Exploring",
++		Phase:  spendPhaseExplore,
++		Persist: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int) {
++			_ = persistExploreRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, "", try, outcome, reason, exitCode)
++		},
++		PersistAnswer: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int, _ string) {
++			_ = persistExploreRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, "", try, outcome, reason, exitCode)
++		},
++		PersistSkipped: func(rec *streamRecorder, invocation *AgentInvocation, model string, try int, reason string, exitCode int) {
++			_ = persistExploreRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, streamOutcomeModelSkipped, reason, exitCode)
++		},
++		RetryEligible: refineAttemptRetryEligible,
++		ReadOnly:      true,
++	}
++}
++
++// printExploreWritten tells the operator where the report went and how to read
++// it.
++func printExploreWritten(w io.Writer, setID, path string) {
++	if w == nil {
++		return
++	}
++	out := outputFor(w)
++	out.line(ansiBold, "━━ Exploration for %s", setID)
++	out.line(ansiDim, "   Document: %s", path)
++	out.line(ansiDim, "   Read it: pop tasks artifacts %s --show %s", setID, ExplorationFileName)
++}
++
++// buildExplorerPrompt assembles the Explorer's prompt: pop's role framing and
++// output expectation around the set's own material — its manifest listing,
++// every task body, and its spec when there is one. It deliberately asks for
++// nothing about prior art; that check stays in the builder's frame, where its
++// trigger is (ADR-0262 decision 7).
++func buildExplorerPrompt(d *Deps, m *Manifest, workSHA string) string {
++	view := explorerPromptView{
++		TaskSet: m.Stem,
++		WorkSHA: ShortSHA(workSHA),
++		Tasks:   gateTaskRows(m),
++	}
++	for _, task := range m.Tasks {
++		view.Bodies = append(view.Bodies, explorerTaskBody{
++			ID:   task.ID,
++			Body: readTaskBody(d, filepath.Join(m.Dir, task.File)),
++		})
++	}
++	if spec, ok := readSpec(d, m); ok {
++		view.SpecRecorded = true
++		view.Spec = spec
++	}
++	return prompt.MustRender(promptTemplates, "explorer.tmpl.md", view)
++}
++
++// explorerPromptView is what the Explorer's template renders against.
++type explorerPromptView struct {
++	TaskSet      string
++	WorkSHA      string
++	SpecRecorded bool
++	Spec         string
++	Tasks        []taskRow
++	Bodies       []explorerTaskBody
++}
++
++// explorerTaskBody is one task's body as the Explorer reads it: inlined whole,
++// because the tasks are what decides which area of the code is worth mapping.
++type explorerTaskBody struct {
++	ID   string
++	Body taskBodyRow
++}
+diff --git a/tasks/explore_mark.go b/tasks/explore_mark.go
+new file mode 100644
+index 00000000..68c9d423
+--- /dev/null
++++ b/tasks/explore_mark.go
+@@ -0,0 +1,201 @@
++package tasks
++
++import (
++	"fmt"
++	"strings"
++	"time"
++
++	"github.com/glebglazov/pop/work"
++)
++
++// ExploreMark is whether a set that declared `"explore": true` got its
++// Exploration report, carried beside its status the way the Verification and
++// Refine marks are (ADR-0262). A set that never asked carries none.
++//
++// It answers one question — explored, yes or no — and the reason a set is not
++// rides beside it as an UnexploredReason rather than as a value inside it.
++// ResolveExploreMark is the one place that derives both.
++type ExploreMark = work.ExploreMark
++
++const (
++	// ExploreMarkNone is the absent mark: the set never declared exploration.
++	ExploreMarkNone ExploreMark = ""
++	// ExploreMarkExplored is a declared set whose report is on disk.
++	ExploreMarkExplored ExploreMark = "explored"
++	// ExploreMarkUnexplored is a declared set with no report.
++	ExploreMarkUnexplored ExploreMark = "unexplored"
++)
++
++// UnexploredReason is why an unexplored set has no report — the detail beside
++// the mark, never a second mark.
++type UnexploredReason = work.UnexploredReason
++
++const (
++	// UnexploredReasonNone is the absent reason: the set is explored, or it
++	// carries no mark.
++	UnexploredReasonNone UnexploredReason = ""
++	// UnexploredNotYetRun is a declared set no Explore pass has run for.
++	UnexploredNotYetRun UnexploredReason = "not-yet-run"
++	// UnexploredFailed is a declared set whose pass ran and wrote no report. On a
++	// set that still has agent work to do it is also the status, EXPLORE-FAILED.
++	UnexploredFailed UnexploredReason = "failed"
++)
++
++// ExploreResolution is what the read-side resolution answers for one set: the
++// mark, the reason beside an unexplored one, and — for an explored set — the
++// report as a pointer, never its body.
++type ExploreResolution struct {
++	Mark   ExploreMark
++	Reason UnexploredReason
++	// Pointer is the report's path and the tree its header records, set only
++	// when Mark is ExploreMarkExplored.
++	Pointer ReportPointer
++}
++
++// ResolveExploreMark is the single read-side Explore mark resolution
++// (ADR-0262). The status overlay, the sign-off gate, the Assist prompt and
++// every status surface read this answer, so none of them can disagree about a
++// set.
++//
++// It stores nothing. The report on disk says explored; otherwise a Captured run
++// of phase `explore` says a pass ran and failed to write one, and no such run
++// says none has run yet. That is the whole of the park's derivation — no store
++// column and no table — and nothing here compares the tree the report records
++// to the checkout.
++func ResolveExploreMark(d *Deps, m *Manifest) ExploreResolution {
++	if !m.ExploreDeclared() {
++		return ExploreResolution{}
++	}
++	if pointer, ok := explorationPointer(d, m); ok {
++		return ExploreResolution{Mark: ExploreMarkExplored, Pointer: pointer}
++	}
++	if hasExploreRun(d, m) {
++		return ExploreResolution{Mark: ExploreMarkUnexplored, Reason: UnexploredFailed}
++	}
++	return ExploreResolution{Mark: ExploreMarkUnexplored, Reason: UnexploredNotYetRun}
++}
++
++// explorationPointer reads the set's report as the surfaces carry it: where it
++// is and which commit its header records.
++func explorationPointer(d *Deps, m *Manifest) (ReportPointer, bool) {
++	if !hasExplorationReport(d, m) {
++		return ReportPointer{}, false
++	}
++	if d == nil {
++		d = defaultDeps
++	}
++	p := ReportPointer{Label: explorationReport.PointerLabel, Path: explorationPath(m)}
++	body, err := d.FS.ReadFile(p.Path)
++	if err != nil {
++		return p, true
++	}
++	p.WorkSHA = reportHeaderField(string(body), "Work SHA")
++	if at, err := time.Parse(time.RFC3339, reportHeaderField(string(body), explorationReport.WrittenLabel)); err == nil {
++		p.Written = at.UTC().Format("2006-01-02 15:04Z")
++	}
++	return p, true
++}
++
++// hasExploreRun reports whether any Captured run of phase `explore` exists for
++// the set. It reads the index halves only, like the Refine mark's lookup.
++func hasExploreRun(d *Deps, m *Manifest) bool {
++	if d == nil {
++		d = defaultDeps
++	}
++	if d == nil || d.FS == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
++		return false
++	}
++	metas, err := listCapturedRunMetas(d, m.Dir)
++	if err != nil {
++		return false
++	}
++	for _, meta := range metas {
++		if meta.Phase == spendPhaseExplore {
++			return true
++		}
++	}
++	return false
++}
++
++// exploreMarkPhrase is the mark as a human reads it, in the one wording every
++// surface uses, with the reason as detail after the mark. Empty for a set that
++// carries no mark.
++func exploreMarkPhrase(res ExploreResolution) string {
++	switch res.Mark {
++	case ExploreMarkExplored:
++		return "explored"
++	case ExploreMarkUnexplored:
++		return "unexplored: " + unexploredReasonPhrase(res.Reason)
++	}
++	return ""
++}
++
++func unexploredReasonPhrase(reason UnexploredReason) string {
++	if reason == UnexploredFailed {
++		return "the pass failed"
++	}
++	return "not yet run"
++}
++
++// exploreMarkSegment is the STATUS-cell token the mark contributes: the mark,
++// then its reason in brackets, so the reason reads as detail beside it.
++func exploreMarkSegment(mark ExploreMark, reason UnexploredReason) (work.StatusSegment, bool) {
++	switch mark {
++	case ExploreMarkExplored:
++		return work.StatusSegment{Text: string(mark), Tone: work.TonePlain}, true
++	case ExploreMarkUnexplored:
++		return work.StatusSegment{Text: fmt.Sprintf("%s (%s)", mark, unexploredReasonPhrase(reason)), Tone: work.ToneWarn}, true
++	}
++	return work.StatusSegment{}, false
++}
++
++// ExploreSectionTitle heads the detail-view section the Explore mark renders as.
++const ExploreSectionTitle = "Exploration"
++
++// ExploreSection is a row's already-resolved Explore mark as a detail-view
++// section: the mark, and for an explored set its report as a pointer — the path
++// and the tree its header records, never the body (ADR-0262). False for a set
++// that carries no mark.
++func ExploreSection(row Row) (work.Section, bool) {
++	res := ExploreResolution{Mark: row.ExploreMark, Reason: row.UnexploredReason, Pointer: row.ExplorationPointer}
++	phrase := exploreMarkPhrase(res)
++	if phrase == "" {
++		return work.Section{}, false
++	}
++	lines := []string{phrase}
++	if res.Mark == ExploreMarkExplored {
++		lines = append(lines, res.Pointer.Path)
++		if res.Pointer.WorkSHA != "" {
++			lines = append(lines, "tree: "+res.Pointer.WorkSHA)
++		}
++	} else {
++		lines = append(lines, "run: pop tasks explore "+row.ID)
++	}
++	return work.Section{Title: ExploreSectionTitle, Body: strings.Join(lines, "\n")}, true
++}
++
++// applyExploreResolutions resolves every row's Explore mark once per refresh and
++// lets the one answer that is also a status become it: a declared set whose pass
++// failed, and that still has agent work to start, reads EXPLORE-FAILED instead of
++// READY, so neither automatic selection nor the Work daemon re-picks it and
++// re-explores it in a loop (ADR-0262 decision 6). A set at any other status keeps
++// it, mark beside. It reports whether any status changed, so the caller can
++// restore the display order.
++func applyExploreResolutions(d *Deps, result *RefreshResult) bool {
++	if result == nil {
++		return false
++	}
++	changed := false
++	for i := range result.Rows {
++		row := &result.Rows[i]
++		m := result.Manifests[row.ID]
++		res := ResolveExploreMark(d, m)
++		row.ExploreMark, row.UnexploredReason, row.ExplorationPointer = res.Mark, res.Reason, res.Pointer
++		if row.Status == StatusReady && res.Reason == UnexploredFailed {
++			row.Status = StatusExploreFailed
++			row.Progress = BuildProgress(m, StatusExploreFailed)
++			changed = true
++		}
++	}
++	return changed
++}
+diff --git a/tasks/explore_phase.go b/tasks/explore_phase.go
+new file mode 100644
+index 00000000..c6672a69
+--- /dev/null
++++ b/tasks/explore_phase.go
+@@ -0,0 +1,79 @@
++package tasks
++
++// exploreDirective is what explorePhase hands back to the drain: carry on into
++// the first task selection, or stop the run with the result and error it
++// produced — the human's interrupt, or the park.
++type exploreDirective int
++
++const (
++	// exploreProceed enters the task loop: the step did not apply, the set
++	// already had its report, or the pass just wrote one.
++	exploreProceed exploreDirective = iota
++	// exploreReturn ends the run here.
++	exploreReturn
++)
++
++// explorePhase runs the drain's Explore step (ADR-0262) at the head of the
++// drain, before the loop selects its first task. A set that declared
++// `"explore": true` and has no Exploration report gets one written by a fresh
++// Explorer, so every builder in the set works from one picture of the code.
++//
++// Presence is the whole rule. A set that already has a report reuses it and
++// spends nothing; nothing reads back the tree the report records to decide it
++// has gone stale, because an implement attempt commits and a freshness rule
++// would regenerate the map per task.
++//
++// It is the one agent phase that gates. A pass that cannot produce the report
++// after the standard per-phase cap parks the set at EXPLORE-FAILED rather than
++// letting builders start from separate maps — the inconsistency the phase
++// exists to prevent. Like refinement it declines a human-completed set.
++func (r *implementRun) explorePhase() (exploreDirective, error) {
++	cfg := r.plan.cfg
++	// [work.explore].enabled gates only the drain, and defaults on: what
++	// triggers a pass is the set's own declaration (ADR-0262).
++	if r.opts.SkipExplore || !cfg.ExploreEnabled() {
++		return exploreProceed, nil
++	}
++	refresh, err := RefreshWith(r.d, r.resolved.DefinitionPath, r.statePath)
++	if err != nil {
++		return exploreReturn, exitErr(ExitOperational, "refresh before exploring: %v", err)
++	}
++	m := refresh.Manifests[r.taskSetID]
++	if m == nil || !m.Valid || !m.ExploreDeclared() || m.HumanCompleted {
++		return exploreProceed, nil
++	}
++	if hasExplorationReport(r.d, m) {
++		return exploreProceed, nil
++	}
++	// A set with no task an agent could start on has nothing to build against a
++	// map yet; the loop takes it to its gate or its terminal status instead.
++	if !hasEligibleTask(m) {
++		return exploreProceed, nil
++	}
++
++	_, err = exploreResolvedSet(r.d, cfg, exploreCoreOptions{
++		DefPath:     r.resolved.DefinitionPath,
++		RuntimePath: r.runtimePath,
++		SetID:       r.taskSetID,
++		Agents:      r.opts.ExploreAgents,
++		Effort:      r.opts.ExploreEffort,
++		Timeout:     r.timeout,
++		Output:      r.out,
++		runExplorer: r.opts.exploreRunner,
++		probeMemo:   r.agentProbeMemo,
++		// The drain already holds this checkout for this set (ADR-0238).
++		checkoutHeld: true,
++	})
++	if err == nil {
++		return exploreProceed, nil
++	}
++	if isInterrupted(err) {
++		return exploreReturn, err
++	}
++	r.result.TaskSetExploreFailed = true
++	out := outputFor(r.out)
++	out.line(ansiRed, "━━ Exploration failed for %s — the set parks at %s", r.taskSetID, StatusExploreFailed)
++	out.line(ansiDim, "   %v", err)
++	out.line(ansiDim, "   Ways out: pop tasks explore %s · pop tasks implement %s --skip-explore · \"%s\": false", r.taskSetID, r.taskSetID, manifestExploreKey)
++	return exploreReturn, exitErr(ExitNoRunnable, "Task set %q parked at %s: %v", r.taskSetID, StatusExploreFailed, err)
++}
+diff --git a/tasks/explore_surfaces_test.go b/tasks/explore_surfaces_test.go
+new file mode 100644
+index 00000000..85acee12
+--- /dev/null
++++ b/tasks/explore_surfaces_test.go
+@@ -0,0 +1,97 @@
++package tasks
++
++import (
++	"bytes"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/glebglazov/pop/work"
++)
++
++// exploreSurfaces renders one set through every human surface the Explore mark
++// rides: the `pop tasks status` table and per-set detail, the STATUS cell the
++// dashboard row and `pop work status` share, the detail-view section, and the
++// sign-off gate's preamble.
++type exploreSurfaces struct {
++	table, detail, cell, section, gate string
++}
++
++func renderExploreSurfaces(t *testing.T, env *runTaskSetFixture) exploreSurfaces {
++	t.Helper()
++	d := env.deps()
++	refresh, err := RefreshWith(d, env.tasksDir, DefaultStatePathWith(d))
++	if err != nil {
++		t.Fatal(err)
++	}
++	row := findRow(refresh, "demo")
++	m := refresh.Manifests["demo"]
++	var table, detail bytes.Buffer
++	Render(&table, refresh)
++	RenderTaskSetDetail(d, nil, &detail, "demo", row, m)
++	container := work.Container{RawStatus: row.Status, ExploreMark: row.ExploreMark, ExploreReason: row.UnexploredReason}
++	section, _ := ExploreSection(*row)
++	return exploreSurfaces{
++		table:   table.String(),
++		detail:  detail.String(),
++		cell:    WorkRowStatusCell(container),
++		section: section.Title + "\n" + section.Body,
++		gate:    strings.Join(gateExplorePreamble(ResolveExploreMark(d, m)), "\n"),
++	}
++}
++
++// TestExploreMarkRidesEverySurface: a declared set with no report carries the
++// unexplored mark with its reason beside it on every surface; once its report
++// exists each surface carries the report as a pointer — path and tree — and
++// never its body; a set that never asked carries nothing anywhere.
++func TestExploreMarkRidesEverySurface(t *testing.T) {
++	t.Parallel()
++
++	t.Run("declared, not yet run", func(t *testing.T) {
++		t.Parallel()
++		got := renderExploreSurfaces(t, setupExploreDrainFixture(t, map[string]any{"explore": true}))
++		for name, text := range map[string]string{"table": got.table, "detail": got.detail, "section": got.section, "gate": got.gate} {
++			if !strings.Contains(text, "unexplored: not yet run") {
++				t.Errorf("%s lacks the mark and its reason:\n%s", name, text)
++			}
++		}
++		if got.cell != "READY · unexplored (not yet run)" {
++			t.Errorf("status cell = %q", got.cell)
++		}
++	})
++
++	t.Run("declared and explored", func(t *testing.T) {
++		t.Parallel()
++		env := setupExploreDrainFixture(t, map[string]any{"explore": true})
++		path := filepath.Join(env.setDir(), ExplorationFileName)
++		doc := "# Exploration report — demo\n\n- Explored: 2026-09-01T12:00:00Z\n- Work SHA: abc1234\n- Explorer: claude\n\nSECRET-MAP-BODY\n"
++		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
++			t.Fatal(err)
++		}
++		got := renderExploreSurfaces(t, env)
++		for name, text := range map[string]string{"detail": got.detail, "section": got.section, "gate": got.gate} {
++			if !strings.Contains(text, path) || !strings.Contains(text, "abc1234") {
++				t.Errorf("%s does not point at the report and its tree:\n%s", name, text)
++			}
++		}
++		for name, text := range map[string]string{"table": got.table, "detail": got.detail, "section": got.section, "gate": got.gate, "cell": got.cell} {
++			if strings.Contains(text, "SECRET-MAP-BODY") {
++				t.Errorf("%s carries the report's body:\n%s", name, text)
++			}
++		}
++		if got.cell != "READY · explored" {
++			t.Errorf("status cell = %q", got.cell)
++		}
++	})
++
++	t.Run("never asked", func(t *testing.T) {
++		t.Parallel()
++		got := renderExploreSurfaces(t, setupRunTaskSetFixture(t, "demo", interrelatedSet()))
++		for name, text := range map[string]string{"table": got.table, "detail": got.detail, "cell": got.cell, "section": got.section, "gate": got.gate} {
++			if strings.Contains(text, "explored") {
++				t.Errorf("%s carries a mark for a set that never asked:\n%s", name, text)
++			}
++		}
++	})
++}
+diff --git a/tasks/explore_test.go b/tasks/explore_test.go
+new file mode 100644
+index 00000000..7941795e
+--- /dev/null
++++ b/tasks/explore_test.go
+@@ -0,0 +1,157 @@
++package tasks
++
++import (
++	"bytes"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/glebglazov/pop/internal/deps"
++)
++
++// setupExploreFixture is a set nobody has built yet, at a fixed instant, over a
++// stub git whose HEAD the report must record.
++func setupExploreFixture(t *testing.T, setKeys map[string]any) (*Deps, string, string) {
++	t.Helper()
++	d := newTestDeps(t)
++	d.Clock = deps.FixedClock{Instant: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)}
++	d.Git = stubGit("abc123abc123\n", "", "")
++	root := t.TempDir()
++	defPath := filepath.Join(root, "tasks")
++	tasks := []Task{
++		{ID: "01-a", File: "01-a.md", Title: "Shape the seam", Type: "AFK", Status: "open"},
++		{ID: "02-b", File: "02-b.md", Title: "Build on the seam", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
++	}
++	setupManifest(t, defPath, "demo", tasks)
++	if setKeys != nil {
++		writeManifestWithSetKeys(t, filepath.Join(defPath, "demo"), tasks, setKeys)
++	}
++	return d, defPath, filepath.Join(defPath, "demo")
++}
++
++func exploreOpts(defPath string, out *bytes.Buffer) exploreCoreOptions {
++	opts := exploreCoreOptions{DefPath: defPath, RuntimePath: "/rt", SetID: "demo", Agents: []string{"claude"}}
++	if out != nil {
++		opts.Output = out
++	}
++	return opts
++}
++
++// TestHandExploreWritesTheReportAndFilesItsOwnRun drives the whole pass through
++// the real agent walk: the Explorer's reply lands flat in the set directory as
++// the Exploration report, headed by the tree it was observed at, and the
++// invocation is a Captured run of its own phase that spend counts as explore.
++// The set never declared exploration — a hand run asks nothing of the key.
++func TestHandExploreWritesTheReportAndFilesItsOwnRun(t *testing.T) {
++	t.Parallel()
++	d, defPath, setDir := setupExploreFixture(t, nil)
++	runner := &scriptedRefineRunner{runs: []scriptedRefineRun{
++		{output: claudeRefineStream(`The tree is abc123a.\n\n## Where things live\n\n- tasks/explore.go owns the pass.`)},
++	}}
++	d.Git = stubGit("abc123abc123\n", "", "")
++	d.LookPath = func(string) (string, error) { return "/bin/claude", nil }
++	d.Runner = &probeNeutralRunner{inner: runner}
++
++	var out bytes.Buffer
++	res, err := exploreResolvedSet(d, nil, exploreOpts(defPath, &out))
++	if err != nil {
++		t.Fatalf("explore: %v\n%s", err, out.String())
++	}
++	if res.Path != filepath.Join(setDir, ExplorationFileName) {
++		t.Fatalf("report path = %q, want it flat in the set directory", res.Path)
++	}
++	body, err := os.ReadFile(res.Path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, want := range []string{"# Exploration report — demo", "- Work SHA: abc123a", "- Explorer: claude", "tasks/explore.go owns the pass."} {
++		if !strings.Contains(string(body), want) {
++			t.Fatalf("report is missing %q:\n%s", want, body)
++		}
++	}
++
++	runs, err := listSetRuns(d, setDir)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(runs) != 1 || runs[0].meta.Phase != "explore" || runs[0].meta.TaskFile != "" {
++		t.Fatalf("captured runs = %+v, want one set-level explore run", runs)
++	}
++	m := LoadManifest(d, "demo", filepath.Join(setDir, ManifestFileName))
++	breakdown, err := buildSpendSetBreakdown(d, "demo", m, nil, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if breakdown.ExploreRunCount != 1 || breakdown.ImplementRunCount != 0 {
++		t.Fatalf("buckets = explore %d / implement %d, want the run counted as explore", breakdown.ExploreRunCount, breakdown.ImplementRunCount)
++	}
++}
++
++// TestExplorerPromptCarriesTheSetAndAsksForTheCodeAsFound pins what reaches the
++// Explorer: the listing, every task body and the spec, the one-page,
++// path-or-symbol contract and the tree — and nothing about prior art.
++func TestExplorerPromptCarriesTheSetAndAsksForTheCodeAsFound(t *testing.T) {
++	t.Parallel()
++	d, defPath, setDir := setupExploreFixture(t, nil)
++	d.Git = stubGit("abc123abc123\n", "", "")
++	if err := os.WriteFile(filepath.Join(setDir, SpecFileName), []byte("# Spec\n\nOne seam, two tasks.\n"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	var got string
++	opts := exploreOpts(defPath, nil)
++	opts.runExplorer = func(prompt string) (string, string, error) {
++		got = prompt
++		return "## Where things live", "claude", nil
++	}
++	if _, err := exploreResolvedSet(d, nil, opts); err != nil {
++		t.Fatal(err)
++	}
++	for _, want := range []string{
++		"01-a [AFK open] Shape the seam", "02-b [AFK open] Build on the seam",
++		"### 01-a", "### 02-b", "One seam, two tasks.",
++		"Every claim names a path or a symbol", "about one page", "commit abc123a",
++	} {
++		if !strings.Contains(got, want) {
++			t.Fatalf("explorer prompt is missing %q:\n%s", want, got)
++		}
++	}
++	if strings.Contains(strings.ToLower(got), "prior art") {
++		t.Fatalf("explorer prompt asks about prior art:\n%s", got)
++	}
++}
++
++// TestHandExploreOverwritesAReportAndAFailedPassLeavesItAlone: a hand run is
++// the human re-opening the question, so a finished pass replaces the report,
++// while one that fails writes nothing over it.
++func TestHandExploreOverwritesAReportAndAFailedPassLeavesItAlone(t *testing.T) {
++	t.Parallel()
++	d, defPath, setDir := setupExploreFixture(t, map[string]any{"explore": true})
++	path := filepath.Join(setDir, ExplorationFileName)
++	if err := os.WriteFile(path, []byte("old map\n"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++
++	failing := exploreOpts(defPath, nil)
++	failing.runExplorer = func(string) (string, string, error) { return "half a map", "claude", errInterruptedForTest() }
++	if _, err := exploreResolvedSet(d, nil, failing); err == nil {
++		t.Fatal("an interrupted pass reported success")
++	}
++	if body, _ := os.ReadFile(path); string(body) != "old map\n" {
++		t.Fatalf("a failed pass touched the report: %q", body)
++	}
++
++	fresh := exploreOpts(defPath, nil)
++	fresh.runExplorer = func(string) (string, string, error) { return "new map", "claude", nil }
++	if _, err := exploreResolvedSet(d, nil, fresh); err != nil {
++		t.Fatal(err)
++	}
++	if body, _ := os.ReadFile(path); !strings.Contains(string(body), "new map") || strings.Contains(string(body), "old map") {
++		t.Fatalf("a finished pass did not replace the report: %q", body)
++	}
++}
++
++func errInterruptedForTest() error {
++	return exitErr(ExitInterrupted, "interrupted")
++}
+diff --git a/tasks/gate_menu.go b/tasks/gate_menu.go
+index bb2ea1af..183f774f 100644
+--- a/tasks/gate_menu.go
++++ b/tasks/gate_menu.go
+@@ -162,6 +162,21 @@ func gateRefineEntryDetails(refine gateRefineState) []string {
+ 	return details
+ }
+ 
++// gateExplorePreamble names the set's Exploration report beside the refine
++// one: the mark, and for an explored set the report as a pointer — its path and
++// the tree it records, never its body (ADR-0262). A set that never declared
++// exploration gets no line.
++func gateExplorePreamble(res ExploreResolution) []string {
++	phrase := exploreMarkPhrase(res)
++	if phrase == "" {
++		return nil
++	}
++	if res.Mark == ExploreMarkExplored {
++		return []string{"🗺 " + res.Pointer.Summary()}
++	}
++	return []string{"🗺 " + phrase}
++}
++
+ // gateVerifyPreamble tells the same human that a Verify report of the set
+ // exists, and against which commit — the pointer only, on the same terms as the
+ // refine one above it (ADR-0245). It answers why verification judged as it did,
+diff --git a/tasks/gates.go b/tasks/gates.go
+index 7e014493..cb872830 100644
+--- a/tasks/gates.go
++++ b/tasks/gates.go
+@@ -410,6 +410,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
+ 			gateWaiterPreamble(d, runtimePath),
+ 			gateTaskBodyPreamble(hitl.File, body),
+ 			gateRemediationPreamble(d, taskSetID, m),
++			gateExplorePreamble(ResolveExploreMark(d, m)),
+ 			gateRefinePreamble(refine),
+ 			gateVerifyPreamble(verify, hasVerify),
+ 		),
+diff --git a/tasks/implement/run.go b/tasks/implement/run.go
+index 4d385551..b2b28d46 100644
+--- a/tasks/implement/run.go
++++ b/tasks/implement/run.go
+@@ -33,6 +33,12 @@ type WholeSetOptions struct {
+ 	// `--verify-effort`), forwarded verbatim to the task-set executor.
+ 	VerifyAgents []string
+ 	VerifyEffort string
++	// SkipExplore, ExploreAgents and ExploreEffort steer the drain's Explore
++	// step (`--skip-explore`, `--explore-agent`, `--explore-effort`, ADR-0262),
++	// forwarded verbatim to the task-set executor.
++	SkipExplore   bool
++	ExploreAgents []string
++	ExploreEffort string
+ 	// ImplementationConvention resolves the repository's `implementation`
+ 	// Convention for the drain's refine phase and optional implement-prompt
+ 	// inlining (ADR-0246); forwarded verbatim to the task-set executor.
+@@ -99,6 +105,9 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
+ 		Timeout:                opts.Timeout,
+ 		VerifyAgents:           opts.VerifyAgents,
+ 		VerifyEffort:           opts.VerifyEffort,
++		SkipExplore:            opts.SkipExplore,
++		ExploreAgents:          opts.ExploreAgents,
++		ExploreEffort:          opts.ExploreEffort,
+ 		ImplementationConvention:       opts.ImplementationConvention,
+ 		DocumentOverlay:                opts.DocumentOverlay,
+ 		VerificationConvention: opts.VerificationConvention,
+diff --git a/tasks/implement_implementation_convention_test.go b/tasks/implement_implementation_convention_test.go
+index 8e08d7ff..48b55620 100644
+--- a/tasks/implement_implementation_convention_test.go
++++ b/tasks/implement_implementation_convention_test.go
+@@ -106,7 +106,7 @@ func TestImplementPromptIsUnchangedWithoutTheToggle(t *testing.T) {
+ 	if len(prompts) != 1 {
+ 		t.Fatalf("agent saw %d prompts, want one", len(prompts))
+ 	}
+-	if got, want := prompts[0], BuildAgentPrompt(parseFakeAgentTaskPath(prompts[0]), runtimeCheckoutOf(t, prompts[0]), ""); got != want {
++	if got, want := prompts[0], BuildAgentPrompt(parseFakeAgentTaskPath(prompts[0]), runtimeCheckoutOf(t, prompts[0]), "", ""); got != want {
+ 		t.Fatalf("prompt differs from the untoggled prompt:\ngot:\n%s\nwant:\n%s", got, want)
+ 	}
+ 	if resolved {
+diff --git a/tasks/manifest.go b/tasks/manifest.go
+index 45644e8f..28b61ad2 100644
+--- a/tasks/manifest.go
++++ b/tasks/manifest.go
+@@ -502,8 +502,8 @@ func validateManifest(d *Deps, m *Manifest, entries []os.DirEntry, listErr error
+ // and is invisible — never drained, never counted, never reported missing.
+ //
+ // The set folder is pop's storage rather than scratch space, so the only markdown
+-// exempt is the co-located spec; anything else is a stray file to move out or a
+-// slice to list.
++// exempt is the co-located spec and the Exploration report pop writes beside it;
++// anything else is a stray file to move out or a slice to list.
+ func validateNoOrphanMarkdown(m *Manifest, entries []os.DirEntry, listErr error, listed map[string]int) {
+ 	if listErr != nil {
+ 		if os.IsNotExist(listErr) {
+@@ -518,7 +518,7 @@ func validateNoOrphanMarkdown(m *Manifest, entries []os.DirEntry, listErr error,
+ 		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".md") {
+ 			continue
+ 		}
+-		if name == SpecFileName || name == legacySpecFileName || listed[name] > 0 {
++		if name == SpecFileName || name == legacySpecFileName || name == ExplorationFileName || listed[name] > 0 {
+ 			continue
+ 		}
+ 		orphans = append(orphans, name)
+@@ -526,8 +526,8 @@ func validateNoOrphanMarkdown(m *Manifest, entries []os.DirEntry, listErr error,
+ 	sort.Strings(orphans)
+ 	for _, name := range orphans {
+ 		m.Errors = append(m.Errors, fmt.Sprintf(
+-			"%s: no manifest entry; every markdown in a set folder but %s is a task",
+-			name, SpecFileName))
++			"%s: no manifest entry; every markdown in a set folder but %s and %s is a task",
++			name, SpecFileName, ExplorationFileName))
+ 	}
+ }
+ 
+@@ -673,16 +673,47 @@ func (m *Manifest) optedOut(key string) bool {
+ 	return !enabled
+ }
+ 
++// The set-level keys of the Explore phase (ADR-0262). The authoring guide prints
++// these same constants, so the keys it teaches are the keys read here.
++const (
++	// manifestExploreKey is the Explore directive: `"explore": true` is the set's
++	// author saying its tasks are interrelated enough to share one map.
++	manifestExploreKey = "explore"
++	// manifestExplorerKey is the Explorer's Agent directive object.
++	manifestExplorerKey = "explorer"
++)
++
++// ExploreDeclared reports whether the set declared `"explore": true` (ADR-0262).
++// It is opt-*in*, the reverse of VerifyOptedOut / RefineOptedOut: absent, false
++// or malformed all mean the set never explores, because a pass that runs unasked
++// and can park a set must be asked for in so many words.
++//
++// A hand-run `pop tasks explore <set>` ignores it: the key decides whether the
++// drain explores, not whether a human may.
++func (m *Manifest) ExploreDeclared() bool {
++	if m == nil {
++		return false
++	}
++	raw, ok := m.Unknown[manifestExploreKey]
++	if !ok {
++		return false
++	}
++	var declared bool
++	if err := json.Unmarshal(raw, &declared); err != nil {
++		return false
++	}
++	return declared
++}
++
+ // AgentDirective is a set's per-set override of the agent list and effort a
+ // set-level phase runs at, read from the manifest's
+ // `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086) and its
+-// `"refiner"` twin (ADR-0252). One type serves both because the two phases
+-// resolve the same two values by the same precedence.
++// `"refiner"` and `"explorer"` twins (ADR-0252, ADR-0262). One type serves all
++// three because the phases resolve the same two values by the same precedence.
+ //
+-// It overrides the phase's config default for that set, but it is opt-out only
+-// for participation: user config is the master gate, so a directive can steer
+-// *how* a set is verified or refined but never opt it *in* while the feature is
+-// globally off (that stays VerifyOptedOut / RefineOptedOut and the config switch).
++// It overrides the phase's config default for that set, but it never opts a set
++// in: a directive steers *how* a phase runs, while participation stays with
++// VerifyOptedOut / RefineOptedOut / ExploreDeclared and the config switches.
+ type AgentDirective struct {
+ 	Agents []string `json:"agents,omitempty"`
+ 	Effort string   `json:"effort,omitempty"`
+@@ -701,6 +732,12 @@ func (m *Manifest) RefinerOverride() *AgentDirective {
+ 	return m.agentDirective("refiner")
+ }
+ 
++// ExplorerOverride returns the set's per-set Explorer override, read from the
++// manifest's `explorer` object, or nil when there is none.
++func (m *Manifest) ExplorerOverride() *AgentDirective {
++	return m.agentDirective(manifestExplorerKey)
++}
++
+ // agentDirective parses one override object out of the manifest's unread keys.
+ // The key rides through WriteManifestAtomic in Unknown, so a rewrite preserves
+ // it; a malformed object resolves to nil rather than an error, leaving the phase
+diff --git a/tasks/manifest_explore_test.go b/tasks/manifest_explore_test.go
+new file mode 100644
+index 00000000..acf803ad
+--- /dev/null
++++ b/tasks/manifest_explore_test.go
+@@ -0,0 +1,29 @@
++package tasks
++
++import (
++	"encoding/json"
++	"testing"
++)
++
++// TestExploreDirectiveIsOptIn pins the one way the Explore directive differs
++// from the verify and refine keys: only an explicit true participates.
++func TestExploreDirectiveIsOptIn(t *testing.T) {
++	t.Parallel()
++	for name, tc := range map[string]struct {
++		raw  string
++		want bool
++	}{
++		"absent":    {"", false},
++		"false":     {"false", false},
++		"malformed": {`"yes"`, false},
++		"true":      {"true", true},
++	} {
++		m := &Manifest{Unknown: map[string]json.RawMessage{}}
++		if tc.raw != "" {
++			m.Unknown[manifestExploreKey] = json.RawMessage(tc.raw)
++		}
++		if got := m.ExploreDeclared(); got != tc.want {
++			t.Errorf("%s: ExploreDeclared() = %v, want %v", name, got, tc.want)
++		}
++	}
++}
+diff --git a/tasks/output.go b/tasks/output.go
+index 1b660ad8..f6d3b4fd 100644
+--- a/tasks/output.go
++++ b/tasks/output.go
+@@ -68,7 +68,7 @@ func statusStyle(status TaskSetStatus) string {
+ 	switch status {
+ 	case StatusDone:
+ 		return ansiGreen
+-	case StatusFailed, StatusMalformed, StatusVerifyFailed:
++	case StatusFailed, StatusMalformed, StatusVerifyFailed, StatusExploreFailed:
+ 		return ansiRed
+ 	case StatusReady, StatusNeedsVerify:
+ 		return ansiCyan
+diff --git a/tasks/prompt.go b/tasks/prompt.go
+index 9128768f..c0b78835 100644
+--- a/tasks/prompt.go
++++ b/tasks/prompt.go
+@@ -128,17 +128,23 @@ func taskHeading(task Task) string {
+ // non-empty adds one labelled block, so a planned task and a Remediation task —
+ // which drain through this same prompt — are held to the standard upfront.
+ //
++// explorationPath is the set's Exploration report when it has one, empty when it
++// has none (ADR-0262). Non-empty names the report as a path — never inlined,
++// however long, the way every task body reaches a builder — and states the one
++// edit a builder may make to it.
++//
+ // The completion sentinels the template names (SUMMARY_START, SUMMARY_END,
+ // TASK_COMPLETE, TASK_FAILED) stay literal text there. They are also compiled
+ // into the assessor's regexes and written again in the retry lessons; folding
+ // the three sites onto a shared constant is its own change (ADR-0208).
+-func BuildAgentPrompt(taskPath, runtimePath, implementationConvention string) string {
++func BuildAgentPrompt(taskPath, runtimePath, implementationConvention, explorationPath string) string {
+ 	tasksDir := filepath.Dir(taskPath)
+ 	view := agentPromptView{
+-		TaskPath:     taskPath,
+-		TasksDir:     tasksDir,
+-		ManifestPath: filepath.Join(tasksDir, ManifestFileName),
+-		RuntimePath:  runtimePath,
++		TaskPath:        taskPath,
++		TasksDir:        tasksDir,
++		ManifestPath:    filepath.Join(tasksDir, ManifestFileName),
++		RuntimePath:     runtimePath,
++		ExplorationPath: explorationPath,
+ 	}
+ 	if convention := strings.TrimSpace(implementationConvention); convention != "" {
+ 		view.ImplementationConventionRecorded = true
+@@ -160,6 +166,8 @@ type agentPromptView struct {
+ 	// so the template never asks why a field is empty.
+ 	ImplementationConventionRecorded bool
+ 	ImplementationConvention         string
++	// ExplorationPath is the set's Exploration report, empty when it has none.
++	ExplorationPath string
+ }
+ 
+ // BuildHITLAssistancePrompt generates the attended-agent prompt shown when a
+@@ -553,6 +561,9 @@ func BuildAssistPrompt(d *Deps, cfg *config.Config, taskSetID string, m *Manifes
+ 	// report, or with one an interrupted pass left stale, would otherwise read
+ 	// the absence as nothing to say (ADR-0260).
+ 	view.RefineMark = refineMarkPhrase(ResolveRefineMark(d, cfg, m))
++	// Named beside the refine pointer, as a path like every task body: the map
++	// the set's builders read is worth the human's session knowing about too.
++	view.Exploration = explorationBlock(d, m)
+ 	view.Progress, view.HasProgress, view.ProgressEmpty, view.ProgressUnavailable = recentProgressRows(d, m)
+ 	return prompt.MustRender(promptTemplates, "assist.tmpl.md", view)
+ }
+@@ -572,6 +583,7 @@ type assistPromptView struct {
+ 	// RefineMark is the mark as the gate words it, empty for a set that carries
+ 	// none.
+ 	RefineMark          string
++	Exploration         explorationBlockView
+ 	Progress            []progressRow
+ 	HasProgress         bool
+ 	ProgressEmpty       bool
+diff --git a/tasks/prompt_golden_test.go b/tasks/prompt_golden_test.go
+index 8e37a0b8..486f3dc3 100644
+--- a/tasks/prompt_golden_test.go
++++ b/tasks/prompt_golden_test.go
+@@ -200,10 +200,10 @@ func TestAgentPromptGoldens(t *testing.T) {
+ 	// Absent side: the default, where [work.implement].include_implementation_convention
+ 	// is off and the builder's prompt reads as it did before the toggle existed.
+ 	prompttest.Assert(t, goldenPath("agent.md"),
+-		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, ""))
++		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, "", ""))
+ 
+ 	prompttest.Assert(t, goldenPath("agent.implementation-convention.md"),
+-		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, goldenImplementationConvention))
++		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, goldenImplementationConvention, ""))
+ }
+ 
+ // goldenImplementationConvention stands in for what the `implementation`
+@@ -348,3 +348,60 @@ var knownTaskPromptWarts = map[string]string{}
+ func TestTaskPromptGoldensSatisfyWhitespaceInvariant(t *testing.T) {
+ 	prompttest.AssertGoldenWhitespace(t, filepath.Join("testdata", "prompts"), knownTaskPromptWarts)
+ }
++
++// goldenExplorationPath is where the fixture set's Exploration report sits.
++var goldenExplorationPath = filepath.Join(goldenSetDir, ExplorationFileName)
++
++// TestAgentPromptExplorationGoldens covers both arms of the Exploration report
++// in the builder's frame (ADR-0262): a set with a report is told its path, its
++// nature and the one edit it may make, and the prior-art block reaches the
++// builder byte for byte as it does without one.
++func TestAgentPromptExplorationGoldens(t *testing.T) {
++	taskPath := filepath.Join(goldenSetDir, "04-afk.md")
++	without := BuildAgentPrompt(taskPath, goldenRuntimePath, "", "")
++	with := BuildAgentPrompt(taskPath, goldenRuntimePath, "", goldenExplorationPath)
++	prompttest.Assert(t, goldenPath("agent.exploration.md"), with)
++
++	if strings.Contains(without, ExplorationFileName) {
++		t.Fatalf("a set with no report is told about one:\n%s", without)
++	}
++	priorArt := func(p string) string {
++		start := strings.Index(p, "## Before you hand-write mechanism")
++		end := strings.Index(p, "This attempt is a single non-interactive session.")
++		if start < 0 || end < start {
++			t.Fatalf("prompt has no prior-art block:\n%s", p)
++		}
++		return p[start:end]
++	}
++	if priorArt(with) != priorArt(without) {
++		t.Fatalf("the prior-art block changed with a report present:\n--- without\n%s\n--- with\n%s", priorArt(without), priorArt(with))
++	}
++}
++
++// explorationFixtureDeps is the populated fixture plus an Exploration report
++// whose body must never reach a prompt.
++func explorationFixtureDeps(t *testing.T) *Deps {
++	t.Helper()
++	d := goldenFixtureDeps(t)
++	fs := d.FS.(*promptFixtureFS)
++	fs.files[goldenExplorationPath] = "# Exploration report — " + goldenSetID + "\n\n- Explored: 2026-05-01T08:00:00Z\n- Work SHA: abc1234\n- Explorer: claude\n\nSECRET-EXPLORATION-BODY\n"
++	return d
++}
++
++func TestAssistPromptExplorationGolden(t *testing.T) {
++	full := goldenFullManifest()
++	got := BuildAssistPrompt(explorationFixtureDeps(t), refineEnabledConfig(), goldenSetID, full, StatusFailed, goldenRuntimePath, "")
++	prompttest.Assert(t, goldenPath("assist.exploration.md"), got)
++	if strings.Contains(got, "SECRET-EXPLORATION-BODY") {
++		t.Fatalf("the Assist prompt inlined the report body:\n%s", got)
++	}
++}
++
++func TestExplorerPromptGoldens(t *testing.T) {
++	prompttest.Assert(t, goldenPath("explorer.full.md"),
++		buildExplorerPrompt(goldenFixtureDeps(t), goldenFullManifest(), "shaHEAD0000"))
++
++	// Absent side: no spec, an unreadable body, and no work SHA to name.
++	prompttest.Assert(t, goldenPath("explorer.bare.md"),
++		buildExplorerPrompt(&Deps{FS: &unreadableFS{}}, goldenBareManifest(), ""))
++}
+diff --git a/tasks/prompts/agent.tmpl.md b/tasks/prompts/agent.tmpl.md
+index 54e982ec..0ce37555 100644
+--- a/tasks/prompts/agent.tmpl.md
++++ b/tasks/prompts/agent.tmpl.md
+@@ -12,9 +12,23 @@ Do NOT make git commits — the runner handles assessment and committing.
+ Runtime checkout: {{.RuntimePath}}
+ 
+ Implementation edits belong only beneath the runtime checkout. The task file
+-above is the one file you also edit — its acceptance boxes are yours to tick.
++above is the one file you also edit — its acceptance boxes are yours to tick.{{if .ExplorationPath}}
++The set's Exploration report below is the one exception beside it, and only
++under the duty stated there.{{end}}
+ 
+-## Before you hand-write mechanism
++{{if .ExplorationPath}}## The set's Exploration report
++
++{{.ExplorationPath}} records the code as it was found in the area this set's
++tasks touch: where things live, which seam owns what, which invariants hold,
++the test shape. Every builder in this set works from this one report, so read
++it before you map the code yourself.
++
++You may edit it in exactly one case: this attempt falsified a line it records —
++you moved a file it names, or retired a seam it describes. Then fix that line
++and change nothing else in it. Do not add to it, do not record what you did
++there, and do not touch lines that are still true.
++
++{{end}}## Before you hand-write mechanism
+ 
+ The trigger is your own output: when what you are about to write is plumbing — a
+ state flag, a `catch` that turns an error into a message, a success notice, a
+diff --git a/tasks/prompts/assist.tmpl.md b/tasks/prompts/assist.tmpl.md
+index 7e03417f..61a82c49 100644
+--- a/tasks/prompts/assist.tmpl.md
++++ b/tasks/prompts/assist.tmpl.md
+@@ -12,7 +12,7 @@ Derived status: {{.Status}}
+ {{end}}{{if .RefineMark}}
+ ## Refinement
+ - {{.RefineMark}}. Nothing gates on this; it says only whether the implementation standard was applied to this set's changeset.
+-{{end}}{{template "latest-refine-report" .Refine}}
++{{end}}{{template "latest-refine-report" .Refine}}{{template "exploration-report" .Exploration}}
+ 
+ ## Recent progress
+ {{if .ProgressUnavailable}}- No progress.txt is available yet.
+diff --git a/tasks/prompts/explorer.tmpl.md b/tasks/prompts/explorer.tmpl.md
+new file mode 100644
+index 00000000..e4af4529
+--- /dev/null
++++ b/tasks/prompts/explorer.tmpl.md
+@@ -0,0 +1,34 @@
++You are an independent Explorer. Nobody has built this task set yet. Your job is to record the code as it is found in the area its tasks touch, so that every builder who works the set starts from one picture of that code instead of each re-deriving its own.
++
++Task set: {{.TaskSet}}
++
++Change nothing. Do not edit, create or delete any file, and do not touch git. Your whole output is the report.
++
++## What to record
++The code as found, in the area the tasks below touch — not the repository at large:
++- where things live: the files and packages that own the behaviour these tasks change;
++- which seam owns what: the type, function or interface each task will go through;
++- which invariants hold there, and where the code enforces them;
++- the test shape: where the tests for that area live, and the helpers and fixtures they share;
++- which files are large enough to read in ranges, and the ranges that matter.
++
++Every claim names a path or a symbol. A claim you cannot anchor to one is not worth a line; leave it out. Record what is, not what the tasks should do: the tasks and the spec already say that, and every builder reads them.
++
++Keep the whole report to about one page. A builder reads all of it before every attempt.
++
++## The tree you describe
++{{if .WorkSHA}}You are standing in the checkout at commit {{.WorkSHA}}. Open the report with one sentence stating that commit as the tree it describes.{{else}}Open the report with one sentence naming the commit you observed (`git rev-parse HEAD`) as the tree it describes.{{end}} The report outlives this checkout, and its reader needs to know how old it is.
++
++## Output
++Reply with the report itself, in markdown, and nothing else: no preamble, no sign-off. pop writes your reply as the set's Exploration report, word for word.
++
++{{if .SpecRecorded}}## Spec — what this set was asked to do
++{{.Spec}}
++
++{{end}}## Manifest listing
++{{template "task-listing" .Tasks}}
++## Task bodies
++{{range .Bodies}}
++### {{.ID}}
++{{template "task-body" .Body}}
++{{end}}
+diff --git a/tasks/prompts/partials.tmpl.md b/tasks/prompts/partials.tmpl.md
+index cd54369b..7fdd6c24 100644
+--- a/tasks/prompts/partials.tmpl.md
++++ b/tasks/prompts/partials.tmpl.md
+@@ -19,3 +19,9 @@ An appended task that the set's open HITL gates should wait on is wired into tho
+ {{end}}{{if .OutOfDate}}- Out of date: the checkout has moved past that commit. Parts of it may describe files as they no longer are; check what changed since before you act on a finding.
+ {{end}}- It is one Refiner's opinion against this repository's standards. It reaches no verdict and gates nothing; read it when the human asks what to do about it, and treat acting on it as the human's call.
+ {{end}}{{end}}
++{{define "exploration-report"}}{{if .HasReport}}
++## Exploration report (NOT inlined — read the file yourself)
++- Document: {{.Path}}
++{{if .Tree}}- Describes the tree at: {{.Tree}}
++{{end}}- It records the code as found when the set was explored. Builders read it and may fix only a line their own attempt falsified.
++{{end}}{{end}}
+diff --git a/tasks/refine.go b/tasks/refine.go
+index 96fb9e05..7368db17 100644
+--- a/tasks/refine.go
++++ b/tasks/refine.go
+@@ -430,8 +430,8 @@ func runConfiguredRefiner(d *Deps, cfg *config.Config, sel verifierSelection, ta
+ // It carries no read-only posture. A Refiner fixes what the convention licenses
+ // (ADR-0252), so it is spawned with the same argv as any other writing role, and
+ // what it may change is stated in its prompt rather than withheld from its
+-// tools. The posture capability stays declared on every preset for the next
+-// read-only role that needs it.
++// tools. The posture capability stays declared on every preset; the Explorer
++// is the read-only role that uses it now.
+ //
+ // Its runs are filed exactly as the Verifier's are, and for the same reason: a
+ // Refiner spends the same agent quota on the same set, so hiding it would make
+diff --git a/tasks/refine_surfaces_test.go b/tasks/refine_surfaces_test.go
+index 0153db93..4edad1a3 100644
+--- a/tasks/refine_surfaces_test.go
++++ b/tasks/refine_surfaces_test.go
+@@ -213,7 +213,7 @@ func TestRefineBlockReachesEveryAttendedPrompt(t *testing.T) {
+ 
+ 	// The two unattended prompts carry no pointer at all.
+ 	unattended := map[string]string{
+-		"implementer prompt": BuildAgentPrompt(filepath.Join(m.Dir, m.Tasks[0].File), "/rt", ""),
++		"implementer prompt": BuildAgentPrompt(filepath.Join(m.Dir, m.Tasks[0].File), "/rt", "", ""),
+ 		"verifier prompt":    buildVerifierPrompt(d, m, "sha1", workDiffView{Range: "aaa111^..HEAD", Stat: " a.go | 1 +"}, "", ""),
+ 	}
+ 	for surface, text := range unattended {
+diff --git a/tasks/render.go b/tasks/render.go
+index 6a8cfc8a..1987989b 100644
+--- a/tasks/render.go
++++ b/tasks/render.go
+@@ -199,6 +199,12 @@ func buildRefreshResult(d *Deps, canon string, disc *Discovery, state *GlobalSta
+ 		ShowArchived: archived == archivedOnly,
+ 	}
+ 	result.Rows = buildRows(state, canon, disc, manifests, archived)
++	// The Explore mark is resolved here, beside the manifest-derived status, so
++	// the park it can become is in place before anything — the NEXT marker, the
++	// local picker, the daemon's scan — reads the rows as READY (ADR-0262).
++	if applyExploreResolutions(d, result) {
++		result.Rows = orderStatusRows(result.Rows)
++	}
+ 	MarkNextPick(result.Rows)
+ 	return result
+ }
+@@ -502,14 +508,23 @@ func statusColumnText(row Row) string {
+ }
+ 
+ func rowDetail(out *output, row Row) string {
++	base := rowStatusDetail(out, row)
++	if phrase := exploreMarkPhrase(ExploreResolution{Mark: row.ExploreMark, Reason: row.UnexploredReason}); phrase != "" && row.Status != StatusExploreFailed {
++		base = joinDetail(base, phrase)
++	}
+ 	if row.ConfigError != "" {
+-		base := rowStatusDetail(out, row)
+-		if base == "" {
+-			return "config error: " + row.ConfigError
+-		}
+-		return base + " — config error: " + row.ConfigError
++		return joinDetail(base, "config error: "+row.ConfigError)
++	}
++	return base
++}
++
++// joinDetail appends one segment to a row's DETAILS text in the table's own
++// separator, so an empty base does not lead with it.
++func joinDetail(base, part string) string {
++	if base == "" {
++		return part
+ 	}
+-	return rowStatusDetail(out, row)
++	return base + " — " + part
+ }
+ 
+ func rowStatusDetail(out *output, row Row) string {
+@@ -546,6 +561,8 @@ func rowStatusDetail(out *output, row Row) string {
+ 			parts = append(parts, suffix)
+ 		}
+ 		return strings.Join(parts, " — ")
++	case StatusExploreFailed:
++		return strings.Join([]string{row.Progress, "unexplored: the pass failed", "explore: pop tasks explore " + row.ID}, " — ")
+ 	case StatusVerifyFailed:
+ 		parts := []string{row.Progress}
+ 		if f := firstFindingsLine(row.VerifyFindings); f != "" {
+@@ -781,11 +798,35 @@ func renderTaskSetDetail(d *Deps, cfg *config.Config, out *output, taskSetID str
+ 		fmt.Fprintln(out, out.styled(taskStyle(m, task), line))
+ 	}
+ 
++	renderExploreMark(d, out, row, m)
+ 	renderRefineMark(d, cfg, out, m)
+ 	renderVerifyReportPointer(d, out, m)
+ 	renderArtifactSummarySection(d, out, taskSetID, m)
+ }
+ 
++// renderExploreMark says whether a set that declared exploration has its
++// Exploration report, reading the resolution the refresh already put on the row
++// (ADR-0262). An explored set gets the report as a pointer — its path and the
++// tree it records — never the body. A set that never asked renders nothing.
++func renderExploreMark(d *Deps, out *output, row *Row, m *Manifest) {
++	res := ExploreResolution{}
++	if row != nil {
++		res = ExploreResolution{Mark: row.ExploreMark, Reason: row.UnexploredReason, Pointer: row.ExplorationPointer}
++	} else {
++		res = ResolveExploreMark(d, m)
++	}
++	phrase := exploreMarkPhrase(res)
++	if phrase == "" {
++		return
++	}
++	fmt.Fprintln(out)
++	if res.Mark == ExploreMarkExplored {
++		out.line(ansiCyan, "🗺 %s", res.Pointer.Summary())
++		return
++	}
++	out.line(ansiYellow, "🗺 %s — run: pop tasks explore %s", phrase, m.Stem)
++}
++
+ // renderRefineMark says whether anything held this set's changeset to the
+ // implementation standard, in the words the sign-off gate uses and from the same
+ // resolution it reads (ADR-0260 decision 5). A reader who reaches a set here
+diff --git a/tasks/run_selected_task.go b/tasks/run_selected_task.go
+index bfb381c7..08933529 100644
+--- a/tasks/run_selected_task.go
++++ b/tasks/run_selected_task.go
+@@ -91,7 +91,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
+ 		opts.PreSeedTopic(sel.Task.Title)
+ 	}
+ 
+-	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath, r.implementationConvention)
++	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath, r.implementationConvention, explorationPromptPath(d, sel.Manifest))
+ 	buildForAgent := buildAgentInvocationFactory(d, loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, r.turnCap)
+ 
+ 	resolveSpec := newEffortSpecResolver(opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
+diff --git a/tasks/run_tasks.go b/tasks/run_tasks.go
+index ba80035e..ea4a51ed 100644
+--- a/tasks/run_tasks.go
++++ b/tasks/run_tasks.go
+@@ -62,6 +62,18 @@ type RunTaskSetOptions struct {
+ 	// [work.verify], then [work.implement].agents / DefaultVerifyEffort.
+ 	VerifyAgents []string
+ 	VerifyEffort string
++	// SkipExplore drains a set once without its Explore step (`--skip-explore`,
++	// ADR-0262): a declared set with no report proceeds unexplored instead of
++	// being explored first, and a parked one drains without parking again.
++	SkipExplore bool
++	// ExploreAgents and ExploreEffort steer the drain's Explorer
++	// (`--explore-agent`, `--explore-effort`): the highest-precedence Explorer
++	// overrides, above the set's `explorer` object and [work.explore].
++	ExploreAgents []string
++	ExploreEffort string
++	// exploreRunner overrides the explore step's agent spawn, mirroring
++	// exploreCoreOptions.runExplorer. Unexported and test-only.
++	exploreRunner func(prompt string) (string, string, error)
+ 	// verifyRunner overrides the pre-approval Verifier's agent spawn, mirroring
+ 	// verifyCoreOptions.runVerifier. Unexported and test-only: production always
+ 	// resolves the real Verifier agent. Nil ⇒ the configured Verifier runs.
+@@ -102,6 +114,10 @@ type RunTaskSetResult struct {
+ 	// parked the drain. VerifyFindings carries the Verifier's human-facing reasons.
+ 	TaskSetVerifyFailed bool
+ 	VerifyFindings      string
++	// TaskSetExploreFailed reports the drain's Explore step could not write the
++	// Exploration report for a set that declared it, so the set parked at
++	// EXPLORE-FAILED before any task ran (ADR-0262).
++	TaskSetExploreFailed bool
+ 	// VerifyRerunCmd is a copy-pasteable `pop tasks verify …` when verification failed.
+ 	VerifyRerunCmd string
+ 	SkippedTasks   []string
+@@ -177,7 +193,8 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
+ }
+ 
+ // loop drains the resolved Task set sequentially through eligible AFK tasks. It
+-// runs after setup and reads as pure orchestration: each iteration re-Refreshes,
++// runs after setup and reads as pure orchestration: the Explore step runs once at
++// its head, then each iteration re-Refreshes,
+ // then dispatches to one of four methods — the Refine phase, the pre-approval
+ // Verifier phase, the terminal-status switch, or the task-execution branch —
+ // each of which owns its choreography and hands back a continue/return directive.
+@@ -190,6 +207,13 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
+ 	taskSetID := r.taskSetID
+ 	result := r.result
+ 
++	// Explore step (ADR-0262): a set that declared it needs one map and has
++	// none gets it here, before the first task is selected, so every attempt in
++	// the drain reads the same report. It is the one step that can park the set.
++	if directive, exploreErr := r.explorePhase(); directive == exploreReturn {
++		return result, exploreErr
++	}
++
+ 	for {
+ 		currentRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
+ 		if err != nil {
+diff --git a/tasks/scheduler.go b/tasks/scheduler.go
+index 8e4840d2..11b2cff1 100644
+--- a/tasks/scheduler.go
++++ b/tasks/scheduler.go
+@@ -120,7 +120,10 @@ func selectExplicitTaskSet(refresh *RefreshResult, taskSetID string) (string, er
+ 		return "", exitErr(ExitNoRunnable, "Task set %q is malformed", taskSetID)
+ 	case StatusMissing:
+ 		return "", exitErr(ExitNoRunnable, "Task set %q is missing", taskSetID)
+-	case StatusReady, StatusDeferred:
++	case StatusReady, StatusDeferred, StatusExploreFailed:
++		// An explicitly targeted EXPLORE-FAILED set is let through: a human
++		// naming it is either draining it once without exploring
++		// (`--skip-explore`) or asking the drain to explore it again.
+ 		return taskSetID, nil
+ 	default:
+ 		// An explicitly targeted set that is Human-blocked by an open HITL task
+diff --git a/tasks/setkind/artifacts_test.go b/tasks/setkind/artifacts_test.go
+index d58e0bf2..96aa09dc 100644
+--- a/tasks/setkind/artifacts_test.go
++++ b/tasks/setkind/artifacts_test.go
+@@ -24,6 +24,7 @@ func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
+ 	files := map[string]string{
+ 		filepath.Join(setDir, tasks.SpecFileName):                    "spec body\n",
+ 		filepath.Join(setDir, progressFileName):                      "progress body\n",
++		filepath.Join(setDir, tasks.ExplorationFileName):             "exploration body\n",
+ 		filepath.Join(setDir, tasks.ManifestFileName):                "{}",
+ 		filepath.Join(setDir, "01-task.md"):                          "task",
+ 		filepath.Join(setDir, "streams", "runs", "attempt.jsonl.gz"): "run",
+@@ -64,6 +65,7 @@ func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
+ 		"refine:refine-20260817T120000Z.md",
+ 		"refine:refine-20260815T120000Z.md",
+ 		"spec:spec.md",
++		"exploration:exploration.md",
+ 		"progress:progress.txt",
+ 	}
+ 	if !reflect.DeepEqual(rows, want) {
+diff --git a/tasks/setkind/explore_section_test.go b/tasks/setkind/explore_section_test.go
+new file mode 100644
+index 00000000..4893e127
+--- /dev/null
++++ b/tasks/setkind/explore_section_test.go
+@@ -0,0 +1,44 @@
++package setkind
++
++import (
++	"strings"
++	"testing"
++
++	"github.com/glebglazov/pop/config"
++	"github.com/glebglazov/pop/tasks"
++)
++
++// TestContainerCarriesTheRowsExploreMark: the Task-set container takes the
++// Explore mark the refresh resolved — it derives nothing again — and the detail
++// view's Exploration section points at the report by path and tree.
++func TestContainerCarriesTheRowsExploreMark(t *testing.T) {
++	rows := []tasks.Row{{
++		ID:                 "demo",
++		Status:             tasks.StatusReady,
++		ExploreMark:        tasks.ExploreMarkExplored,
++		ExplorationPointer: tasks.ReportPointer{Label: "Exploration", Path: "/def/demo/exploration.md", WorkSHA: "abc1234"},
++	}}
++	d := testDeps(t, rows)
++	d.Refresh = func(string) (*tasks.RefreshResult, error) {
++		return &tasks.RefreshResult{Rows: rows, Manifests: map[string]*tasks.Manifest{"demo": {Valid: true, Dir: "/def/demo"}}}, nil
++	}
++	scan := scanFixture{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
++	got, err := rowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
++	if err != nil || len(got) != 1 {
++		t.Fatalf("containers = %+v, %v", got, err)
++	}
++	c := got[0]
++	if c.ExploreMark != tasks.ExploreMarkExplored {
++		t.Fatalf("container mark = %q, want explored", c.ExploreMark)
++	}
++	if len(c.DetailSections) == 0 || c.DetailSections[0].Title != tasks.ExploreSectionTitle {
++		t.Fatalf("detail sections = %+v, want the Exploration section first", c.DetailSections)
++	}
++	body := c.DetailSections[0].Body
++	if !strings.Contains(body, "/def/demo/exploration.md") || !strings.Contains(body, "tree: abc1234") {
++		t.Fatalf("section does not point at the report and its tree:\n%s", body)
++	}
++	if !strings.Contains(tasks.WorkRowStatusCell(c), "explored") {
++		t.Fatalf("status cell = %q, want the mark beside the status", tasks.WorkRowStatusCell(c))
++	}
++}
+diff --git a/tasks/setkind/setkind.go b/tasks/setkind/setkind.go
+index 726aefe2..67d40f49 100644
+--- a/tasks/setkind/setkind.go
++++ b/tasks/setkind/setkind.go
+@@ -409,11 +409,13 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
+ 			VerifiedAtSHA:         taskRow.VerifiedAtSHA,
+ 			VerifiedAtDrifted:     taskRow.VerifiedAtDrifted,
+ 			VerifyMark:            taskRow.VerifyMark,
++			ExploreMark:           taskRow.ExploreMark,
++			ExploreReason:         taskRow.UnexploredReason,
+ 			Worktree:              wt.label,
+ 			CursorKey:             setCursorKey(g, taskRow.ID),
+ 			DestKind:              wt.DestKind,
+ 			Items:                 itemsFor(refresh, taskRow.ID),
+-			DetailSections:        artifactSections(d.Tasks, manifestFor(refresh, taskRow.ID)),
++			DetailSections:        detailSections(d.Tasks, manifestFor(refresh, taskRow.ID), taskRow),
+ 			Headline:              taskRow.Progress,
+ 		}
+ 		container.Broken, container.BrokenReason = brokenFor(refresh, taskRow.ID)
+@@ -436,6 +438,16 @@ func liveMute(row tasks.Row, now time.Time) (time.Time, bool) {
+ 	return time.Time{}, false
+ }
+ 
++// detailSections are the prose sections of a set's detail view: the Explore
++// mark when the set carries one, then the Artifact summary.
++func detailSections(td *tasks.Deps, m *tasks.Manifest, row tasks.Row) []work.Section {
++	var sections []work.Section
++	if section, ok := tasks.ExploreSection(row); ok {
++		sections = append(sections, section)
++	}
++	return append(sections, artifactSections(td, m)...)
++}
++
+ // artifactSections tells the dashboard why the Task set has an Artifact view
+ // without putting a non-actionable document path in a prose section (ADR-0217).
+ func artifactSections(td *tasks.Deps, m *tasks.Manifest) []work.Section {
+diff --git a/tasks/spend.go b/tasks/spend.go
+index 96873f6e..cf939958 100644
+--- a/tasks/spend.go
++++ b/tasks/spend.go
+@@ -182,9 +182,16 @@ type SpendSetBreakdownResult struct {
+ 	RefineCost           PartialCost
+ 	RefineRunCount       int
+ 	RefineTokenBlindRuns int
+-	ImplementNotional    PartialCost
+-	VerificationNotional PartialCost
+-	RefineNotional       PartialCost
++	// The Explore bucket is the phase a set spends before any task runs
++	// (ADR-0262), reported only when the set has been explored.
++	ExploreTokens         TokenUsage
++	ExploreCost           PartialCost
++	ExploreRunCount       int
++	ExploreTokenBlindRuns int
++	ImplementNotional     PartialCost
++	VerificationNotional  PartialCost
++	RefineNotional        PartialCost
++	ExploreNotional       PartialCost
+ 	// RateTableDate is the fetched_at of the Rate table that priced this render.
+ 	RateTableDate time.Time
+ }
+@@ -246,6 +253,13 @@ type spendSetBreakdownJSON struct {
+ 	RefinePartialCostUSD         *float64                `json:"refine_partial_cost_usd,omitempty"`
+ 	RefineRunCount               int                     `json:"refine_run_count"`
+ 	RefineTokenBlindRuns         int                     `json:"refine_token_blind_runs"`
++	ExploreInputTokens           int64                   `json:"explore_input_tokens,omitempty"`
++	ExploreOutputTokens          int64                   `json:"explore_output_tokens,omitempty"`
++	ExploreCacheReadTokens       int64                   `json:"explore_cache_read_tokens,omitempty"`
++	ExploreCacheWriteTokens      int64                   `json:"explore_cache_write_tokens,omitempty"`
++	ExplorePartialCostUSD        *float64                `json:"explore_partial_cost_usd,omitempty"`
++	ExploreRunCount              int                     `json:"explore_run_count,omitempty"`
++	ExploreTokenBlindRuns        int                     `json:"explore_token_blind_runs,omitempty"`
+ 	Rows                         []spendBreakdownJSONRow `json:"rows"`
+ }
+ 
+@@ -787,6 +801,14 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
+ 			addTokenUsage(&result.RefineTokens, spend.Tokens)
+ 			addPartialCost(&result.RefineCost, spend.Cost)
+ 			addPartialCost(&result.RefineNotional, notional.Cost)
++		case spendExploreRowKey:
++			result.ExploreRunCount++
++			if !spend.Tokens.HasUsage() {
++				result.ExploreTokenBlindRuns++
++			}
++			addTokenUsage(&result.ExploreTokens, spend.Tokens)
++			addPartialCost(&result.ExploreCost, spend.Cost)
++			addPartialCost(&result.ExploreNotional, notional.Cost)
+ 		default:
+ 			result.ImplementRunCount++
+ 			if !spend.Tokens.HasUsage() {
+@@ -809,8 +831,9 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
+ }
+ 
+ const (
+-	spendVerifyRowKey = "__verify__"
+-	spendRefineRowKey = "__refine__"
++	spendVerifyRowKey  = "__verify__"
++	spendRefineRowKey  = "__refine__"
++	spendExploreRowKey = "__explore__"
+ )
+ 
+ func spendBreakdownRowKey(run capturedRun, m *Manifest) (key, taskID, title string) {
+@@ -820,6 +843,9 @@ func spendBreakdownRowKey(run capturedRun, m *Manifest) (key, taskID, title stri
+ 	if run.meta.Phase == "refine" {
+ 		return spendRefineRowKey, "refine", "Refine"
+ 	}
++	if run.meta.Phase == spendPhaseExplore {
++		return spendExploreRowKey, "explore", "Explore"
++	}
+ 	key = run.meta.TaskFile
+ 	if task := taskByFile(m, key); task != nil {
+ 		return key, task.ID, task.Title
+@@ -1244,6 +1270,13 @@ func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
+ 			result.RefineTokenBlindRuns,
+ 		)
+ 	}
++	if result.ExploreRunCount > 0 {
++		fmt.Fprintf(w, "explore spend: %s  (%d runs, %d blind)\n",
++			formatSpendCell(result.ExploreTokens, result.ExploreNotional, "", ""),
++			result.ExploreRunCount,
++			result.ExploreTokenBlindRuns,
++		)
++	}
+ 	fmt.Fprintln(w)
+ 
+ 	showAgents := result != nil && result.ShowAgents
+@@ -1458,6 +1491,13 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
+ 		RefinePartialCostUSD:         partialCostUSDPtr(result.RefineCost),
+ 		RefineRunCount:               result.RefineRunCount,
+ 		RefineTokenBlindRuns:         result.RefineTokenBlindRuns,
++		ExploreInputTokens:           result.ExploreTokens.Input,
++		ExploreOutputTokens:          result.ExploreTokens.Output,
++		ExploreCacheReadTokens:       result.ExploreTokens.CacheRead,
++		ExploreCacheWriteTokens:      result.ExploreTokens.CacheWrite,
++		ExplorePartialCostUSD:        partialCostUSDPtr(result.ExploreCost),
++		ExploreRunCount:              result.ExploreRunCount,
++		ExploreTokenBlindRuns:        result.ExploreTokenBlindRuns,
+ 		Rows:                         make([]spendBreakdownJSONRow, len(result.Rows)),
+ 	}
+ 	for i, row := range result.Rows {
+diff --git a/tasks/spent_retry_cap.go b/tasks/spent_retry_cap.go
+index 615cf230..3f521e36 100644
+--- a/tasks/spent_retry_cap.go
++++ b/tasks/spent_retry_cap.go
+@@ -14,6 +14,7 @@ const (
+ 	spendPhaseImplement = "implement"
+ 	spendPhaseVerify    = "verify"
+ 	spendPhaseRefine    = "refine"
++	spendPhaseExplore   = "explore"
+ )
+ 
+ // SpentRetryCapRecord is one spent-cap event at the tasks boundary: an agent
+diff --git a/tasks/status.go b/tasks/status.go
+index 5e962a0a..0be10ae9 100644
+--- a/tasks/status.go
++++ b/tasks/status.go
+@@ -34,6 +34,14 @@ const (
+ 	// NEEDS-HUMAN verdict at the current work SHA (ADR-0086/0087). It parks with
+ 	// the findings for a human. Appears only when Agent verification is enabled.
+ 	StatusVerifyFailed TaskSetStatus = "VERIFY-FAILED"
++	// StatusExploreFailed is a set that declared `"explore": true` and whose
++	// Explore pass gave up without writing the Exploration report (ADR-0262). It
++	// is VERIFY-FAILED's sibling, not BLOCKED: nothing here waits on a human's
++	// decision about a task — the set waits for a map, and a hand-run
++	// `pop tasks explore`, `--skip-explore` or `"explore": false` lets it go. It
++	// replaces READY only, so nothing re-picks the set and re-explores it in a
++	// loop.
++	StatusExploreFailed TaskSetStatus = "EXPLORE-FAILED"
+ )
+ 
+ // Row is one line in the task status table.
+@@ -77,6 +85,13 @@ type Row struct {
+ 	// ResolveVerifiedStatus. On a human-completed set it is the only place the
+ 	// verdict shows: the status stays DONE.
+ 	VerifyMark VerifyMark
++	// ExploreMark and UnexploredReason are the Explore mark and its detail,
++	// resolved once per refresh by ResolveExploreMark (ADR-0262); blank for a
++	// set that never declared exploration.
++	ExploreMark      ExploreMark
++	UnexploredReason UnexploredReason
++	// ExplorationPointer is the report an explored set carries, as a pointer.
++	ExplorationPointer ReportPointer
+ 	// Bound is true when the set holds a Worktree binding with a non-blank
+ 	// runtime path. Populated at refresh from the store (no git); Unfolded reads
+ 	// it with Provisioned and Status so `pop tasks status` can show the same
+diff --git a/tasks/stream.go b/tasks/stream.go
+index 909e48ae..b26a743b 100644
+--- a/tasks/stream.go
++++ b/tasks/stream.go
+@@ -132,19 +132,22 @@ type capturedRun struct {
+ // phaseOrder returns a sort rank for run phases. Lower values sort earlier.
+ func phaseOrder(phase string) int {
+ 	switch phase {
+-	case "implement":
++	case spendPhaseExplore:
+ 		return 0
+-	case "verify":
++	case "implement":
+ 		return 1
+-	case "refine":
++	case "verify":
+ 		return 2
+-	default:
++	case "refine":
+ 		return 3
++	default:
++		return 4
+ 	}
+ }
+ 
+ // sortRunsChronologically sorts runs by start time, with the drain's phases in
+-// the order the drain runs them (implement, verify, refine) at equal timestamps.
++// the order the drain runs them (explore, implement, verify, refine) at equal
++// timestamps.
+ // The sort is stable.
+ func sortRunsChronologically(runs []capturedRun) {
+ 	sort.SliceStable(runs, func(i, j int) bool {
+@@ -444,6 +447,24 @@ func persistSkippedRefineRun(d *Deps, errOut io.Writer, taskSetDir, setID, workS
+ 	return metaPath
+ }
+ 
++// persistExploreRun writes one Captured run pair for an Explorer invocation
++// under the `explore` phase label, best-effort. A nil recorder records nothing.
++// It files nothing in the outcome slot: whether a pass succeeded is answered by
++// the Exploration report being on disk, not by a run (ADR-0262).
++func persistExploreRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, outcome, reason string, exitCode int) string {
++	if rec == nil {
++		return ""
++	}
++	metaPath, _, err := writeCapturedRun(d, taskSetDir, spendPhaseExplore, setID, "", "", rec, agent, requestedAgent, model, attempt, outcome, reason, exitCode, workSHA, "")
++	if err != nil {
++		if errOut != nil {
++			fmt.Fprintf(errOut, "warning: persist explore run for %s: %v\n", setID, err)
++		}
++		return ""
++	}
++	return metaPath
++}
++
+ // collectAllRuns reads every captured run under a task set, both uuid-keyed
+ // Captured run pairs (ADR-0094) and legacy task-stem gzipped JSONL files
+ // synthesized into virtual metas. Results are unordered.
+diff --git a/tasks/stream_tracer.go b/tasks/stream_tracer.go
+index 99585dc1..79ae5052 100644
+--- a/tasks/stream_tracer.go
++++ b/tasks/stream_tracer.go
+@@ -203,7 +203,7 @@ func taskByFile(m *Manifest, file string) *Task {
+ 
+ // setLevelRunStream names the synthetic task stream a set-level run belongs to
+ // — a run of a drain phase that judges the whole set rather than one task, so it
+-// carries no task file. Verification and Refine are the two, and each reads
++// carries no task file. Exploration, Verification and Refine are the three, and each reads
+ // as its own row rather than being folded into a task's attempts.
+ func setLevelRunStream(run capturedRun) (TaskStream, bool) {
+ 	if run.meta.TaskFile != "" {
+@@ -214,13 +214,15 @@ func setLevelRunStream(run capturedRun) (TaskStream, bool) {
+ 		return TaskStream{TaskID: "verify", Title: "Verify"}, true
+ 	case "refine":
+ 		return TaskStream{TaskID: "refine", Title: "Refine"}, true
++	case spendPhaseExplore:
++		return TaskStream{TaskID: "explore", Title: "Explore"}, true
+ 	}
+ 	return TaskStream{}, false
+ }
+ 
+ // groupRunsIntoTaskStreams groups chronologically sorted runs by task, preserving
+ // the order in which each task first appears in the run timeline. Set-level runs
+-// (verify, refine — no task file) are grouped into a synthetic task each.
++// (explore, verify, refine — no task file) are grouped into a synthetic task each.
+ func groupRunsIntoTaskStreams(m *Manifest, runs []capturedRun) []TaskStream {
+ 	var groups []TaskStream
+ 	seen := map[string]int{}
+diff --git a/tasks/testdata/prompts/agent.exploration.md b/tasks/testdata/prompts/agent.exploration.md
+new file mode 100644
+index 00000000..3fa3deb0
+--- /dev/null
++++ b/tasks/testdata/prompts/agent.exploration.md
+@@ -0,0 +1,80 @@
++You are implementing the task at: /pop/tasks/2026-05-01-demo/04-afk.md
++
++Read the task file in full. Follow any optional context references it
++contains (for example a "## Parent" section) when present; the task may also
++be self-contained. Implement the work described under "What to build" and
++satisfy every box under "Acceptance criteria". As you complete each
++criterion, check its box (`- [ ]` → `- [x]`) in /pop/tasks/2026-05-01-demo/04-afk.md.
++
++Do NOT modify /pop/tasks/2026-05-01-demo/index.json. Do NOT modify other task files in /pop/tasks/2026-05-01-demo.
++Do NOT make git commits — the runner handles assessment and committing.
++
++Runtime checkout: /pop/checkouts/demo
++
++Implementation edits belong only beneath the runtime checkout. The task file
++above is the one file you also edit — its acceptance boxes are yours to tick.
++The set's Exploration report below is the one exception beside it, and only
++under the duty stated there.
++
++## The set's Exploration report
++
++/pop/tasks/2026-05-01-demo/exploration.md records the code as it was found in the area this set's
++tasks touch: where things live, which seam owns what, which invariants hold,
++the test shape. Every builder in this set works from this one report, so read
++it before you map the code yourself.
++
++You may edit it in exactly one case: this attempt falsified a line it records —
++you moved a file it names, or retired a seam it describes. Then fix that line
++and change nothing else in it. Do not add to it, do not record what you did
++there, and do not touch lines that are still true.
++
++## Before you hand-write mechanism
++
++The trigger is your own output: when what you are about to write is plumbing — a
++state flag, a `catch` that turns an error into a message, a success notice, a
++confirmation, a retry around a call — stop and look for the composed form this
++repository already has for it. Hand-written mechanism is the signal, not where
++the change lands: being in the right file is not the same as transferring from
++it.
++
++Search cheapest first and stop at the first hit: the files the task's
++Orientation names, then the directory the change lands in, then the repository.
++Adopt what you find. Write the plumbing by hand only when the ladder ends empty.
++
++This attempt is a single non-interactive session. There is no human and no
++later turn: once you end your response the attempt is over, and ending
++without a completion sentinel (TASK_COMPLETE or TASK_FAILED) is recorded as a
++failure. To wait on a long-running command, keep polling it across successive
++bash calls until it finishes (or fails) — never background the work and end
++your turn to "wait", which orphans it and yields no sentinel. A single bash
++call may be killed at its own tool timeout (~10 min), but the whole attempt
++has a far longer timeout (~1 hour), so poll across calls rather than waiting
++within one.
++
++Your context is billed on every turn and only grows within the attempt, so
++the attempt's cost rises with the square of how many tool calls you make.
++Probe wide once rather than laddering narrowing greps; read the ranges of a
++file you need instead of whole large files; never re-run a command or re-read
++a file whose output is already in this session; chain setup and command in one
++shell call instead of repeating cd or env lines. Images are never evicted —
++read one only when visual judgement is the question.
++
++When you have completed the work, close out in this order:
++
++1. Re-read the task file and tick every box under "Acceptance criteria" that
++   you have satisfied (`- [ ]` → `- [x]`). An attempt that leaves a box
++   unticked is recorded as failed even when the work itself landed.
++2. Name in your summary the existing implementation you matched your new
++   mechanism against, or say plainly that there was no prior art to match.
++3. Print a summary block followed by the completion sentinel as the final
++   lines of your output, exactly:
++
++SUMMARY_START
++<one or more lines describing what you did>
++SUMMARY_END
++TASK_COMPLETE
++
++If you cannot complete the task (blocked, unclear, missing info, repeated
++failure), instead print as the final line:
++
++TASK_FAILED: <one-line reason>
+diff --git a/tasks/testdata/prompts/assist.exploration.md b/tasks/testdata/prompts/assist.exploration.md
+new file mode 100644
+index 00000000..4c91880e
+--- /dev/null
++++ b/tasks/testdata/prompts/assist.exploration.md
+@@ -0,0 +1,47 @@
++You are assisting a human in an Assist session for a Pop task set.
++
++Task set: 2026-05-01-demo
++Task set path: /pop/tasks/2026-05-01-demo
++Derived status: FAILED
++Worktree binding / Runtime path (Binding-first): /pop/checkouts/demo
++
++## Manifest listing (task bodies are NOT inlined — read them from Task storage)
++- 01-afk [AFK done effort=standard] Freeze the prompts (/pop/tasks/2026-05-01-demo/01-afk.md)
++- 02-remediation [AFK done effort=heavy] Remediation 1: widen the range (/pop/tasks/2026-05-01-demo/02-remediation.md); blocked_by: 01-afk
++- 03-hitl [HITL open effort=standard] Review the goldens (/pop/tasks/2026-05-01-demo/03-hitl.md); blocked_by: 01-afk, 02-remediation
++- 04-afk [AFK failed effort=standard] Migrate the templates (/pop/tasks/2026-05-01-demo/04-afk.md); blocked_by: 01-afk
++
++## Exploration report (NOT inlined — read the file yourself)
++- Document: /pop/tasks/2026-05-01-demo/exploration.md
++- Describes the tree at: abc1234
++- It records the code as found when the set was explored. Builders read it and may fix only a line their own attempt falsified.
++
++## Recent progress
++- 2026-05-01T09:00:00Z [01-afk.md] DONE
++  captured a golden for each builder
++  asserted the whitespace invariant
++- 2026-05-01T10:00:00Z [02-remediation.md] DONE
++  widened the range to the recorded base
++- 2026-05-01T11:00:00Z [04-afk.md] FAILED
++  left an acceptance box unticked
++
++## Task contract to respect
++- Each task file has "What to build" and "## Acceptance criteria" checkboxes.
++- Do not modify index.json's task list shape carelessly; run `pop tasks authoring-guide` for what must stay coherent.
++- Do not make git commits — the human owns commits and drain assessment.
++- Do not start a Drain, do not run the Verifier, and do not run a Refine pass.
++
++## Operations you may perform (by editing Task storage / the checkout)
++- Inspect task bodies and the runtime checkout to advise the human.
++- Edit implementation under the runtime checkout when the human asks.
++- Run `pop conventions get implementation` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
++- Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine` (those start a Drain, the Verifier or a Refiner).
++
++The human decides every outcome here. You do not effect a disposition — no task status change (complete, skip, reset, reopen), no verdict recorded, no accept, no remediation spawned — even when the human has told you which outcome they want; they effect it themselves after you exit.
++You may draft what the human then confirms. A task body, a Remediation task, an edit to the task manifest, or implementation under the runtime checkout are all yours to prepare when the human asks for them: preparing an artifact is not deciding the outcome. Say plainly what you prepared, and leave the transition to the human.
++1. You may create a new Task set, or append a task to this one, when the human asks.
++2. Default to *this* set; mint a new set only when the idea sits beyond this set's slice.
++3. Run `pop tasks authoring-guide` before writing — it is authoritative for file shape.
++4. Writing files only *drafts*. Run `pop tasks register` and work the MALFORMED fix list until the set reads READY.
++5. Creating work is not a disposition — it completes, skips, accepts and remediates nothing at this gate.
++An appended task that the set's open HITL gates should wait on is wired into those gates' `blocked_by`, the way a remediation spawn wires itself.
+diff --git a/tasks/testdata/prompts/explorer.bare.md b/tasks/testdata/prompts/explorer.bare.md
+new file mode 100644
+index 00000000..1385bf51
+--- /dev/null
++++ b/tasks/testdata/prompts/explorer.bare.md
+@@ -0,0 +1,32 @@
++You are an independent Explorer. Nobody has built this task set yet. Your job is to record the code as it is found in the area its tasks touch, so that every builder who works the set starts from one picture of that code instead of each re-deriving its own.
++
++Task set: 2026-05-01-demo
++
++Change nothing. Do not edit, create or delete any file, and do not touch git. Your whole output is the report.
++
++## What to record
++The code as found, in the area the tasks below touch — not the repository at large:
++- where things live: the files and packages that own the behaviour these tasks change;
++- which seam owns what: the type, function or interface each task will go through;
++- which invariants hold there, and where the code enforces them;
++- the test shape: where the tests for that area live, and the helpers and fixtures they share;
++- which files are large enough to read in ranges, and the ranges that matter.
++
++Every claim names a path or a symbol. A claim you cannot anchor to one is not worth a line; leave it out. Record what is, not what the tasks should do: the tasks and the spec already say that, and every builder reads them.
++
++Keep the whole report to about one page. A builder reads all of it before every attempt.
++
++## The tree you describe
++Open the report with one sentence naming the commit you observed (`git rev-parse HEAD`) as the tree it describes. The report outlives this checkout, and its reader needs to know how old it is.
++
++## Output
++Reply with the report itself, in markdown, and nothing else: no preamble, no sign-off. pop writes your reply as the set's Exploration report, word for word.
++
++## Manifest listing
++- 01-afk [AFK open] (/pop/tasks/2026-05-01-demo/01-afk.md)
++
++## Task bodies
++
++### 01-afk
++Could not read /pop/tasks/2026-05-01-demo/01-afk.md: open /pop/tasks/2026-05-01-demo/01-afk.md: permission denied.
++Proceed by inspecting the task path manually or asking the human for the missing task body.
+diff --git a/tasks/testdata/prompts/explorer.full.md b/tasks/testdata/prompts/explorer.full.md
+new file mode 100644
+index 00000000..6006a7a4
+--- /dev/null
++++ b/tasks/testdata/prompts/explorer.full.md
+@@ -0,0 +1,80 @@
++You are an independent Explorer. Nobody has built this task set yet. Your job is to record the code as it is found in the area its tasks touch, so that every builder who works the set starts from one picture of that code instead of each re-deriving its own.
++
++Task set: 2026-05-01-demo
++
++Change nothing. Do not edit, create or delete any file, and do not touch git. Your whole output is the report.
++
++## What to record
++The code as found, in the area the tasks below touch — not the repository at large:
++- where things live: the files and packages that own the behaviour these tasks change;
++- which seam owns what: the type, function or interface each task will go through;
++- which invariants hold there, and where the code enforces them;
++- the test shape: where the tests for that area live, and the helpers and fixtures they share;
++- which files are large enough to read in ranges, and the ranges that matter.
++
++Every claim names a path or a symbol. A claim you cannot anchor to one is not worth a line; leave it out. Record what is, not what the tasks should do: the tasks and the spec already say that, and every builder reads them.
++
++Keep the whole report to about one page. A builder reads all of it before every attempt.
++
++## The tree you describe
++You are standing in the checkout at commit shaHEAD0000. Open the report with one sentence stating that commit as the tree it describes. The report outlives this checkout, and its reader needs to know how old it is.
++
++## Output
++Reply with the report itself, in markdown, and nothing else: no preamble, no sign-off. pop writes your reply as the set's Exploration report, word for word.
++
++## Spec — what this set was asked to do
++# Prompt templates
++
++The ten agent prompts become embedded markdown templates.
++
++## Manifest listing
++- 01-afk [AFK done] Freeze the prompts (/pop/tasks/2026-05-01-demo/01-afk.md)
++- 02-remediation [AFK done] Remediation 1: widen the range (/pop/tasks/2026-05-01-demo/02-remediation.md); blocked_by: 01-afk
++- 03-hitl [HITL open] Review the goldens (/pop/tasks/2026-05-01-demo/03-hitl.md); blocked_by: 01-afk, 02-remediation
++- 04-afk [AFK failed] Migrate the templates (/pop/tasks/2026-05-01-demo/04-afk.md); blocked_by: 01-afk
++
++## Task bodies
++
++### 01-afk
++```markdown
++## What to build
++
++Freeze every prompt behind a golden.
++
++## Acceptance criteria
++
++- [x] a golden per prompt
++```
++
++### 02-remediation
++```markdown
++## What to build
++
++Widen the commit range the Verifier reads.
++
++## Acceptance criteria
++
++- [x] the range starts at the recorded base
++```
++
++### 03-hitl
++```markdown
++## Review
++
++Read the goldens and confirm nothing moved.
++
++## Acceptance criteria
++
++- [ ] approved
++```
++
++### 04-afk
++```markdown
++## What to build
++
++Migrate the builders onto templates.
++
++## Acceptance criteria
++
++- [ ] every builder renders through the seam
++```
+diff --git a/tasks/work_row.go b/tasks/work_row.go
+index 2e95a412..efcb26e9 100644
+--- a/tasks/work_row.go
++++ b/tasks/work_row.go
+@@ -50,7 +50,7 @@ func statusOrder(s TaskSetStatus) int {
+ 		return 0
+ 	case StatusNeedsVerify:
+ 		return 1
+-	case StatusVerifyFailed:
++	case StatusVerifyFailed, StatusExploreFailed:
+ 		return 2
+ 	case StatusFailed:
+ 		return 3
+@@ -195,6 +195,12 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
+ 	if text := VerifiedAtBadgeText(badge); text != "" {
+ 		segments = append(segments, work.StatusSegment{Text: text, Tone: verifiedAtTone(badge.State)})
+ 	}
++	// The Explore mark rides beside the status as the verified-at badge does
++	// (ADR-0262), its reason as bracketed detail; a set that never declared
++	// exploration contributes nothing.
++	if segment, ok := exploreMarkSegment(row.ExploreMark, row.ExploreReason); ok {
++		segments = append(segments, segment)
++	}
+ 	// The Admission indicator (ADR-0239): a command is queued for this set's
+ 	// checkout. It sits right after the label group, where the live-drain
+ 	// refinement of the label is, because both say what is happening to the tree
+diff --git a/work/cell.go b/work/cell.go
+index cd9b9832..c1ea65da 100644
+--- a/work/cell.go
++++ b/work/cell.go
+@@ -61,6 +61,16 @@ type SetStatus string
+ // the vocabulary (`tasks.VerifyMark` is an alias of it).
+ type VerifyMark string
+ 
++// ExploreMark is the exploration-outcome vocabulary a container's ExploreMark
++// carries — whether a set that asked for an Exploration report got one — and
++// UnexploredReason is the detail riding beside it when it did not. Both are
++// declared here with no constants for the same reason as VerifyMark
++// (`tasks.ExploreMark` and `tasks.UnexploredReason` are aliases of them).
++type ExploreMark string
++
++// UnexploredReason is why an unexplored set has no report; see ExploreMark.
++type UnexploredReason string
++
+ // DestKind selects how the WORKTREE destination column is styled. The plain
+ // label lives on Container.Worktree; the styled wrapper lives queue-side
+ // (ADR-0143).
+diff --git a/work/kind.go b/work/kind.go
+index 7e71a767..3f1a6bab 100644
+--- a/work/kind.go
++++ b/work/kind.go
+@@ -279,7 +279,12 @@ type Container struct {
+ 	// separate fact from RawStatus: a human-completed set stays DONE and carries
+ 	// its verification outcome here, so a verdict never contradicts the human.
+ 	VerifyMark VerifyMark
+-	Worktree   string
++	// ExploreMark is whether a set that declared `"explore": true` has its
++	// Exploration report, blank for a set that never asked; ExploreReason is the
++	// detail beside an unexplored mark — not yet run, or the pass failed.
++	ExploreMark   ExploreMark
++	ExploreReason UnexploredReason
++	Worktree      string
+ 	// MapOpen and MapFrontier are the Map ticket tallies its STATUS cell reports.
+ 	// Zero on Task-set rows.
+ 	MapOpen, MapFrontier int

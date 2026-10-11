@@ -1,0 +1,920 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "bf4b743ca5cf5f0c3e6c3cea9f1f0cf627110ec08a1ee69dfe2e8146bd3e37a7",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t74.654s\nok  \tgithub.com/glebglazov/pop/config\t4.707s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.729s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t91.160s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t4.056s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.271s\nok  \tgithub.com/glebglazov/pop/integrate\t55.353s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.045s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t2.785s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.159s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.424s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.555s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t10.274s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.572s\nok  \tgithub.com/glebglazov/pop/layout\t2.698s\nok  \tgithub.com/glebglazov/pop/monitor\t4.246s\nok  \tgithub.com/glebglazov/pop/project\t4.232s\nok  \tgithub.com/glebglazov/pop/release\t2.166s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.338s\nok  \tgithub.com/glebglazov/pop/routine\t20.082s\nok  \tgithub.com/glebglazov/pop/store\t5.570s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t36.216s\nok  \tgithub.com/glebglazov/pop/tasks\t139.203s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t31.690s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.857s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t45.858s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.971s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.905s\nok  \tgithub.com/glebglazov/pop/ui\t6.782s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.525s\nok  \tgithub.com/glebglazov/pop/work\t1.325s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.061s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t72.624s\nok  \tgithub.com/glebglazov/pop/config\t2.777s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t1.648s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t90.137s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t3.284s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.161s\nok  \tgithub.com/glebglazov/pop/integrate\t55.268s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t7.964s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.789s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t4.061s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.323s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.452s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.669s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t3.609s\nok  \tgithub.com/glebglazov/pop/layout\t2.360s\nok  \tgithub.com/glebglazov/pop/monitor\t4.664s\nok  \tgithub.com/glebglazov/pop/project\t3.302s\nok  \tgithub.com/glebglazov/pop/release\t2.285s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.229s\nok  \tgithub.com/glebglazov/pop/routine\t16.923s\nok  \tgithub.com/glebglazov/pop/store\t5.183s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t33.234s\nok  \tgithub.com/glebglazov/pop/tasks\t137.817s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t32.140s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t0.700s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t45.496s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.450s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.404s\nok  \tgithub.com/glebglazov/pop/ui\t6.625s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.783s\nok  \tgithub.com/glebglazov/pop/work\t0.806s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.019s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Reports are written under \u003cset\u003e/verify/ with timestamped filenames."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Each completed verification writes once after fallback, preserving earlier reports."
+        },
+        {
+          "item": 3,
+          "met": true,
+          "reason": "The verdict-first contract remains; the report retains the remaining reply."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "Parsing behavior is unchanged, and malformed replies retain their raw text."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "Report writing applies to all three verdicts."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "PASS now requires findings explaining checks and each criterion’s satisfaction."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "Cache hits return before report writing."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Invalidation still deletes cached verdicts without deleting reports."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "Reports never enter Verifier prompts; human-note forwarding remains unchanged."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "Accept writes a human report without invoking an agent."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Human reports contain the rationale and overridden verdict."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Human reports explicitly identify their authorship."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Human reports use the same writer, headers, timestamp format, and latest-report lookup."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "The gate preamble displays the latest report’s path and commit metadata without its prose."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "The paging entry opens the report and returns to the gate."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "The set detail view includes a Verify report pointer."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Verify artifacts rank above Refine artifacts."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Agent-facing views gain no pointer; golden changes cover only the Verifier response contract."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Missing reports produce no Verify-specific entries on the four surfaces."
+        },
+        {
+          "item": 20,
+          "met": true,
+          "reason": "Badge and verification-status derivation remain unchanged."
+        },
+        {
+          "item": 21,
+          "met": false,
+          "reason": "Status rows retain truncated findings but gain no adjacent report pointer; the pointer appears only in the separate detail view."
+        },
+        {
+          "item": 22,
+          "met": true,
+          "reason": "Both report families share parameterized rendering, filing, scanning, and header-reading machinery."
+        },
+        {
+          "item": 23,
+          "met": true,
+          "reason": "Refine delegates to shared machinery while preserving its existing formats and presentation."
+        },
+        {
+          "item": 24,
+          "met": true,
+          "reason": "Refine prompt goldens are unchanged."
+        }
+      ],
+      "list_ratio": 0.9583333333333334,
+      "quality": 4,
+      "rationale": "Clear shared design and focused regression tests; the missing status-row pointer leaves one acceptance gap. Assessment was static."
+    },
+    "samples": [
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "6c93800e-a7ca-410c-bc33-0cf686927700",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 462577,
+              "Output": 2133,
+              "CacheRead": 391168,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 9,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 82116,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Reports are written under \u003cset\u003e/verify/ with timestamped filenames.\nITEM 2 MET: Each completed verification writes once after fallback, preserving earlier reports.\nITEM 3 MET: The verdict-first contract remains; the report retains the remaining reply.\nITEM 4 MET: Parsing behavior is unchanged, and malformed replies retain their raw text.\nITEM 5 MET: Report writing applies to all three verdicts.\nITEM 6 MET: PASS now requires findings explaining checks and each criterion’s satisfaction.\nITEM 7 MET: Cache hits return before report writing.\nITEM 8 MET: Invalidation still deletes cached verdicts without deleting reports.\nITEM 9 MET: Reports never enter Verifier prompts; human-note forwarding remains unchanged.\nITEM 10 MET: Accept writes a human report without invoking an agent.\nITEM 11 MET: Human reports contain the rationale and overridden verdict.\nITEM 12 MET: Human reports explicitly identify their authorship.\nITEM 13 MET: Human reports use the same writer, headers, timestamp format, and latest-report lookup.\nITEM 14 MET: The gate preamble displays the latest report’s path and commit metadata without its prose.\nITEM 15 MET: The paging entry opens the report and returns to the gate.\nITEM 16 MET: The set detail view includes a Verify report pointer.\nITEM 17 MET: Verify artifacts rank above Refine artifacts.\nITEM 18 MET: Agent-facing views gain no pointer; golden changes cover only the Verifier response contract.\nITEM 19 MET: Missing reports produce no Verify-specific entries on the four surfaces.\nITEM 20 MET: Badge and verification-status derivation remain unchanged.\nITEM 21 NOT_MET: Status rows retain truncated findings but gain no adjacent report pointer; the pointer appears only in the separate detail view.\nITEM 22 MET: Both report families share parameterized rendering, filing, scanning, and header-reading machinery.\nITEM 23 MET: Refine delegates to shared machinery while preserving its existing formats and presentation.\nITEM 24 MET: Refine prompt goldens are unchanged.\nQUALITY 4: Clear shared design and focused regression tests; the missing status-row pointer leaves one acceptance gap. Assessment was static.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Reports are written under \u003cset\u003e/verify/ with timestamped filenames."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Each completed verification writes once after fallback, preserving earlier reports."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The verdict-first contract remains; the report retains the remaining reply."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Parsing behavior is unchanged, and malformed replies retain their raw text."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Report writing applies to all three verdicts."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "PASS now requires findings explaining checks and each criterion’s satisfaction."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cache hits return before report writing."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation still deletes cached verdicts without deleting reports."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Reports never enter Verifier prompts; human-note forwarding remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Accept writes a human report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports contain the rationale and overridden verdict."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports explicitly identify their authorship."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports use the same writer, headers, timestamp format, and latest-report lookup."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble displays the latest report’s path and commit metadata without its prose."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "The paging entry opens the report and returns to the gate."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "The set detail view includes a Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Verify artifacts rank above Refine artifacts."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Agent-facing views gain no pointer; golden changes cover only the Verifier response contract."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Missing reports produce no Verify-specific entries on the four surfaces."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Badge and verification-status derivation remain unchanged."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "Status rows retain truncated findings but gain no adjacent report pointer; the pointer appears only in the separate detail view."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Both report families share parameterized rendering, filing, scanning, and header-reading machinery."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Refine delegates to shared machinery while preserving its existing formats and presentation."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refine prompt goldens are unchanged."
+            }
+          ],
+          "list_ratio": 0.9583333333333334,
+          "quality": 4,
+          "rationale": "Clear shared design and focused regression tests; the missing status-row pointer leaves one acceptance gap. Assessment was static."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "d437e31a-dc08-4627-a941-dc902c15d370",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 539164,
+              "Output": 2065,
+              "CacheRead": 467968,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 10,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 82022,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Verifier results write timestamped reports under the set’s verify directory.\nITEM 2 MET: Collision handling retains separate reports; publication occurs once after fallback resolves.\nITEM 3 MET: The verdict-first contract remains, and the remaining prose becomes the report body.\nITEM 4 MET: Existing verdict parsing remains unchanged; malformed replies retain their raw text.\nITEM 5 MET: Report publication applies to PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: The response contract requires criterion-by-criterion findings for PASS.\nITEM 7 MET: Cached verdicts return before report publication.\nITEM 8 MET: Invalidation deletes cached verdicts without touching report files.\nITEM 9 MET: Previous reports never enter Verifier prompts; human-note forwarding remains unchanged.\nITEM 10 MET: Accept records PASS and publishes a report without invoking an agent.\nITEM 11 MET: Human reports include the supplied rationale and overridden verdict.\nITEM 12 MET: Human reports explicitly identify their author and distinguish Accept from agent verification.\nITEM 13 MET: Human reports use the same directory, timestamp format, shared header rendering, and latest-report lookup.\nITEM 14 MET: The gate preamble shows the latest report’s path and commit facts without its prose.\nITEM 15 MET: The paging action opens the report and returns to the gate menu.\nITEM 16 MET: The set detail view includes a Verify report pointer.\nITEM 17 MET: Artifact ordering places Verify reports above Refine reports.\nITEM 18 MET: Agent prompt views gain no pointer; only Verifier response-contract goldens change.\nITEM 19 MET: Missing Verify reports produce no Verify-specific entries on the specified surfaces.\nITEM 20 MET: Badge and verification-status derivation remain independent of report age.\nITEM 21 NOT_MET: One-line findings remain, but status rows receive no adjacent report pointer; only the separate detail view does.\nITEM 22 MET: Both passes share rendering, filing, timestamp scanning, header parsing, and pointer machinery.\nITEM 23 MET: Refine delegates to shared machinery while retaining its existing naming, headers, and presentation.\nITEM 24 MET: Refine prompt goldens are untouched.\nQUALITY 4: Clear shared implementation with focused behavioral tests; the status-row pointer requirement remains incomplete.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Verifier results write timestamped reports under the set’s verify directory."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Collision handling retains separate reports; publication occurs once after fallback resolves."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The verdict-first contract remains, and the remaining prose becomes the report body."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Existing verdict parsing remains unchanged; malformed replies retain their raw text."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Report publication applies to PASS, FIXABLE, and NEEDS-HUMAN."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "The response contract requires criterion-by-criterion findings for PASS."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cached verdicts return before report publication."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation deletes cached verdicts without touching report files."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Previous reports never enter Verifier prompts; human-note forwarding remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Accept records PASS and publishes a report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports include the supplied rationale and overridden verdict."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports explicitly identify their author and distinguish Accept from agent verification."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports use the same directory, timestamp format, shared header rendering, and latest-report lookup."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble shows the latest report’s path and commit facts without its prose."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "The paging action opens the report and returns to the gate menu."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "The set detail view includes a Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Artifact ordering places Verify reports above Refine reports."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Agent prompt views gain no pointer; only Verifier response-contract goldens change."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Missing Verify reports produce no Verify-specific entries on the specified surfaces."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Badge and verification-status derivation remain independent of report age."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "One-line findings remain, but status rows receive no adjacent report pointer; only the separate detail view does."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Both passes share rendering, filing, timestamp scanning, header parsing, and pointer machinery."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Refine delegates to shared machinery while retaining its existing naming, headers, and presentation."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refine prompt goldens are untouched."
+            }
+          ],
+          "list_ratio": 0.9583333333333334,
+          "quality": 4,
+          "rationale": "Clear shared implementation with focused behavioral tests; the status-row pointer requirement remains incomplete."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "07f4aaa0-ea0e-445c-b950-12ccd7f824e7",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 614011,
+              "Output": 1949,
+              "CacheRead": 542592,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 11,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 81928,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Verifier results write timestamped documents under the set’s verify directory.\nITEM 2 MET: Collision handling preserves separate reports, and reporting occurs once after agent fallback completes.\nITEM 3 MET: The verdict-first contract remains, and the remaining reply becomes the report body.\nITEM 4 MET: Parsing behavior is unchanged; malformed replies retain their raw text and absent replies retain an explanation.\nITEM 5 MET: Report writing applies to PASS, FIXABLE, and NEEDS-HUMAN.\nITEM 6 MET: The response contract requires criterion-by-criterion findings for PASS.\nITEM 7 MET: Cache hits return before the report-writing path.\nITEM 8 MET: Invalidation deletes verdict records without touching report files.\nITEM 9 MET: Previous reports stay outside Verifier prompts, while human-note forwarding remains unchanged.\nITEM 10 MET: Accept writes a human report without invoking an agent.\nITEM 11 MET: Human reports include the rationale and overridden verdict.\nITEM 12 MET: Human reports carry an explicit Authored by header.\nITEM 13 MET: Human reports use the same renderer, directory, timestamp naming, and latest-report reader.\nITEM 14 MET: The gate preamble displays the latest report path and recorded commit without its prose.\nITEM 15 MET: A paging action opens the report and returns to the gate menu.\nITEM 16 MET: RenderTaskSetDetail includes the latest Verify report pointer.\nITEM 17 MET: Verify artifacts rank ahead of Refine artifacts.\nITEM 18 MET: Agent prompt views gain no Verify pointer; golden changes affect only the Verifier response contract.\nITEM 19 MET: Missing Verify reports produce no Verify preamble, paging entry, detail section, or artifact.\nITEM 20 MET: Verified-at badge and verification status derivation remain unchanged.\nITEM 21 NOT_MET: Status rows retain truncated findings but gain no adjacent report pointer; the pointer appears only in the detail view.\nITEM 22 MET: Shared reportPass machinery handles rendering, storage, newest selection, and document-header parsing for both passes.\nITEM 23 MET: Refine delegates to equivalent shared operations while preserving its filenames, headers, and existing presentation.\nITEM 24 MET: Refine prompt goldens are untouched.\nQUALITY 4: Clear shared implementation and substantial regression coverage; the status-row pointer requirement is missed, and the supplied diff was assessed statically.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Verifier results write timestamped documents under the set’s verify directory."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Collision handling preserves separate reports, and reporting occurs once after agent fallback completes."
+            },
+            {
+              "item": 3,
+              "met": true,
+              "reason": "The verdict-first contract remains, and the remaining reply becomes the report body."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "Parsing behavior is unchanged; malformed replies retain their raw text and absent replies retain an explanation."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "Report writing applies to PASS, FIXABLE, and NEEDS-HUMAN."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "The response contract requires criterion-by-criterion findings for PASS."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "Cache hits return before the report-writing path."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Invalidation deletes verdict records without touching report files."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Previous reports stay outside Verifier prompts, while human-note forwarding remains unchanged."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "Accept writes a human report without invoking an agent."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Human reports include the rationale and overridden verdict."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Human reports carry an explicit Authored by header."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Human reports use the same renderer, directory, timestamp naming, and latest-report reader."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "The gate preamble displays the latest report path and recorded commit without its prose."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "A paging action opens the report and returns to the gate menu."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "RenderTaskSetDetail includes the latest Verify report pointer."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Verify artifacts rank ahead of Refine artifacts."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Agent prompt views gain no Verify pointer; golden changes affect only the Verifier response contract."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Missing Verify reports produce no Verify preamble, paging entry, detail section, or artifact."
+            },
+            {
+              "item": 20,
+              "met": true,
+              "reason": "Verified-at badge and verification status derivation remain unchanged."
+            },
+            {
+              "item": 21,
+              "met": false,
+              "reason": "Status rows retain truncated findings but gain no adjacent report pointer; the pointer appears only in the detail view."
+            },
+            {
+              "item": 22,
+              "met": true,
+              "reason": "Shared reportPass machinery handles rendering, storage, newest selection, and document-header parsing for both passes."
+            },
+            {
+              "item": 23,
+              "met": true,
+              "reason": "Refine delegates to equivalent shared operations while preserving its filenames, headers, and existing presentation."
+            },
+            {
+              "item": 24,
+              "met": true,
+              "reason": "Refine prompt goldens are untouched."
+            }
+          ],
+          "list_ratio": 0.9583333333333334,
+          "quality": 4,
+          "rationale": "Clear shared implementation and substantial regression coverage; the status-row pointer requirement is missed, and the supplied diff was assessed statically."
+        }
+      }
+    ]
+  },
+  "case": "2026-08-29-verify-report",
+  "arm": "refine-off",
+  "repeat": 3,
+  "attempts": 1,
+  "model": "opus",
+  "parent_commit": "00e2932d3da6a6afd321788e90d6f854696246f2",
+  "pop_version": "pop version 2026.7.0-891-gb8848b3-dirty",
+  "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+  "started_at": "2026-10-10T14:09:51.878712Z",
+  "ended_at": "2026-10-10T14:43:23.8926Z",
+  "outcome": "completed",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-3036929204",
+  "set_status": "DONE",
+  "set_spend": {
+    "task_set_id": "2026-08-29-verify-report",
+    "completed_tasks": 4,
+    "tokens_per_completed_task": 1059157,
+    "implement_input_tokens": 136,
+    "implement_output_tokens": 61404,
+    "implement_cache_read_tokens": 3905858,
+    "implement_cache_write_tokens": 269231,
+    "implement_partial_cost_usd": 4.1636435999999994,
+    "implement_notional_cost_usd": 4.1636435999999994,
+    "implement_run_count": 4,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 18,
+    "verification_output_tokens": 7759,
+    "verification_cache_read_tokens": 482766,
+    "verification_cache_write_tokens": 75174,
+    "verification_partial_cost_usd": 0.8531972,
+    "verification_notional_cost_usd": 0.8531972,
+    "verification_run_count": 1,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 0,
+    "refine_output_tokens": 0,
+    "refine_cache_read_tokens": 0,
+    "refine_cache_write_tokens": 0,
+    "refine_run_count": 0,
+    "refine_token_blind_runs": 0,
+    "explore_input_tokens": 22,
+    "explore_output_tokens": 7357,
+    "explore_cache_read_tokens": 632428,
+    "explore_cache_write_tokens": 82736,
+    "explore_partial_cost_usd": 0.9356015999999999,
+    "explore_notional_cost_usd": 0.9356015999999999,
+    "explore_run_count": 1,
+    "explore_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "explore",
+        "title": "Explore",
+        "input_tokens": 22,
+        "output_tokens": 7357,
+        "cache_read_tokens": 632428,
+        "cache_write_tokens": 82736,
+        "partial_cost_usd": 0.9356015999999999,
+        "notional_cost_usd": 0.9356015999999999,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 11,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 94020,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 22,
+            "output_tokens": 7357,
+            "cache_read_tokens": 632428,
+            "cache_write_tokens": 82736
+          }
+        }
+      },
+      {
+        "task_id": "01-shared-report-machinery",
+        "title": "The report document and pointer machinery is shared by both passes",
+        "input_tokens": 34,
+        "output_tokens": 15796,
+        "cache_read_tokens": 820319,
+        "cache_write_tokens": 54918,
+        "partial_cost_usd": 0.9194637999999999,
+        "notional_cost_usd": 0.9194637999999999,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 17,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 66786,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 34,
+            "output_tokens": 15796,
+            "cache_read_tokens": 820319,
+            "cache_write_tokens": 54918
+          }
+        }
+      },
+      {
+        "task_id": "02-verifier-writes-the-report",
+        "title": "The Verifier writes a report of every verdict it reaches",
+        "input_tokens": 34,
+        "output_tokens": 17224,
+        "cache_read_tokens": 1029215,
+        "cache_write_tokens": 76217,
+        "partial_cost_usd": 1.160195,
+        "notional_cost_usd": 1.160195,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 17,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 88085,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 34,
+            "output_tokens": 17224,
+            "cache_read_tokens": 1029215,
+            "cache_write_tokens": 76217
+          }
+        }
+      },
+      {
+        "task_id": "03-accepted-verdict-report",
+        "title": "A human's accepted verdict leaves a report of what it overrode",
+        "input_tokens": 24,
+        "output_tokens": 9679,
+        "cache_read_tokens": 559106,
+        "cache_write_tokens": 55872,
+        "partial_cost_usd": 0.7524732,
+        "notional_cost_usd": 0.7524732,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 12,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 67740,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 24,
+            "output_tokens": 9679,
+            "cache_read_tokens": 559106,
+            "cache_write_tokens": 55872
+          }
+        }
+      },
+      {
+        "task_id": "04-report-reaches-the-human",
+        "title": "The Verify report reaches the human wherever a set is read",
+        "input_tokens": 44,
+        "output_tokens": 18705,
+        "cache_read_tokens": 1497218,
+        "cache_write_tokens": 82224,
+        "partial_cost_usd": 1.3315116,
+        "notional_cost_usd": 1.3315116,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 22,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 94092,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 44,
+            "output_tokens": 18705,
+            "cache_read_tokens": 1497218,
+            "cache_write_tokens": 82224
+          }
+        }
+      },
+      {
+        "task_id": "verify",
+        "title": "Verify",
+        "input_tokens": 18,
+        "output_tokens": 7759,
+        "cache_read_tokens": 482766,
+        "cache_write_tokens": 75174,
+        "partial_cost_usd": 0.8531972,
+        "notional_cost_usd": 0.8531972,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 9,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 87042,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 18,
+            "output_tokens": 7759,
+            "cache_read_tokens": 482766,
+            "cache_write_tokens": 75174
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}

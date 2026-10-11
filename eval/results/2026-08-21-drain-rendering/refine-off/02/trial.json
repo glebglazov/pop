@@ -1,0 +1,766 @@
+{
+  "grade": {
+    "status": "graded",
+    "acceptance_digest": "1015113e3689428b5b3b00ae3f40df0f481513c42be577823cc58e3e241a28f5",
+    "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+    "baseline_gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t66.026s\nok  \tgithub.com/glebglazov/pop/config\t2.794s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t3.408s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t70.765s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t2.402s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t1.636s\nok  \tgithub.com/glebglazov/pop/integrate\t54.610s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t8.125s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t2.983s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.826s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t4.067s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.184s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t9.125s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.412s\nok  \tgithub.com/glebglazov/pop/layout\t2.207s\nok  \tgithub.com/glebglazov/pop/monitor\t4.300s\nok  \tgithub.com/glebglazov/pop/project\t3.796s\nok  \tgithub.com/glebglazov/pop/release\t2.239s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.296s\nok  \tgithub.com/glebglazov/pop/routine\t19.187s\nok  \tgithub.com/glebglazov/pop/store\t4.838s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t22.114s\nok  \tgithub.com/glebglazov/pop/tasks\t118.195s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t28.536s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t1.866s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t37.822s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.405s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t3.371s\nok  \tgithub.com/glebglazov/pop/ui\t5.840s\nok  \tgithub.com/glebglazov/pop/wayfinder\t2.231s\nok  \tgithub.com/glebglazov/pop/work\t1.363s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.016s\n"
+      }
+    ],
+    "gates": [
+      {
+        "command": "go build ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go vet ./...",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "go test ./...",
+        "exit_code": 0,
+        "output": "?   \tgithub.com/glebglazov/pop\t[no test files]\nok  \tgithub.com/glebglazov/pop/cmd\t67.043s\nok  \tgithub.com/glebglazov/pop/config\t2.084s\n?   \tgithub.com/glebglazov/pop/confighost\t[no test files]\nok  \tgithub.com/glebglazov/pop/conventions\t2.628s\n?   \tgithub.com/glebglazov/pop/conventions/shipped\t[no test files]\nok  \tgithub.com/glebglazov/pop/dashboard\t71.898s\nok  \tgithub.com/glebglazov/pop/dashboardshell\t1.768s\n?   \tgithub.com/glebglazov/pop/debug\t[no test files]\nok  \tgithub.com/glebglazov/pop/history\t3.370s\nok  \tgithub.com/glebglazov/pop/integrate\t52.378s\n?   \tgithub.com/glebglazov/pop/internal/clipboard\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/deps\t6.493s\nok  \tgithub.com/glebglazov/pop/internal/fanout\t3.425s\nok  \tgithub.com/glebglazov/pop/internal/frontmatter\t3.705s\nok  \tgithub.com/glebglazov/pop/internal/prompt\t3.941s\n?   \tgithub.com/glebglazov/pop/internal/prompt/prompttest\t[no test files]\n?   \tgithub.com/glebglazov/pop/internal/queuetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/repokey\t4.057s\nok  \tgithub.com/glebglazov/pop/internal/tmux\t8.582s\n?   \tgithub.com/glebglazov/pop/internal/tmux/tmuxtest\t[no test files]\nok  \tgithub.com/glebglazov/pop/internal/tty\t2.509s\nok  \tgithub.com/glebglazov/pop/layout\t2.643s\nok  \tgithub.com/glebglazov/pop/monitor\t4.084s\nok  \tgithub.com/glebglazov/pop/project\t3.053s\nok  \tgithub.com/glebglazov/pop/release\t2.094s\nok  \tgithub.com/glebglazov/pop/repogroup\t2.144s\nok  \tgithub.com/glebglazov/pop/routine\t17.654s\nok  \tgithub.com/glebglazov/pop/store\t4.563s\n?   \tgithub.com/glebglazov/pop/store/storetest\t[no test files]\nok  \tgithub.com/glebglazov/pop/supervisor\t22.938s\nok  \tgithub.com/glebglazov/pop/tasks\t117.010s\nok  \tgithub.com/glebglazov/pop/tasks/binding\t27.212s\nok  \tgithub.com/glebglazov/pop/tasks/completion\t2.233s\nok  \tgithub.com/glebglazov/pop/tasks/drain\t39.451s\nok  \tgithub.com/glebglazov/pop/tasks/implement\t4.192s\nok  \tgithub.com/glebglazov/pop/tasks/setkind\t2.297s\nok  \tgithub.com/glebglazov/pop/ui\t5.355s\nok  \tgithub.com/glebglazov/pop/wayfinder\t1.982s\nok  \tgithub.com/glebglazov/pop/work\t1.402s\nok  \tgithub.com/glebglazov/pop/work/ref\t1.075s\n"
+      }
+    ],
+    "outside_scope": [],
+    "scores": {
+      "items": [
+        {
+          "item": 1,
+          "met": true,
+          "reason": "Whole-set routing prints the set identifier, Runtime path, and binding kind before the status table."
+        },
+        {
+          "item": 2,
+          "met": true,
+          "reason": "Header emission is unconditional after successful routing, including inside the bound checkout."
+        },
+        {
+          "item": 3,
+          "met": false,
+          "reason": "The header compares checkout roots rather than invocation directories, omitting subdirectory differences and reporting the root instead of the actual cwd."
+        },
+        {
+          "item": 4,
+          "met": true,
+          "reason": "BoundDefault triggers the “binding recorded to current checkout” announcement."
+        },
+        {
+          "item": 5,
+          "met": true,
+          "reason": "The old “draining at bound checkout” output is removed."
+        },
+        {
+          "item": 6,
+          "met": true,
+          "reason": "Single-task AFK runs print the current-checkout path without a Drain header."
+        },
+        {
+          "item": 7,
+          "met": true,
+          "reason": "The current-checkout line prints before the single-task HITL branch."
+        },
+        {
+          "item": 8,
+          "met": true,
+          "reason": "Successful whole-set tasks print one green “✓ \u003cset\u003e/\u003ctask\u003e done” line."
+        },
+        {
+          "item": 9,
+          "met": true,
+          "reason": "Commit SHA or verified no-op details print beneath the green result line."
+        },
+        {
+          "item": 10,
+          "met": true,
+          "reason": "The old completion printer is removed, and each task ending has one result-line emission."
+        },
+        {
+          "item": 11,
+          "met": true,
+          "reason": "Exhausted retries that fail the task produce one red failed result line."
+        },
+        {
+          "item": 12,
+          "met": true,
+          "reason": "Exhaustion that leaves the task open produces the distinct red “out of agents (left open)” line."
+        },
+        {
+          "item": 13,
+          "met": true,
+          "reason": "Quota parking prints the yellow quota-paused line with the selected preset."
+        },
+        {
+          "item": 14,
+          "met": true,
+          "reason": "Interrupted agent execution prints one yellow interrupted result line."
+        },
+        {
+          "item": 15,
+          "met": true,
+          "reason": "Blocked and Deferred remain set-level reporting paths without Task result lines."
+        },
+        {
+          "item": 16,
+          "met": true,
+          "reason": "Attempt failure narration, timing breakdowns, and exhausted-walk narration remain intact."
+        },
+        {
+          "item": 17,
+          "met": true,
+          "reason": "Shared output formatting preserves complete lines and suppresses ANSI for redirected output."
+        },
+        {
+          "item": 18,
+          "met": true,
+          "reason": "Task result lines use existing TTY color handling and honor NO_COLOR."
+        },
+        {
+          "item": 19,
+          "met": true,
+          "reason": "Header and result printers add no journal writes."
+        }
+      ],
+      "list_ratio": 0.9473684210526315,
+      "quality": 4,
+      "rationale": "Clear, centralized presentation changes with useful regression coverage; invocation-directory handling violates one requirement, and tests miss that case."
+    },
+    "samples": [
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "5b7189b3-14b8-466a-964e-ca9196a25534",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 323466,
+              "Output": 1700,
+              "CacheRead": 265728,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 7,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 69039,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Whole-set routing prints the set identifier, Runtime path, and binding kind before the status table.\nITEM 2 MET: Header emission is unconditional after successful routing, including inside the bound checkout.\nITEM 3 NOT_MET: The header compares checkout roots rather than invocation directories, omitting subdirectory differences and reporting the root instead of the actual cwd.\nITEM 4 MET: BoundDefault triggers the “binding recorded to current checkout” announcement.\nITEM 5 MET: The old “draining at bound checkout” output is removed.\nITEM 6 MET: Single-task AFK runs print the current-checkout path without a Drain header.\nITEM 7 MET: The current-checkout line prints before the single-task HITL branch.\nITEM 8 MET: Successful whole-set tasks print one green “✓ \u003cset\u003e/\u003ctask\u003e done” line.\nITEM 9 MET: Commit SHA or verified no-op details print beneath the green result line.\nITEM 10 MET: The old completion printer is removed, and each task ending has one result-line emission.\nITEM 11 MET: Exhausted retries that fail the task produce one red failed result line.\nITEM 12 MET: Exhaustion that leaves the task open produces the distinct red “out of agents (left open)” line.\nITEM 13 MET: Quota parking prints the yellow quota-paused line with the selected preset.\nITEM 14 MET: Interrupted agent execution prints one yellow interrupted result line.\nITEM 15 MET: Blocked and Deferred remain set-level reporting paths without Task result lines.\nITEM 16 MET: Attempt failure narration, timing breakdowns, and exhausted-walk narration remain intact.\nITEM 17 MET: Shared output formatting preserves complete lines and suppresses ANSI for redirected output.\nITEM 18 MET: Task result lines use existing TTY color handling and honor NO_COLOR.\nITEM 19 MET: Header and result printers add no journal writes.\nQUALITY 4: Clear, centralized presentation changes with useful regression coverage; invocation-directory handling violates one requirement, and tests miss that case.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Whole-set routing prints the set identifier, Runtime path, and binding kind before the status table."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Header emission is unconditional after successful routing, including inside the bound checkout."
+            },
+            {
+              "item": 3,
+              "met": false,
+              "reason": "The header compares checkout roots rather than invocation directories, omitting subdirectory differences and reporting the root instead of the actual cwd."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "BoundDefault triggers the “binding recorded to current checkout” announcement."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The old “draining at bound checkout” output is removed."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Single-task AFK runs print the current-checkout path without a Drain header."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "The current-checkout line prints before the single-task HITL branch."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Successful whole-set tasks print one green “✓ \u003cset\u003e/\u003ctask\u003e done” line."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Commit SHA or verified no-op details print beneath the green result line."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The old completion printer is removed, and each task ending has one result-line emission."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Exhausted retries that fail the task produce one red failed result line."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Exhaustion that leaves the task open produces the distinct red “out of agents (left open)” line."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Quota parking prints the yellow quota-paused line with the selected preset."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Interrupted agent execution prints one yellow interrupted result line."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Blocked and Deferred remain set-level reporting paths without Task result lines."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Attempt failure narration, timing breakdowns, and exhausted-walk narration remain intact."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Shared output formatting preserves complete lines and suppresses ANSI for redirected output."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Task result lines use existing TTY color handling and honor NO_COLOR."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Header and result printers add no journal writes."
+            }
+          ],
+          "list_ratio": 0.9473684210526315,
+          "quality": 4,
+          "rationale": "Clear, centralized presentation changes with useful regression coverage; invocation-directory handling violates one requirement, and tests miss that case."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "c398b56e-8c2c-4dcc-b434-5c597ed41574",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 463636,
+              "Output": 1819,
+              "CacheRead": 404224,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 9,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 70366,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Whole-set routing prints the set identifier, Runtime path, and binding kind before the status table.\nITEM 2 MET: Header printing is unconditional after successful routing, including inside the bound checkout.\nITEM 3 NOT_MET: The header compares checkout roots rather than the actual invocation directory, omitting or misreporting subdirectory invocations.\nITEM 4 MET: BoundDefault adds the required current-checkout binding announcement.\nITEM 5 MET: The old conditional bound-checkout message is removed.\nITEM 6 MET: Single-task AFK runs print the current-checkout path without a Drain header.\nITEM 7 MET: The current-checkout line prints before the single-task HITL branch.\nITEM 8 MET: Successful drain tasks print one green done result line.\nITEM 9 MET: Commit or verified no-op detail prints beneath the done line.\nITEM 10 MET: The old completion line is removed, with one result emission per ending.\nITEM 11 MET: Retry exhaustion that fails the task prints one red failed result line.\nITEM 12 MET: Exhaustion leaving the task open prints the distinct red left-open result.\nITEM 13 MET: Quota parking prints a yellow quota-paused line naming the preset.\nITEM 14 MET: Interrupted agent runs print one yellow interrupted result line.\nITEM 15 MET: Blocked and Deferred remain set-level reports; executed tasks retain their own results.\nITEM 16 MET: Attempt failure narration, timing breakdowns, and exhausted-walk narration remain.\nITEM 17 MET: Shared output formatting preserves complete lines without ANSI on redirected output.\nITEM 18 MET: Shared styling enables terminal colors and honors NO_COLOR.\nITEM 19 MET: Header and result helpers write output without adding journal rows.\nQUALITY 4: Focused implementation with useful integration assertions; the invocation-directory defect and missing subdirectory coverage prevent an excellent rating.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Whole-set routing prints the set identifier, Runtime path, and binding kind before the status table."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Header printing is unconditional after successful routing, including inside the bound checkout."
+            },
+            {
+              "item": 3,
+              "met": false,
+              "reason": "The header compares checkout roots rather than the actual invocation directory, omitting or misreporting subdirectory invocations."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "BoundDefault adds the required current-checkout binding announcement."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The old conditional bound-checkout message is removed."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Single-task AFK runs print the current-checkout path without a Drain header."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "The current-checkout line prints before the single-task HITL branch."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Successful drain tasks print one green done result line."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Commit or verified no-op detail prints beneath the done line."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The old completion line is removed, with one result emission per ending."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Retry exhaustion that fails the task prints one red failed result line."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Exhaustion leaving the task open prints the distinct red left-open result."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Quota parking prints a yellow quota-paused line naming the preset."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Interrupted agent runs print one yellow interrupted result line."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Blocked and Deferred remain set-level reports; executed tasks retain their own results."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Attempt failure narration, timing breakdowns, and exhausted-walk narration remain."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Shared output formatting preserves complete lines without ANSI on redirected output."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Shared styling enables terminal colors and honors NO_COLOR."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "Header and result helpers write output without adding journal rows."
+            }
+          ],
+          "list_ratio": 0.9473684210526315,
+          "quality": 4,
+          "rationale": "Focused implementation with useful integration assertions; the invocation-directory defect and missing subdirectory coverage prevent an excellent rating."
+        }
+      },
+      {
+        "grader": {
+          "agent": "codex --model \"gpt-6-astra\" \"-c\" 'model_reasoning_effort=\"high\"'",
+          "run_id": "7d81f289-4d38-4006-9eb5-0fc26b1fd4ed",
+          "outcome": "completed",
+          "spend": {
+            "Tokens": {
+              "Input": 266993,
+              "Output": 1607,
+              "CacheRead": 216320,
+              "CacheWrite": 0,
+              "HasInput": true,
+              "HasOutput": true,
+              "HasCacheRead": true,
+              "HasCacheWrite": false
+            },
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "Turns": {
+              "Count": 6,
+              "HasTurn": true
+            },
+            "PeakInput": {
+              "Tokens": 67947,
+              "HasPeak": true
+            }
+          },
+          "notional": {
+            "Cost": {
+              "Dollars": 0,
+              "HasCost": false
+            },
+            "RateSource": "",
+            "ModelKey": "",
+            "ModelKeySource": ""
+          }
+        },
+        "reply": "ITEM 1 MET: Whole-set routing prints the set identifier, Runtime path, and binding kind before the status table.\nITEM 2 MET: Header printing is unconditional after successful routing, including inside the bound checkout.\nITEM 3 NOT_MET: The header compares checkout roots rather than invocation directories, omitting subdirectory differences and reporting the root instead of the actual cwd.\nITEM 4 MET: BoundDefault adds the current-checkout binding announcement.\nITEM 5 MET: The old conditional bound-checkout message is removed.\nITEM 6 MET: Single-task AFK execution prints the current-checkout path without a Drain header.\nITEM 7 MET: The current-checkout line prints before the HITL branch.\nITEM 8 MET: Successful whole-set execution prints one green done result.\nITEM 9 MET: Commit SHA or verified no-op detail prints beneath the done result.\nITEM 10 MET: The old completion renderer is removed, and each ending follows one result-printing branch.\nITEM 11 MET: Exhausted retries retain failed disposition and print one red failed result.\nITEM 12 MET: Exhaustion that leaves the task open prints the distinct red out-of-agents result.\nITEM 13 MET: Quota parking prints a yellow quota-paused result naming the preset.\nITEM 14 MET: Interrupted agent execution prints one yellow interrupted result.\nITEM 15 MET: Blocked and Deferred remain set-level reporting paths without task result lines.\nITEM 16 MET: Attempt failures, exhaustion narration, and attempt breakdowns remain available alongside task results.\nITEM 17 MET: Both renderers use the existing output wrapper, preserving complete plain-text output for redirected files and pipes.\nITEM 18 MET: Result colors use the existing terminal detection and NO_COLOR handling.\nITEM 19 MET: The added renderers write output without adding journal records.\nQUALITY 4: Clear, centralized rendering with useful regression tests; invocation-directory handling violates one requirement, and subdirectory coverage is missing.\n",
+        "scores": {
+          "items": [
+            {
+              "item": 1,
+              "met": true,
+              "reason": "Whole-set routing prints the set identifier, Runtime path, and binding kind before the status table."
+            },
+            {
+              "item": 2,
+              "met": true,
+              "reason": "Header printing is unconditional after successful routing, including inside the bound checkout."
+            },
+            {
+              "item": 3,
+              "met": false,
+              "reason": "The header compares checkout roots rather than invocation directories, omitting subdirectory differences and reporting the root instead of the actual cwd."
+            },
+            {
+              "item": 4,
+              "met": true,
+              "reason": "BoundDefault adds the current-checkout binding announcement."
+            },
+            {
+              "item": 5,
+              "met": true,
+              "reason": "The old conditional bound-checkout message is removed."
+            },
+            {
+              "item": 6,
+              "met": true,
+              "reason": "Single-task AFK execution prints the current-checkout path without a Drain header."
+            },
+            {
+              "item": 7,
+              "met": true,
+              "reason": "The current-checkout line prints before the HITL branch."
+            },
+            {
+              "item": 8,
+              "met": true,
+              "reason": "Successful whole-set execution prints one green done result."
+            },
+            {
+              "item": 9,
+              "met": true,
+              "reason": "Commit SHA or verified no-op detail prints beneath the done result."
+            },
+            {
+              "item": 10,
+              "met": true,
+              "reason": "The old completion renderer is removed, and each ending follows one result-printing branch."
+            },
+            {
+              "item": 11,
+              "met": true,
+              "reason": "Exhausted retries retain failed disposition and print one red failed result."
+            },
+            {
+              "item": 12,
+              "met": true,
+              "reason": "Exhaustion that leaves the task open prints the distinct red out-of-agents result."
+            },
+            {
+              "item": 13,
+              "met": true,
+              "reason": "Quota parking prints a yellow quota-paused result naming the preset."
+            },
+            {
+              "item": 14,
+              "met": true,
+              "reason": "Interrupted agent execution prints one yellow interrupted result."
+            },
+            {
+              "item": 15,
+              "met": true,
+              "reason": "Blocked and Deferred remain set-level reporting paths without task result lines."
+            },
+            {
+              "item": 16,
+              "met": true,
+              "reason": "Attempt failures, exhaustion narration, and attempt breakdowns remain available alongside task results."
+            },
+            {
+              "item": 17,
+              "met": true,
+              "reason": "Both renderers use the existing output wrapper, preserving complete plain-text output for redirected files and pipes."
+            },
+            {
+              "item": 18,
+              "met": true,
+              "reason": "Result colors use the existing terminal detection and NO_COLOR handling."
+            },
+            {
+              "item": 19,
+              "met": true,
+              "reason": "The added renderers write output without adding journal records."
+            }
+          ],
+          "list_ratio": 0.9473684210526315,
+          "quality": 4,
+          "rationale": "Clear, centralized rendering with useful regression tests; invocation-directory handling violates one requirement, and subdirectory coverage is missing."
+        }
+      }
+    ]
+  },
+  "case": "2026-08-21-drain-rendering",
+  "arm": "refine-off",
+  "repeat": 2,
+  "attempts": 1,
+  "model": "opus",
+  "parent_commit": "7a2e65178433f3360e6482194fabb8ee2e3c42d2",
+  "pop_version": "pop version 2026.7.0-891-gb8848b3-dirty",
+  "agent_home_digest": "9ea8ab3c98d83d6233059ad43e8707bed0722c0fd9e3980647686c576420ccfe",
+  "started_at": "2026-10-10T00:31:14.63608Z",
+  "ended_at": "2026-10-10T00:53:38.21466Z",
+  "outcome": "completed",
+  "work_dir": "/Users/glebglazov/.local/state/pop/eval/work/trial-402170006",
+  "set_status": "DONE",
+  "set_spend": {
+    "task_set_id": "2026-08-21-drain-rendering",
+    "completed_tasks": 2,
+    "tokens_per_completed_task": 1393484,
+    "implement_input_tokens": 88,
+    "implement_output_tokens": 36719,
+    "implement_cache_read_tokens": 2596859,
+    "implement_cache_write_tokens": 153303,
+    "implement_partial_cost_usd": 2.4805278,
+    "implement_notional_cost_usd": 2.4805278,
+    "implement_run_count": 2,
+    "implement_token_blind_runs": 0,
+    "verification_input_tokens": 26,
+    "verification_output_tokens": 8756,
+    "verification_cache_read_tokens": 660400,
+    "verification_cache_write_tokens": 54495,
+    "verification_partial_cost_usd": 0.7432639999999999,
+    "verification_notional_cost_usd": 0.7432639999999999,
+    "verification_run_count": 1,
+    "verification_token_blind_runs": 0,
+    "refine_input_tokens": 0,
+    "refine_output_tokens": 0,
+    "refine_cache_read_tokens": 0,
+    "refine_cache_write_tokens": 0,
+    "refine_run_count": 0,
+    "refine_token_blind_runs": 0,
+    "explore_input_tokens": 18,
+    "explore_output_tokens": 7284,
+    "explore_cache_read_tokens": 479013,
+    "explore_cache_write_tokens": 77636,
+    "explore_partial_cost_usd": 0.8626425999999999,
+    "explore_notional_cost_usd": 0.8626425999999999,
+    "explore_run_count": 1,
+    "explore_token_blind_runs": 0,
+    "rows": [
+      {
+        "task_id": "explore",
+        "title": "Explore",
+        "input_tokens": 18,
+        "output_tokens": 7284,
+        "cache_read_tokens": 479013,
+        "cache_write_tokens": 77636,
+        "partial_cost_usd": 0.8626425999999999,
+        "notional_cost_usd": 0.8626425999999999,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 9,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 88920,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 18,
+            "output_tokens": 7284,
+            "cache_read_tokens": 479013,
+            "cache_write_tokens": 77636
+          }
+        }
+      },
+      {
+        "task_id": "01-drain-header",
+        "title": "Drain header",
+        "input_tokens": 40,
+        "output_tokens": 18447,
+        "cache_read_tokens": 1153679,
+        "cache_write_tokens": 75517,
+        "partial_cost_usd": 1.2039718,
+        "notional_cost_usd": 1.2039718,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 20,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 87385,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 40,
+            "output_tokens": 18447,
+            "cache_read_tokens": 1153679,
+            "cache_write_tokens": 75517
+          }
+        }
+      },
+      {
+        "task_id": "02-task-result-line",
+        "title": "Task result line",
+        "input_tokens": 48,
+        "output_tokens": 18272,
+        "cache_read_tokens": 1443180,
+        "cache_write_tokens": 77786,
+        "partial_cost_usd": 1.2765560000000002,
+        "notional_cost_usd": 1.2765560000000002,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 24,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 89654,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 48,
+            "output_tokens": 18272,
+            "cache_read_tokens": 1443180,
+            "cache_write_tokens": 77786
+          }
+        }
+      },
+      {
+        "task_id": "verify",
+        "title": "Verify",
+        "input_tokens": 26,
+        "output_tokens": 8756,
+        "cache_read_tokens": 660400,
+        "cache_write_tokens": 54495,
+        "partial_cost_usd": 0.7432639999999999,
+        "notional_cost_usd": 0.7432639999999999,
+        "rate_source": null,
+        "model_key": "anthropic/claude-opus-5-5",
+        "model_key_source": "actual",
+        "turns": 13,
+        "turn_blind_runs": 0,
+        "peak_input_tokens": 66363,
+        "peak_blind_runs": 0,
+        "run_count": 1,
+        "token_blind_runs": 0,
+        "models": {
+          "anthropic/claude-opus-5-5": {
+            "input_tokens": 26,
+            "output_tokens": 8756,
+            "cache_read_tokens": 660400,
+            "cache_write_tokens": 54495
+          }
+        }
+      }
+    ]
+  },
+  "spend": {
+    "Tokens": {
+      "Input": 0,
+      "Output": 0,
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "HasInput": false,
+      "HasOutput": false,
+      "HasCacheRead": false,
+      "HasCacheWrite": false
+    },
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "Turns": {
+      "Count": 0,
+      "HasTurn": false
+    },
+    "PeakInput": {
+      "Tokens": 0,
+      "HasPeak": false
+    }
+  },
+  "notional": {
+    "Cost": {
+      "Dollars": 0,
+      "HasCost": false
+    },
+    "RateSource": "",
+    "ModelKey": "",
+    "ModelKeySource": ""
+  }
+}
